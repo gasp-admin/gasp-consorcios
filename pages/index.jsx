@@ -1184,8 +1184,8 @@ export default function App() {
       <Head><title>GASP Consorcios</title></Head>
       <div style={{ background:'#fff', borderRadius:14, padding:36, width:340, boxShadow:'0 8px 40px #0006' }}>
         <div style={{ textAlign:'center', marginBottom:24 }}>
-          <div style={{ fontSize:32, fontWeight:800, color:AZ }}>GASP</div>
-          <div style={{ fontSize:13, color:GR }}>🏢 Consorcios</div>
+          <img src="/logo.svg" alt="GASP Consorcios" style={{ width:80, height:80, marginBottom:8 }} />
+          <div style={{ fontSize:13, color:GR, fontWeight:600 }}>Sistema de Administración</div>
         </div>
         {loginError && <div style={{ background:'#fee2e2', color:RJ, borderRadius:7, padding:'9px 12px', fontSize:13, marginBottom:14 }}>{loginError}</div>}
         <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email"
@@ -1334,9 +1334,14 @@ export default function App() {
         position:'fixed', top:0, left:0, height:'100vh', zIndex:200, overflowY:'auto',
         transform: isMobile && !menuAbierto ? 'translateX(-100%)' : 'translateX(0)',
         transition:'transform 0.25s ease' }}>
-        <div style={{ padding:'18px 14px 12px', borderBottom:'1px solid #1a2540' }}>
-          <div style={{ fontSize:22, fontWeight:800, color:'#fff' }}>GASP</div>
-          <div style={{ fontSize:10, color:'#4a6a8a', marginTop:1 }}>🏢 Consorcios</div>
+        <div style={{ padding:'14px 14px 12px', borderBottom:'1px solid #1a2540' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:2 }}>
+            <img src="/logo.svg" alt="GASP" style={{ width:36, height:36 }} />
+            <div>
+              <div style={{ fontSize:18, fontWeight:800, color:'#fff', lineHeight:1 }}>GASP</div>
+              <div style={{ fontSize:9, color:'#4a6a8a', letterSpacing:'0.1em' }}>CONSORCIOS</div>
+            </div>
+          </div>
           {consorcioActivo && (
             <div style={{ fontSize:11, color:'#7ab4ff', marginTop:6, fontWeight:600, lineHeight:1.3 }}>
               {consorcioActivo.nombre}
