@@ -1099,6 +1099,12 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data?.session || null)
       if (data?.session) cargar(true)
