@@ -1067,6 +1067,53 @@ ${acta.observaciones ? `<h2>Observaciones</h2><div style="white-space:pre-line;f
 // ══════════════════════════════════════════════════════════════════════════════
 // APP PRINCIPAL — GASP CONSORCIOS
 // ══════════════════════════════════════════════════════════════════════════════
+// ── PERFIL ADMIN ──────────────────────────────────────────────────────────────
+function PerfilAdmin({ session, supabase }) {
+  const [perfil, setPerfil] = useState({ nombre:'', telefono:'', matricula:'', email:'' })
+  const [guardando, setGuardando] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    if (session) {
+      setPerfil(p => ({ ...p, email: session.user.email || '' }))
+    }
+  }, [session])
+
+  async function guardar() {
+    setGuardando(true)
+    await new Promise(r => setTimeout(r, 600))
+    setMsg({ tipo:'ok', texto:'✓ Perfil guardado' })
+    setGuardando(false)
+  }
+
+  return (
+    <div style={{ maxWidth:500 }}>
+      <div style={{ fontWeight:700, fontSize:16, color:'#111827', marginBottom:20 }}>⚙️ Mi perfil</div>
+      <Msg data={msg} />
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:16 }}>
+          <Input label="Nombre completo" value={perfil.nombre} onChange={v=>setPerfil(p=>({...p,nombre:v}))} placeholder="Javier García Pérez" />
+          <Input label="Email" value={perfil.email} onChange={v=>setPerfil(p=>({...p,email:v}))} />
+          <Input label="Teléfono" value={perfil.telefono} onChange={v=>setPerfil(p=>({...p,telefono:v}))} placeholder="2254-XXXXXX" />
+          <Input label="Matrícula RPAC" value={perfil.matricula} onChange={v=>setPerfil(p=>({...p,matricula:v}))} placeholder="N° 83" />
+        </div>
+        <Btn onClick={guardar} disabled={guardando}>{guardando ? 'Guardando...' : '💾 Guardar perfil'}</Btn>
+      </Card>
+      <Card>
+        <div style={{ fontSize:13, color:'#6b7280', marginBottom:8, fontWeight:600 }}>Sesión activa</div>
+        <div style={{ fontSize:13, color:'#374151' }}>
+          <div>Usuario: {session?.user?.email}</div>
+          <div style={{ marginTop:6 }}>
+            <Btn color='#991B1B' small onClick={async () => { await supabase.auth.signOut() }}>
+              Cerrar sesión
+            </Btn>
+          </div>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
 export default function App() {
   const [session, setSession] = useState(null)
   const [cargando, setCargando] = useState(true)
@@ -1184,8 +1231,12 @@ export default function App() {
       <Head><title>GASP Consorcios</title></Head>
       <div style={{ background:'#fff', borderRadius:14, padding:36, width:340, boxShadow:'0 8px 40px #0006' }}>
         <div style={{ textAlign:'center', marginBottom:24 }}>
-          <img src="/logo.svg" alt="GASP Consorcios" style={{ width:80, height:80, marginBottom:8 }} />
-          <div style={{ fontSize:13, color:GR, fontWeight:600 }}>Sistema de Administración</div>
+          <div style={{ width:80, height:80, background:'#1A3FA0', borderRadius:16, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', margin:'0 auto 10px' }}>
+            <div style={{ fontSize:20, fontWeight:900, color:'#fff', letterSpacing:2 }}>GASP</div>
+            <div style={{ fontSize:8, color:'#7AB4FF', letterSpacing:3, marginTop:2 }}>🏢</div>
+          </div>
+          <div style={{ fontSize:20, fontWeight:800, color:'#1A3FA0' }}>GASP Consorcios</div>
+          <div style={{ fontSize:12, color:GR }}>Sistema de Administración</div>
         </div>
         {loginError && <div style={{ background:'#fee2e2', color:RJ, borderRadius:7, padding:'9px 12px', fontSize:13, marginBottom:14 }}>{loginError}</div>}
         <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email"
@@ -1316,7 +1367,9 @@ export default function App() {
       case 'morosos':        return <Morosos session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} />
       case 'proveedores':    return <Proveedores session={session} consorcioId={cid} />
       case 'actas':          return <Actas session={session} consorcioId={cid} copropietarios={copropietarios} />
-      default:               return <Card style={{ color:GR, padding:32, textAlign:'center' }}>Módulo en construcción.</Card>
+      case 'perfil':         return <PerfilAdmin session={session} supabase={supabase} />
+      case 'clientes':       return <Card style={{ textAlign:'center', padding:40, color:GR }}><div style={{fontSize:32,marginBottom:12}}>🚧</div><div style={{fontWeight:600,marginBottom:8}}>Panel de clientes en desarrollo</div></Card>
+      default:               return <Dashboard />
     }
   }
 
@@ -1336,7 +1389,9 @@ export default function App() {
         transition:'transform 0.25s ease' }}>
         <div style={{ padding:'14px 14px 12px', borderBottom:'1px solid #1a2540' }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:2 }}>
-            <img src="/logo.svg" alt="GASP" style={{ width:36, height:36 }} />
+            <div style={{ width:36, height:36, background:'#1A3FA0', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+              <span style={{ fontSize:11, fontWeight:900, color:'#fff', letterSpacing:1 }}>GASP</span>
+            </div>
             <div>
               <div style={{ fontSize:18, fontWeight:800, color:'#fff', lineHeight:1 }}>GASP</div>
               <div style={{ fontSize:9, color:'#4a6a8a', letterSpacing:'0.1em' }}>CONSORCIOS</div>
