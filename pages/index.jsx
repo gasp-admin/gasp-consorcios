@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+// build 20260512 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
