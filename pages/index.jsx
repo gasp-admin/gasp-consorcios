@@ -1597,15 +1597,18 @@ function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
     return (
       <div>
         {consorcios.length>1 && (
-          <div style={{ marginBottom:20, display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-            <span style={{ fontSize:13, color:GR, fontWeight:500 }}>Consorcio activo:</span>
-            {consorcios.map(c=>(
-              <button key={c.id} onClick={()=>{ setConsorcioActivo(c); cargarConsorcio(c.id) }}
-                style={{ padding:'6px 14px', borderRadius:8, border:'none', cursor:'pointer', fontSize:13, background:consorcioActivo?.id===c.id?AZ:'#f3f4f6', color:consorcioActivo?.id===c.id?'#fff':'#374151', fontWeight:consorcioActivo?.id===c.id?'bold':'normal' }}>
-                {c.nombre}
-              </button>
-            ))}
-            <Btn small onClick={()=>setFormCon({})}>+ Nuevo consorcio</Btn>
+          <div style={{ marginBottom:16, display:'flex', gap:10, alignItems:'center' }}>
+            <span style={{ fontSize:13, color:GR, fontWeight:500, whiteSpace:'nowrap' }}>Consorcio:</span>
+            <select
+              value={consorcioActivo?.id||''}
+              onChange={e => {
+                const c = consorcios.find(x => x.id === e.target.value)
+                if (c) { setConsorcioActivo(c); cargarConsorcio(c.id) }
+              }}
+              style={{ flex:1, padding:'7px 11px', borderRadius:8, border:'1px solid #d1d5db', fontSize:13, background:'#fff', cursor:'pointer' }}>
+              {consorcios.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+            <Btn small onClick={()=>setFormCon({})}>+ Nuevo</Btn>
           </div>
         )}
         {consorcios.length===0 && (
