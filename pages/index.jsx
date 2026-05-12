@@ -285,7 +285,25 @@ function Unidades({ session, consorcioId, copropietarios }) {
                     <td style={{ padding:'10px 12px' }}>{cp?.apellido_nombre||'—'}</td>
                     <td style={{ padding:'10px 12px' }}><Badge text={u.estado} color={ec.c} bg={ec.bg} /></td>
                     <td style={{ padding:'10px 12px' }}>
-                      <div style={{ display:'flex', gap:6 }}>
+                      <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
+                        {u.portal_token && (
+                          <Btn small title="Copiar link del portal" onClick={() => {
+                            const url = `${window.location.origin}/portal?token=${u.portal_token}`
+                            navigator.clipboard.writeText(url)
+                              .then(() => setMsg({ tipo:'ok', texto:`✓ Link portal copiado — UF ${u.numero}` }))
+                              .catch(() => { prompt('Copie este link:', url) })
+                          }} style={{ background:'#dbeafe', color:'#1e40af' }}>🔗</Btn>
+                        )}
+                        {u.portal_token && (() => {
+                          const cp2 = copropietarios.find(c => c.id === u.propietario_id)
+                          return cp2?.telefono ? (
+                            <Btn small title="Enviar link por WhatsApp" onClick={() => {
+                              const url = `${window.location.origin}/portal?token=${u.portal_token}`
+                              const txt = encodeURIComponent(`Estimado/a ${cp2.apellido_nombre}, le enviamos el link a su portal de expensas donde puede consultar su estado de cuenta:\n${url}`)
+                              window.open(`https://wa.me/549${cp2.telefono.replace(/\D/g,'')}?text=${txt}`, '_blank')
+                            }} style={{ background:'#dcfce7', color:'#166534' }}>📱</Btn>
+                          ) : null
+                        })()}
                         <Btn small onClick={() => setForm({...u})} style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
                         <Btn small onClick={() => eliminar(u.id)} style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
                       </div>
@@ -981,6 +999,19 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios, adminPerfil
                               })}>💳 Cobrar</Btn>
                             )}
                             {d.estado === 'pagada' && <Badge text="✓ Cobrado" color={VD} bg='#dcfce7' />}
+                            {u?.portal_token && (
+                              <Btn small title="Enviar link portal por WhatsApp" onClick={() => {
+                                const url = `${window.location.origin}/portal?token=${u.portal_token}`
+                                const cp2 = copropietarios.find(c => c.id === u.propietario_id)
+                                if (cp2?.telefono) {
+                                  const txt = encodeURIComponent(`Estimado/a ${cp2.apellido_nombre}, consulte su estado de cuenta en:\n${url}`)
+                                  window.open(`https://wa.me/549${cp2.telefono.replace(/\D/g,'')}?text=${txt}`, '_blank')
+                                } else {
+                                  navigator.clipboard.writeText(url)
+                                    .then(() => setMsg({ tipo:'ok', texto:`✓ Link copiado — ${u.numero}` }))
+                                }
+                              }} style={{ background:'#f0fdf4', color:'#166534' }}>🔗</Btn>
+                            )}
                           </td>
                         </tr>
                       )
