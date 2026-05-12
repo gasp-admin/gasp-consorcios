@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gasp-consorcios-v1'
+const CACHE_NAME = 'gasp-consorcios-v6'
 const urlsToCache = ['/']
 
 self.addEventListener('install', event => {
@@ -18,6 +18,11 @@ self.addEventListener('activate', event => {
 })
 
 self.addEventListener('fetch', event => {
+  // No cachear JS de Next.js — siempre buscar la versión nueva
+  if (event.request.url.includes('/_next/')) {
+    event.respondWith(fetch(event.request))
+    return
+  }
   event.respondWith(
     caches.match(event.request).then(response => {
       if (response) return response
