@@ -1585,11 +1585,15 @@ export default function App() {
     </div>
   )
 
-  function Dashboard() {
-    const totalUFs   = unidades.length
-    const ocupadas   = unidades.filter(u => u.estado==='ocupada').length
-    const coefTotal  = unidades.reduce((a,u) => a + Number(u.porcentaje_fiscal||0), 0)
-    const navigate   = (id) => { setPagina(id) }
+// ══════════════════════════════════════════════════════════════════════════════
+// DASHBOARD — componente independiente (fuera de App para evitar re-renders)
+// ══════════════════════════════════════════════════════════════════════════════
+function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
+  formCon, setFormCon, msgCon, guardarConsorcio, setConsorcioActivo,
+  cargarConsorcio, setPagina }) {
+  const totalUFs  = unidades.length
+  const ocupadas  = unidades.filter(u => u.estado==='ocupada').length
+  const coefTotal = unidades.reduce((a,u) => a + Number(u.porcentaje_fiscal||0), 0)
     return (
       <div>
         {consorcios.length>1 && (
@@ -1654,7 +1658,7 @@ export default function App() {
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:24 }}>
               {[{l:'Unidades',v:totalUFs,c:AZ,icon:'🏢',action:'unidades'},{l:'Ocupadas',v:ocupadas,c:VD,icon:'✅',action:'unidades'},{l:'Copropietarios',v:copropietarios.length,c:AM,icon:'👤',action:'copropietarios'},{l:'Coef. total',v:coefTotal.toFixed(2)+'%',c:'#6d28d9',icon:'📊',action:null}].map((k,i)=>(
-                <Card key={i} style={{ textAlign:'center', cursor:k.action?'pointer':'default' }} onClick={()=>k.action&&navigate(k.action)}>
+                <Card key={i} style={{ textAlign:'center', cursor:k.action?'pointer':'default' }} onClick={()=>k.action&&setPagina(k.action)}>
                   <div style={{ fontSize:24, marginBottom:6 }}>{k.icon}</div>
                   <div style={{ fontSize:26, fontWeight:800, color:k.c }}>{k.v}</div>
                   <div style={{ fontSize:11, color:GR, marginTop:4 }}>{k.l}</div>
@@ -1663,7 +1667,7 @@ export default function App() {
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
               {[{id:'expensas',icon:'💰',label:'Gestionar Expensas',desc:'Crear período, calcular, cobrar'},{id:'cobranzas',icon:'💳',label:'Cobranzas',desc:'Registrar pagos por unidad'},{id:'morosos',icon:'⚠️',label:'Ver Morosos',desc:'Cuotas pendientes y contacto'},{id:'actas',icon:'📖',label:'Libro de Actas',desc:'Asambleas y reuniones'}].map(m=>(
-                <Card key={m.id} style={{ cursor:'pointer' }} onClick={()=>navigate(m.id)}>
+                <Card key={m.id} style={{ cursor:'pointer' }} onClick={()=>setPagina(m.id)}>
                   <div style={{ fontSize:28, marginBottom:8 }}>{m.icon}</div>
                   <div style={{ fontWeight:700, fontSize:15 }}>{m.label}</div>
                   <div style={{ fontSize:12, color:GR, marginTop:4 }}>{m.desc}</div>
@@ -1679,13 +1683,14 @@ export default function App() {
         )}
       </div>
     )
-  }
+}
+
 
   const cid=consorcioActivo?.id
   const renderPagina=()=>{
     if (!cid&&pagina!=='dashboard') return <Card style={{ textAlign:'center', padding:40, color:GR }}>Seleccioná un consorcio primero.</Card>
     switch(pagina) {
-      case 'dashboard':      return <Dashboard />
+      case 'dashboard':      return <Dashboard consorcios={consorcios} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} formCon={formCon} setFormCon={setFormCon} msgCon={msgCon} guardarConsorcio={guardarConsorcio} setConsorcioActivo={setConsorcioActivo} cargarConsorcio={cargarConsorcio} setPagina={setPagina} />
       case 'unidades':       return <Unidades session={session} consorcioId={cid} copropietarios={copropietarios} />
       case 'copropietarios': return <Copropietarios session={session} consorcioId={cid} onUpdate={setCopropietarios} />
       case 'expensas':       return <Expensas session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} adminPerfil={adminPerfil} />
@@ -1695,7 +1700,7 @@ export default function App() {
       case 'actas':          return <Actas session={session} consorcioId={cid} copropietarios={copropietarios} />
       case 'perfil':         return <PerfilAdmin session={session} />
       case 'clientes':       return <Card style={{ textAlign:'center', padding:40, color:GR }}><div style={{fontSize:32,marginBottom:12}}>🚧</div><div style={{fontWeight:600}}>Panel de clientes en desarrollo</div></Card>
-      default:               return <Dashboard />
+      default:               return <Dashboard consorcios={consorcios} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} formCon={formCon} setFormCon={setFormCon} msgCon={msgCon} guardarConsorcio={guardarConsorcio} setConsorcioActivo={setConsorcioActivo} cargarConsorcio={cargarConsorcio} setPagina={setPagina} />
     }
   }
 
