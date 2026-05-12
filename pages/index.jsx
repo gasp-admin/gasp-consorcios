@@ -1886,22 +1886,14 @@ function ImportarExcel({ session, consorcioId, onDone }) {
         </div>
         <div style={{ display:'flex', gap:10 }}>
           <Btn small color='#0369a1' onClick={() => {
-            const csv = 'apellido_nombre,dni,email,telefono
-García Juan,12345678,juan@mail.com,1112341234
-López María,87654321,maria@mail.com,
-'
+            const csv = `apellido_nombre,dni,email,telefono\nGarc\u00EDa Juan,12345678,juan@mail.com,1112341234\nL\u00F3pez Mar\u00EDa,87654321,maria@mail.com,\n`
             const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' })
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a'); a.href = url
             a.download = 'plantilla_copropietarios.csv'; a.click()
           }}>⬇ Copropietarios CSV</Btn>
           <Btn small color='#0369a1' onClick={() => {
-            const csv = 'numero,tipo,piso,superficie,coeficiente,pct_fdo_obras,pct_cochera
-1A,departamento,1,55,2.50,2.50,0
-1B,departamento,1,48,2.30,2.30,0
-LOC-1,local comercial,PB,80,3.20,3.20,0
-CO-1,cochera,SS,,0.80,0.80,100
-'
+            const csv = `numero,tipo,piso,superficie,coeficiente,pct_fdo_obras,pct_cochera\n1A,departamento,1,55,2.50,2.50,0\n1B,departamento,1,48,2.30,2.30,0\nLOC-1,local comercial,PB,80,3.20,3.20,0\nCO-1,cochera,SS,,0.80,0.80,100\n`
             const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' })
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a'); a.href = url
