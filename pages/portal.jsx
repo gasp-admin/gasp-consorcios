@@ -75,20 +75,40 @@ export default function Portal() {
       // 5. Historial de expensas/detalles de esta UF
       const { data: dets } = await supabase
         .from('con_expensas_detalle')
-        .select('*, con_expensas!inner(periodo, fecha_vencimiento, estado, tipo)')
+        .select('*')
         .eq('unidad_id', uf.id)
         .order('created_at', { ascending: false })
         .limit(12)
-      setDetalles(dets || [])
+
+      // Enriquecer con datos de expensa
+      const detsEnriq = await Promise.all((dets || []).map(async d => {
+        const { data: exp } = await supabase
+          .from('con_expensas')
+          .select('periodo, fecha_vencimiento, estado, tipo')
+          .eq('id', d.expensa_id)
+          .single()
+        return { ...d, con_expensas: exp }
+      }))
+      setDetalles(detsEnriq)
 
       // 6. Historial de pagos
       const { data: cobs } = await supabase
         .from('con_cobranzas')
-        .select('*, con_expensas!inner(periodo)')
+        .select('*')
         .eq('unidad_id', uf.id)
         .order('fecha', { ascending: false })
         .limit(20)
-      setCobranzas(cobs || [])
+
+      // Enriquecer con período
+      const cobsEnriq = await Promise.all((cobs || []).map(async c => {
+        const { data: exp } = await supabase
+          .from('con_expensas')
+          .select('periodo')
+          .eq('id', c.expensa_id)
+          .single()
+        return { ...c, con_expensas: exp }
+      }))
+      setCobranzas(cobsEnriq)
 
     } catch (e) {
       setError('Error al cargar los datos. Intente nuevamente.')
