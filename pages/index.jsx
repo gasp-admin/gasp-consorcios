@@ -1447,6 +1447,475 @@ function Actas({ session, consorcioId, copropietarios }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // 8. PERFIL ADMIN — con persistencia real en con_admin_perfil
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ENVIAR EMAILS — liquidación por Resend con link de portal
+// ══════════════════════════════════════════════════════════════════════════════
+function EnviarEmails({ session, consorcioId, unidades, adminPerfil }) {
+  const [expensas, setExpensas]   = useState([])
+  const [expSel, setExpSel]       = useState('')
+  const [testEmail, setTestEmail] = useState('')
+  const [enviando, setEnviando]   = useState(false)
+  const [resultado, setResultado] = useState(null)
+  const [msg, setMsg]             = useState(null)
+  const [emailLog, setEmailLog]   = useState([])
+
+  async function cargarExpensas() {
+    const { data } = await supabase.from('con_expensas').select('*')
+      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
+      .order('periodo', { ascending: false })
+    setExpensas(data || [])
+    if (data?.length > 0) setExpSel(data[0].id)
+  }
+
+  async function cargarLog() {
+    const { data } = await supabase.from('con_email_log').select('*')
+      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
+      .order('created_at', { ascending: false }).limit(30)
+    setEmailLog(data || [])
+  }
+
+  async function enviar(esTest) {
+    if (!expSel) return setMsg({ tipo:'warn', texto:'Seleccioná un período primero' })
+    if (esTest && !testEmail) return setMsg({ tipo:'warn', texto:'Ingresá el email de prueba' })
+    if (!esTest && !confirm('¿Enviar la liquidación a TODOS los copropietarios con email registrado?')) return
+
+    setEnviando(true); setResultado(null); setMsg(null)
+    try {
+      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/enviar-liquidacion`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+        },
+        body: JSON.stringify({
+          expensa_id: expSel,
+          admin_id: session.user.id,
+          test_email: esTest ? testEmail : undefined,
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error en el servidor')
+      setResultado(data)
+      setMsg({ tipo:'ok', texto: esTest
+        ? `✓ Email de prueba enviado a ${testEmail}`
+        : `✓ Enviados: ${data.enviados} | Sin email: ${data.sinEmail} | Errores: ${data.errores}` })
+      cargarLog()
+    } catch(e) {
+      setMsg({ tipo:'error', texto: 'Error: ' + e.message })
+    }
+    setEnviando(false)
+  }
+
+  useEffect(() => { if (consorcioId) { cargarExpensas(); cargarLog() } }, [consorcioId])
+
+  const expActual = expensas.find(e => e.id === expSel)
+  const conEmail  = unidades.filter(u => {
+    // contar UFs con email — aproximado
+    return true
+  }).length
+
+  return (
+    <div>
+      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>✉️ Enviar liquidación por email</div>
+      <div style={{ fontSize:12, color:GR, marginBottom:20 }}>
+        Envía la liquidación individual a cada copropietario con su link de portal
+      </div>
+      <Msg data={msg} />
+
+      {/* Selector período */}
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ fontWeight:600, color:AZ, marginBottom:14, fontSize:13 }}>Configuración del envío</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:16 }}>
+          <div>
+            <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Período</div>
+            <select value={expSel} onChange={e => setExpSel(e.target.value)}
+              style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
+                borderRadius:7, fontSize:13, background:'#fff' }}>
+              {expensas.map(e => (
+                <option key={e.id} value={e.id}>
+                  {(() => {
+                    const [y,m] = (e.periodo||'').split('-')
+                    const mes = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                      'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+                    return `${mes[parseInt(m)-1]} ${y} — ${e.tipo}`
+                  })()} {e.total_expensa > 0 ? `($${Number(e.total_expensa).toLocaleString('es-AR')})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', justifyContent:'flex-end', gap:8 }}>
+            {expActual && (
+              <div style={{ fontSize:12, color:GR, padding:'8px 12px',
+                background:'#f8fafc', borderRadius:8 }}>
+                <div>Período: <strong>{expActual.periodo}</strong></div>
+                <div>Vto: {expActual.fecha_vencimiento || '—'}</div>
+                <div>Total: ${Number(expActual.total_expensa||0).toLocaleString('es-AR')}</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Test email */}
+        <div style={{ background:'#fef9c3', border:'1px solid #f59e0b', borderRadius:8,
+          padding:'14px 16px', marginBottom:16 }}>
+          <div style={{ fontWeight:600, fontSize:13, color:'#92400e', marginBottom:8 }}>
+            📧 Prueba antes de enviar masivamente
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <input value={testEmail} onChange={e => setTestEmail(e.target.value)}
+              placeholder="email@prueba.com"
+              style={{ flex:1, padding:'8px 11px', border:'1px solid #d1d5db',
+                borderRadius:7, fontSize:13 }} />
+            <Btn small color={AM} onClick={() => enviar(true)} disabled={enviando}>
+              {enviando ? '⏳' : '📤 Enviar prueba'}
+            </Btn>
+          </div>
+          <div style={{ fontSize:11, color:'#92400e', marginTop:6 }}>
+            El email de prueba llega a la dirección ingresada con los datos de la primera UF.
+          </div>
+        </div>
+
+        {/* Envío masivo */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div style={{ fontSize:13, color:GR }}>
+            Enviará a todos los copropietarios con email registrado.
+            Los que no tienen email quedarán sin enviar.
+          </div>
+          <Btn color={AZ} onClick={() => enviar(false)} disabled={enviando}>
+            {enviando ? '⏳ Enviando...' : '📨 Enviar a todos'}
+          </Btn>
+        </div>
+      </Card>
+
+      {/* Resultado */}
+      {resultado && (
+        <Card style={{ marginBottom:16, background:'#f0fdf4', border:'1px solid #86efac' }}>
+          <div style={{ fontWeight:600, color:VD, marginBottom:10 }}>Resultado del envío</div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
+            {[
+              { l:'Enviados', v:resultado.enviados, c:VD },
+              { l:'Sin email', v:resultado.sinEmail, c:GR },
+              { l:'Errores', v:resultado.errores, c:RJ },
+              { l:'Total UFs', v:resultado.total, c:AZ },
+            ].map((k,i) => (
+              <div key={i} style={{ textAlign:'center', padding:'10px',
+                background:'#fff', borderRadius:8 }}>
+                <div style={{ fontSize:22, fontWeight:800, color:k.c }}>{k.v}</div>
+                <div style={{ fontSize:11, color:GR }}>{k.l}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Log de envíos */}
+      {emailLog.length > 0 && (
+        <Card>
+          <div style={{ fontWeight:600, fontSize:13, marginBottom:12 }}>
+            Historial de envíos
+          </div>
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead>
+                <tr style={{ background:'#f3f4f6' }}>
+                  {['Fecha','Destinatario','Asunto','Estado'].map((h,i) => (
+                    <th key={i} style={{ padding:'6px 10px', textAlign:'left',
+                      fontSize:11, fontWeight:'bold', color:GR, borderBottom:'1px solid #e5e7eb' }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {emailLog.map(log => (
+                  <tr key={log.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                    <td style={{ padding:'7px 10px', whiteSpace:'nowrap' }}>
+                      {new Date(log.created_at).toLocaleDateString('es-AR')}
+                    </td>
+                    <td style={{ padding:'7px 10px' }}>{log.destinatario}</td>
+                    <td style={{ padding:'7px 10px', color:GR, fontSize:11 }}>
+                      {log.asunto?.slice(0,50)}
+                    </td>
+                    <td style={{ padding:'7px 10px' }}>
+                      <Badge
+                        text={log.estado}
+                        color={log.estado==='enviado'?VD:RJ}
+                        bg={log.estado==='enviado'?'#dcfce7':'#fee2e2'}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* Info configuración */}
+      <Card style={{ marginTop:16, background:'#f0f9ff', border:'1px solid #bae6fd' }}>
+        <div style={{ fontWeight:600, fontSize:13, color:'#0369a1', marginBottom:8 }}>
+          ⚙️ Configuración requerida
+        </div>
+        <div style={{ fontSize:12, color:'#374151', lineHeight:1.8 }}>
+          Para activar el envío de emails, configure en Vercel → Settings → Environment Variables:
+          <br/>
+          <code style={{ background:'#e0f2fe', padding:'2px 6px', borderRadius:4 }}>RESEND_API_KEY</code> — obtenga su clave en <a href="https://resend.com" target="_blank" style={{ color:'#0369a1' }}>resend.com</a>
+          <br/>
+          <code style={{ background:'#e0f2fe', padding:'2px 6px', borderRadius:4 }}>SITE_URL</code> — <code>https://consorcios.administracionpinamar.com</code>
+          <br/>
+          Y despliegue la Edge Function <code>enviar-liquidacion</code> en Supabase.
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// IMPORTAR EXCEL — copropietarios, unidades y datos desde planilla
+// ══════════════════════════════════════════════════════════════════════════════
+function ImportarExcel({ session, consorcioId, onDone }) {
+  const [archivo, setArchivo]   = useState(null)
+  const [preview, setPreview]   = useState([])
+  const [tipo, setTipo]         = useState('copropietarios')
+  const [importando, setImportando] = useState(false)
+  const [msg, setMsg]           = useState(null)
+  const [errores, setErrores]   = useState([])
+
+  function procesarArchivo(file) {
+    setArchivo(file); setPreview([]); setErrores([]); setMsg(null)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result)
+        const XLSX = window.XLSX
+        if (!XLSX) { setMsg({ tipo:'error', texto:'Librería XLSX no disponible' }); return }
+        const wb   = XLSX.read(data, { type:'array' })
+        const ws   = wb.Sheets[wb.SheetNames[0]]
+        const rows = XLSX.utils.sheet_to_json(ws, { defval:'' })
+        setPreview(rows.slice(0, 5))
+        setMsg({ tipo:'info', texto:`${rows.length} filas detectadas. Primeras 5 mostradas abajo.` })
+      } catch(err) {
+        setMsg({ tipo:'error', texto:'Error leyendo el archivo: ' + err.message })
+      }
+    }
+    reader.readAsArrayBuffer(file)
+  }
+
+  async function importar() {
+    if (!archivo) return setMsg({ tipo:'warn', texto:'Seleccioná un archivo primero' })
+    setImportando(true); setErrores([]); setMsg(null)
+
+    const reader = new FileReader()
+    reader.onload = async (e) => {
+      try {
+        const XLSX = window.XLSX
+        const wb   = XLSX.read(new Uint8Array(e.target.result), { type:'array' })
+        const ws   = wb.Sheets[wb.SheetNames[0]]
+        const rows = XLSX.utils.sheet_to_json(ws, { defval:'' })
+
+        let ok = 0; const errs = []
+
+        if (tipo === 'copropietarios') {
+          // Columnas esperadas: apellido_nombre, dni, email, telefono, es_consejero
+          for (const row of rows) {
+            const nombre = row['apellido_nombre'] || row['nombre'] || row['Nombre'] || ''
+            if (!nombre) continue
+            const { error } = await supabase.from('con_copropietarios').upsert({
+              id: 'CP-IMP-' + Date.now() + '-' + ok,
+              admin_id: session.user.id,
+              consorcio_id: consorcioId,
+              apellido_nombre: nombre,
+              dni: String(row['dni'] || row['DNI'] || ''),
+              email: row['email'] || row['Email'] || row['EMAIL'] || null,
+              telefono: String(row['telefono'] || row['Telefono'] || row['tel'] || ''),
+              es_consejero: false,
+            }, { onConflict: 'id' })
+            if (error) errs.push(`Fila ${ok+1}: ${error.message}`)
+            else ok++
+          }
+        } else if (tipo === 'unidades') {
+          // Columnas: numero, tipo, piso, superficie_cubierta, porcentaje_fiscal
+          for (const row of rows) {
+            const num = row['numero'] || row['Numero'] || row['UF'] || ''
+            if (!num) continue
+            const { error } = await supabase.from('con_unidades').upsert({
+              id: 'UF-IMP-' + Date.now() + '-' + ok,
+              admin_id: session.user.id,
+              consorcio_id: consorcioId,
+              numero: String(num),
+              tipo: row['tipo'] || row['Tipo'] || 'departamento',
+              piso: String(row['piso'] || row['Piso'] || ''),
+              superficie_cubierta: parseFloat(row['superficie'] || row['Superficie'] || 0) || null,
+              porcentaje_fiscal: parseFloat(row['coeficiente'] || row['porcentaje_fiscal'] || row['pct'] || 0) || null,
+              pct_gtos_grales: parseFloat(row['coeficiente'] || row['porcentaje_fiscal'] || row['pct'] || 0) || null,
+              pct_fdo_obras: parseFloat(row['pct_fdo_obras'] || row['coeficiente'] || 0) || null,
+              pct_cochera: parseFloat(row['pct_cochera'] || 0) || null,
+              estado: 'ocupada',
+              portal_token: Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2),
+            }, { onConflict: 'id' })
+            if (error) errs.push(`Fila ${ok+1}: ${error.message}`)
+            else ok++
+          }
+        }
+
+        setErrores(errs)
+        setMsg({ tipo: errs.length === 0 ? 'ok' : 'warn',
+          texto: `✓ ${ok} registros importados${errs.length > 0 ? ` · ${errs.length} errores` : ''}` })
+        if (ok > 0 && errs.length === 0) setTimeout(() => onDone?.(), 1500)
+      } catch(err) {
+        setMsg({ tipo:'error', texto:'Error importando: ' + err.message })
+      }
+      setImportando(false)
+    }
+    reader.readAsArrayBuffer(archivo)
+  }
+
+  // Cargar XLSX dinámicamente desde CDN
+  useEffect(() => {
+    if (!window.XLSX) {
+      const script = document.createElement('script')
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+      document.head.appendChild(script)
+    }
+  }, [])
+
+  const FORMATOS = {
+    copropietarios: ['apellido_nombre', 'dni', 'email', 'telefono'],
+    unidades: ['numero', 'tipo', 'piso', 'superficie', 'coeficiente', 'pct_fdo_obras', 'pct_cochera'],
+  }
+
+  return (
+    <div>
+      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>📥 Importar desde Excel</div>
+      <div style={{ fontSize:12, color:GR, marginBottom:20 }}>
+        Cargue copropietarios y unidades funcionales desde un archivo .xlsx o .csv
+      </div>
+      <Msg data={msg} />
+
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ fontWeight:600, color:AZ, marginBottom:14, fontSize:13 }}>
+          Configuración
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:16 }}>
+          <Sel label="¿Qué desea importar?" value={tipo} onChange={setTipo}
+            opts={[
+              { v:'copropietarios', l:'👤 Copropietarios' },
+              { v:'unidades', l:'🏢 Unidades Funcionales' },
+            ]} />
+          <div>
+            <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>
+              Archivo Excel / CSV
+            </div>
+            <input type="file" accept=".xlsx,.xls,.csv"
+              onChange={e => e.target.files[0] && procesarArchivo(e.target.files[0])}
+              style={{ width:'100%', padding:'7px 0', fontSize:13 }} />
+          </div>
+        </div>
+
+        {/* Formato esperado */}
+        <div style={{ background:'#f8fafc', borderRadius:8, padding:'12px 14px', marginBottom:14 }}>
+          <div style={{ fontSize:12, fontWeight:600, color:GR, marginBottom:6 }}>
+            Columnas esperadas en la planilla:
+          </div>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+            {FORMATOS[tipo].map(col => (
+              <code key={col} style={{ background:'#e5e7eb', padding:'2px 8px',
+                borderRadius:4, fontSize:11 }}>{col}</code>
+            ))}
+          </div>
+          <div style={{ fontSize:11, color:GR, marginTop:8 }}>
+            La primera fila debe ser el encabezado. Puede incluir columnas adicionales — se ignoran.
+          </div>
+        </div>
+
+        {/* Preview */}
+        {preview.length > 0 && (
+          <div style={{ overflowX:'auto', marginBottom:14 }}>
+            <div style={{ fontSize:12, fontWeight:600, color:GR, marginBottom:6 }}>
+              Vista previa (primeras 5 filas):
+            </div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+              <thead>
+                <tr style={{ background:'#f3f4f6' }}>
+                  {Object.keys(preview[0]).slice(0,6).map(k => (
+                    <th key={k} style={{ padding:'5px 8px', textAlign:'left',
+                      borderBottom:'1px solid #e5e7eb', fontWeight:600, color:GR }}>{k}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {preview.map((row, i) => (
+                  <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                    {Object.values(row).slice(0,6).map((v, j) => (
+                      <td key={j} style={{ padding:'5px 8px', fontSize:11 }}>
+                        {String(v).slice(0,30)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {errores.length > 0 && (
+          <div style={{ background:'#fee2e2', borderRadius:8, padding:'10px 14px',
+            marginBottom:14, fontSize:12, color:RJ }}>
+            <strong>Errores:</strong>
+            {errores.slice(0,5).map((e,i) => <div key={i}>{e}</div>)}
+            {errores.length > 5 && <div>...y {errores.length-5} más</div>}
+          </div>
+        )}
+
+        <div style={{ display:'flex', gap:8 }}>
+          <Btn onClick={importar} disabled={!archivo || importando}>
+            {importando ? '⏳ Importando...' : '📥 Importar'}
+          </Btn>
+          <BtnSec onClick={() => { setArchivo(null); setPreview([]); setMsg(null); setErrores([]) }}>
+            Limpiar
+          </BtnSec>
+        </div>
+      </Card>
+
+      {/* Plantillas descargables */}
+      <Card style={{ background:'#f0f9ff', border:'1px solid #bae6fd' }}>
+        <div style={{ fontWeight:600, fontSize:13, color:'#0369a1', marginBottom:10 }}>
+          📋 Plantillas de ejemplo
+        </div>
+        <div style={{ display:'flex', gap:10 }}>
+          <Btn small color='#0369a1' onClick={() => {
+            const csv = 'apellido_nombre,dni,email,telefono
+García Juan,12345678,juan@mail.com,1112341234
+López María,87654321,maria@mail.com,
+'
+            const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a'); a.href = url
+            a.download = 'plantilla_copropietarios.csv'; a.click()
+          }}>⬇ Copropietarios CSV</Btn>
+          <Btn small color='#0369a1' onClick={() => {
+            const csv = 'numero,tipo,piso,superficie,coeficiente,pct_fdo_obras,pct_cochera
+1A,departamento,1,55,2.50,2.50,0
+1B,departamento,1,48,2.30,2.30,0
+LOC-1,local comercial,PB,80,3.20,3.20,0
+CO-1,cochera,SS,,0.80,0.80,100
+'
+            const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a'); a.href = url
+            a.download = 'plantilla_unidades.csv'; a.click()
+          }}>⬇ Unidades CSV</Btn>
+        </div>
+        <div style={{ fontSize:11, color:GR, marginTop:8 }}>
+          Descargue la plantilla, complete con sus datos y vuelva a importar.
+        </div>
+      </Card>
+    </div>
+  )
+}
+
 function PerfilAdmin({ session }) {
   const [perfil, setPerfil] = useState({ nombre:'', telefono:'', matricula_rpac:'', email:'', direccion:'', horario:'', cuit:'', situacion_fiscal:'Monotributo' })
   const [guardando, setGuardando] = useState(false)
@@ -1588,7 +2057,9 @@ export default function App() {
     { id:'morosos',        label:'Morosos',           icon:'⚠️', sec:'Gestión' },
     { id:'proveedores',    label:'Proveedores',       icon:'🔧', sec:'Gestión' },
     { id:'actas',          label:'Libro de Actas',    icon:'📖', sec:'Gestión' },
-    { id:'perfil',         label:'Mi perfil',         icon:'⚙️', sec:'Admin' },
+    { id:'emails',          label:'Enviar liquidación', icon:'✉️', sec:'Admin' },
+    { id:'importar',        label:'Importar Excel',    icon:'📥', sec:'Admin' },
+    { id:'perfil',          label:'Mi perfil',         icon:'⚙️', sec:'Admin' },
     ...(esSuperAdmin?[{id:'clientes',label:'Clientes GASP',icon:'🏢',sec:'Admin'}]:[]),
   ]
   const secciones=[...new Set(NAV.map(n=>n.sec))]
@@ -1735,6 +2206,8 @@ function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
       case 'proveedores':    return <Proveedores session={session} consorcioId={cid} />
       case 'actas':          return <Actas session={session} consorcioId={cid} copropietarios={copropietarios} />
       case 'perfil':         return <PerfilAdmin session={session} />
+      case 'importar':       return <ImportarExcel session={session} consorcioId={cid} onDone={() => { cargar(); setPagina('unidades') }} />
+      case 'emails':         return <EnviarEmails session={session} consorcioId={cid} unidades={unidades} adminPerfil={adminPerfil} />
       case 'clientes':       return <Card style={{ textAlign:'center', padding:40, color:GR }}><div style={{fontSize:32,marginBottom:12}}>🚧</div><div style={{fontWeight:600}}>Panel de clientes en desarrollo</div></Card>
       default:               return <Dashboard consorcios={consorcios} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} formCon={formCon} setFormCon={setFormCon} msgCon={msgCon} guardarConsorcio={guardarConsorcio} setConsorcioActivo={setConsorcioActivo} cargarConsorcio={cargarConsorcio} setPagina={setPagina} />
     }
