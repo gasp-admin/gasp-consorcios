@@ -647,18 +647,18 @@ function Expensas({ session, consorcioId, unidades, copropietarios, adminPerfil 
 // ══════════════════════════════════════════════════════════════════════════════
 // 4. COBRANZAS (MÓDULO NUEVO)
 // ══════════════════════════════════════════════════════════════════════════════
-function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
-  const [expensas, setExpensas]     = useState([])
-  const [expSel, setExpSel]         = useState(null)
-  const [detalles, setDetalles]     = useState([])
-  const [cobranzas, setCobranzas]   = useState([])
-  const [consorcio, setConsorcio]   = useState(null)
-  const [form, setForm]             = useState(null)
-  const [tabMora, setTabMora]       = useState(false)
-  const [previewMora, setPreviewMora] = useState([])
+function Cobranzas({ session, consorcioId, unidades, copropietarios, adminPerfil }) {
+  const [expensas, setExpensas]         = useState([])
+  const [expSel, setExpSel]             = useState(null)
+  const [detalles, setDetalles]         = useState([])
+  const [cobranzas, setCobranzas]       = useState([])
+  const [consorcio, setConsorcio]       = useState(null)
+  const [form, setForm]                 = useState(null)
+  const [tabMora, setTabMora]           = useState(false)
+  const [previewMora, setPreviewMora]   = useState([])
   const [calculandoMora, setCalculandoMora] = useState(false)
   const [aplicandoMora, setAplicandoMora]   = useState(false)
-  const [msg, setMsg]               = useState(null)
+  const [msg, setMsg]                   = useState(null)
 
   async function cargarExpensas() {
     const [expRes, conRes] = await Promise.all([
@@ -697,11 +697,11 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
     const det = detalles.find(d => d.unidad_id === form.unidad_id)
     if (det) {
       const nuevoPago = (parseFloat(det.pagos_periodo) || 0) + monto
-      // Si el pago cubre deuda + mora, limpiar mora también
       const deudaTotal = (parseFloat(det.saldo_anterior)||0) + (parseFloat(det.monto)||0) + (parseFloat(det.interes_mora)||0)
       const estado = nuevoPago >= deudaTotal ? 'pagada' : 'pendiente'
       await supabase.from('con_expensas_detalle')
-        .update({ pagos_periodo: nuevoPago, estado, fecha_pago: estado==='pagada'?form.fecha:null }).eq('id', det.id)
+        .update({ pagos_periodo: nuevoPago, estado, fecha_pago: estado==='pagada' ? form.fecha : null })
+        .eq('id', det.id)
     }
     setForm(null)
     setMsg({ tipo:'ok', texto: `✓ Pago de ${fmt(monto)} registrado` })
@@ -715,20 +715,18 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
     if (det) {
       const nuevoPago = Math.max(0, (parseFloat(det.pagos_periodo)||0) - parseFloat(cob.monto))
       await supabase.from('con_expensas_detalle')
-        .update({ pagos_periodo: nuevoPago, estado: nuevoPago > 0 ? 'pagada' : 'pendiente' }).eq('id', det.id)
+        .update({ pagos_periodo: nuevoPago, estado: nuevoPago > 0 ? 'pagada' : 'pendiente' })
+        .eq('id', det.id)
     }
     seleccionarExpensa(expSel)
   }
 
-  // ── CÁLCULO DE MORA ─────────────────────────────────────────
   async function previsualizarMora() {
     if (!expSel) return
     setCalculandoMora(true); setTabMora(true)
     try {
-      // Llamar a la función PostgreSQL
       const { data, error } = await supabase.rpc('calcular_mora_expensa', { p_expensa_id: expSel.id })
       if (error) throw error
-      // Enriquecer con datos de UF
       const enriquecido = (data || []).map(row => {
         const u  = unidades.find(x => x.id === row.unidad_id) || {}
         const cp = copropietarios.find(c => c.id === u.propietario_id) || {}
@@ -744,33 +742,43 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
 
   async function aplicarMora() {
     if (previewMora.length === 0) return
-    if (!confirm(`¿Aplicar interés por mora a ${previewMora.length} unidad/es? Esta acción actualizará los saldos.`)) return
+    if (!confirm(`¿Aplicar interés por mora a ${previewMora.length} unidad/es?`)) return
     setAplicandoMora(true)
     let ok = 0
     for (const row of previewMora) {
       if (parseFloat(row.monto_interes) <= 0) continue
-      // Actualizar interes_mora en detalle
-      const { error: e1 } = await supabase.from('con_expensas_detalle')
+      await supabase.from('con_expensas_detalle')
         .update({ interes_mora: row.nueva_mora_acum })
-        .eq('expensa_id', expSel.id)
-        .eq('unidad_id', row.unidad_id)
-      if (e1) { console.error(e1); continue }
-      // Registrar en log
+        .eq('expensa_id', expSel.id).eq('unidad_id', row.unidad_id)
       await supabase.from('con_mora_log').insert([{
         id: `MORA-${expSel.id}-${row.unidad_id}-${Date.now()}`,
         admin_id: session.user.id, consorcio_id: consorcioId,
         expensa_id: expSel.id, unidad_id: row.unidad_id,
-        periodo: expSel.periodo,
-        deuda_base: row.deuda_base, porcentaje: row.porcentaje_mora,
-        monto_interes: row.monto_interes, dias_mora: row.dias_mora,
-        fecha_calculo: new Date().toISOString().split('T')[0]
+        periodo: expSel.periodo, deuda_base: row.deuda_base,
+        porcentaje: row.porcentaje_mora, monto_interes: row.monto_interes,
+        dias_mora: row.dias_mora, fecha_calculo: new Date().toISOString().split('T')[0]
       }])
       ok++
     }
-    setMsg({ tipo:'ok', texto: `✓ Mora aplicada a ${ok} unidad/es correctamente` })
+    setMsg({ tipo:'ok', texto: `✓ Mora aplicada a ${ok} unidad/es` })
     setPreviewMora([]); setTabMora(false)
     seleccionarExpensa(expSel)
     setAplicandoMora(false)
+  }
+
+  async function generarPDF() {
+    if (!expSel) return
+    const { data: gasData } = await supabase.from('con_gastos')
+      .select('*').eq('expensa_id', expSel.id).order('fecha')
+    generarPDFLiquidacion({
+      consorcioActivo: consorcio || { nombre: consorcioId },
+      expensa: expSel,
+      gastos: gasData || [],
+      detalles,
+      unidades,
+      copropietarios,
+      adminPerfil: adminPerfil || {}
+    })
   }
 
   async function cerrarPeriodo() {
@@ -784,7 +792,8 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
         if (salAnt > 0) {
           const { data: detSig } = await supabase.from('con_expensas_detalle')
             .select('id').eq('expensa_id', siguiente.id).eq('unidad_id', det.unidad_id).single()
-          if (detSig) await supabase.from('con_expensas_detalle').update({ saldo_anterior: salAnt }).eq('id', detSig.id)
+          if (detSig) await supabase.from('con_expensas_detalle')
+            .update({ saldo_anterior: salAnt }).eq('id', detSig.id)
         }
       }
       setMsg({ tipo:'ok', texto: `✓ Período cerrado. Saldos trasladados a ${periodoLabel(siguiente.periodo)}` })
@@ -797,12 +806,12 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
   useEffect(() => { if (consorcioId) cargarExpensas() }, [consorcioId])
 
   const MEDIOS = ['transferencia','efectivo','debito','cheque','otro']
-  const totalCobrado   = cobranzas.reduce((a,c) => a + parseFloat(c.monto||0), 0)
-  const totalPendiente = detalles.filter(d => d.estado !== 'pagada').reduce((a,d) => {
-    const saldo = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)
-    return a + Math.max(0, saldo)
+  const totalCobrado   = cobranzas.reduce((a, c) => a + parseFloat(c.monto||0), 0)
+  const totalPendiente = detalles.filter(d => d.estado !== 'pagada').reduce((a, d) => {
+    const s = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)
+    return a + Math.max(0, s)
   }, 0)
-  const totalMora = detalles.reduce((a,d) => a + (parseFloat(d.interes_mora)||0), 0)
+  const totalMora = detalles.reduce((a, d) => a + (parseFloat(d.interes_mora)||0), 0)
 
   return (
     <div>
@@ -822,6 +831,9 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
             </Btn>
             <Btn small color={AM} onClick={previsualizarMora}>
               {calculandoMora ? '⏳ Calculando...' : '📐 Calcular mora'}
+            </Btn>
+            <Btn small color={AZ} onClick={generarPDF}>
+              🖨 PDF liquidación
             </Btn>
             {expSel.estado !== 'cerrada' && (
               <Btn small color={GR} onClick={cerrarPeriodo}>🔒 Cerrar período</Btn>
@@ -849,7 +861,9 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
             </button>
           )
         })}
-        {expensas.length === 0 && <div style={{ color:GR, fontSize:13 }}>No hay períodos de expensas. Ir a Expensas para crear uno.</div>}
+        {expensas.length === 0 && (
+          <div style={{ color:GR, fontSize:13 }}>No hay períodos de expensas. Ir a Expensas para crear uno.</div>
+        )}
       </div>
 
       {expSel && (
@@ -857,10 +871,10 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
           {/* KPIs */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:16 }}>
             {[
-              { l:'Total expensa', v:fmt(expSel.total_expensa), c:AZ },
-              { l:'Cobrado', v:fmt(totalCobrado), c:VD },
-              { l:'Pendiente', v:fmt(totalPendiente), c:RJ },
-              { l:'Mora acumulada', v:fmt(totalMora), c:AM },
+              { l:'Total expensa',   v:fmt(expSel.total_expensa), c:AZ },
+              { l:'Cobrado',         v:fmt(totalCobrado),         c:VD },
+              { l:'Pendiente',       v:fmt(totalPendiente),       c:RJ },
+              { l:'Mora acumulada',  v:fmt(totalMora),            c:AM },
             ].map((k,i) => (
               <Card key={i} style={{ textAlign:'center' }}>
                 <div style={{ fontSize:18, fontWeight:800, color:k.c }}>{k.v}</div>
@@ -869,12 +883,9 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
             ))}
           </div>
 
-          {/* Tabs: Estado UF | Mora */}
+          {/* Tabs */}
           <div style={{ display:'flex', gap:4, marginBottom:14 }}>
-            {[
-              { id:false, label:'🏢 Estado por unidad' },
-              { id:true,  label:'📐 Interés por mora' },
-            ].map(t => (
+            {[{id:false,label:'🏢 Estado por unidad'},{id:true,label:'📐 Interés por mora'}].map(t => (
               <button key={String(t.id)} onClick={() => setTabMora(t.id)}
                 style={{ padding:'7px 18px', borderRadius:8, border:'none', cursor:'pointer', fontSize:13,
                   background:tabMora===t.id?AZ:'#f3f4f6', color:tabMora===t.id?'#fff':'#555',
@@ -890,17 +901,23 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
               <div style={{ fontWeight:700, color:VD, marginBottom:12 }}>Registrar pago</div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:10 }}>
                 <div>
-                  <div style={{ fontSize:12, color:'#6b7280', marginBottom:4, fontWeight:500 }}>Unidad <span style={{color:RJ}}>*</span></div>
+                  <div style={{ fontSize:12, color:'#6b7280', marginBottom:4, fontWeight:500 }}>
+                    Unidad <span style={{color:RJ}}>*</span>
+                  </div>
                   <select value={form.unidad_id||''} onChange={e => setForm(x=>({...x,unidad_id:e.target.value}))}
                     style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
                     <option value=''>— Seleccionar UF —</option>
                     {detalles.map(d => {
                       const u  = unidades.find(x=>x.id===d.unidad_id)
                       const cp = u ? copropietarios.find(c=>c.id===u.propietario_id) : null
-                      const saldo = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)
-                      return <option key={d.unidad_id} value={d.unidad_id}>
-                        {u?.numero||d.unidad_id} — {cp?.apellido_nombre||'Sin propietario'} (Saldo: {fmt(Math.max(0,saldo))})
-                      </option>
+                      const saldo = Math.max(0,
+                        (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) +
+                        (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0))
+                      return (
+                        <option key={d.unidad_id} value={d.unidad_id}>
+                          {u?.numero||d.unidad_id} — {cp?.apellido_nombre||'Sin propietario'} (Saldo: {fmt(saldo)})
+                        </option>
+                      )
                     })}
                   </select>
                 </div>
@@ -917,7 +934,7 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
             </Card>
           )}
 
-          {/* ── TAB: ESTADO POR UNIDAD ─────────────────────── */}
+          {/* ── TAB: ESTADO POR UNIDAD ── */}
           {!tabMora && (
             <>
               <div style={{ fontWeight:600, fontSize:13, marginBottom:8 }}>
@@ -941,7 +958,9 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
                       const monto   = parseFloat(d.monto) || 0
                       const mora    = parseFloat(d.interes_mora) || 0
                       const saldo   = Math.max(0, salAnt + monto + mora - pagado)
-                      const ec = d.estado==='pagada'?{c:VD,bg:'#dcfce7'}:saldo>0?{c:RJ,bg:'#fee2e2'}:{c:AM,bg:'#fef9c3'}
+                      const ec = d.estado==='pagada'
+                        ? {c:VD,bg:'#dcfce7'}
+                        : saldo>0 ? {c:RJ,bg:'#fee2e2'} : {c:AM,bg:'#fef9c3'}
                       return (
                         <tr key={d.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
                           <td style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>{u?.numero||d.unidad_id}</td>
@@ -958,7 +977,7 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
                                 fecha: new Date().toISOString().split('T')[0],
                                 medio_pago: 'transferencia',
                                 unidad_id: d.unidad_id,
-                                monto: saldo  // pre-carga el saldo total
+                                monto: saldo
                               })}>💳 Cobrar</Btn>
                             )}
                             {d.estado === 'pagada' && <Badge text="✓ Cobrado" color={VD} bg='#dcfce7' />}
@@ -1021,16 +1040,16 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
             </>
           )}
 
-          {/* ── TAB: INTERÉS POR MORA ─────────────────────── */}
+          {/* ── TAB: INTERÉS POR MORA ── */}
           {tabMora && (
             <div>
-              {/* Info de configuración */}
               <Card style={{ marginBottom:14, background:'#fef9c3', border:'1px solid #f59e0b' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <div style={{ fontSize:13, color:'#78350f' }}>
-                    <strong>Tasa configurada:</strong> {consorcio?.interes_mora || 0}% mensual · 
-                    Vencimiento: {fmtD(expSel.fecha_vencimiento)} · 
-                    Días desde vencimiento: {expSel.fecha_vencimiento
+                    <strong>Tasa configurada:</strong> {consorcio?.interes_mora || 0}% mensual ·{' '}
+                    <strong>Vencimiento:</strong> {fmtD(expSel.fecha_vencimiento)} ·{' '}
+                    <strong>Días vencidos:</strong>{' '}
+                    {expSel.fecha_vencimiento
                       ? Math.max(0, Math.floor((new Date() - new Date(expSel.fecha_vencimiento + 'T00:00:00')) / 86400000))
                       : '—'} días
                   </div>
@@ -1048,7 +1067,7 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
                 <>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
                     <div style={{ fontWeight:600, fontSize:13 }}>
-                      Previsualización — {previewMora.length} unidad/es con mora
+                      {previewMora.length} unidad/es con mora a aplicar
                     </div>
                     <Btn color={RJ} onClick={aplicarMora} disabled={aplicandoMora}>
                       {aplicandoMora ? '⏳ Aplicando...' : '⚡ Aplicar mora a todas'}
@@ -1058,7 +1077,7 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
                     <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
                       <thead>
                         <tr style={{ background:'#fef2f2' }}>
-                          {['UF','Propietario','Deuda base','Días mora','Tasa %','Interés nuevo','Mora acumulada','Acción'].map((h,i) => (
+                          {['UF','Propietario','Deuda base','Días mora','Tasa %','Interés nuevo','Mora acumulada',''].map((h,i) => (
                             <th key={i} style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:'bold', color:RJ, textTransform:'uppercase', borderBottom:'1px solid #fecaca' }}>{h}</th>
                           ))}
                         </tr>
@@ -1075,7 +1094,6 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
                             <td style={{ padding:'8px 10px', fontWeight:700, color:RJ }}>{fmt(row.nueva_mora_acum)}</td>
                             <td style={{ padding:'8px 10px' }}>
                               <Btn small color={RJ} onClick={async () => {
-                                // Aplicar mora solo a esta UF
                                 if (parseFloat(row.monto_interes) <= 0) return
                                 await supabase.from('con_expensas_detalle')
                                   .update({ interes_mora: row.nueva_mora_acum })
@@ -1099,7 +1117,7 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
                     </table>
                   </div>
                   <div style={{ marginTop:12, padding:'10px 14px', background:'#fef2f2', borderRadius:8, fontSize:12, color:'#7f1d1d' }}>
-                    <strong>Total mora a aplicar:</strong> {fmt(previewMora.reduce((a,r)=>a+parseFloat(r.monto_interes||0),0))} · 
+                    <strong>Total mora a aplicar:</strong> {fmt(previewMora.reduce((a,r)=>a+parseFloat(r.monto_interes||0),0))} ·{' '}
                     <strong>Total mora acumulada:</strong> {fmt(previewMora.reduce((a,r)=>a+parseFloat(r.nueva_mora_acum||0),0))}
                   </div>
                 </>
@@ -1108,9 +1126,11 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
               {!calculandoMora && previewMora.length === 0 && (
                 <Card style={{ textAlign:'center', color:GR, padding:32 }}>
                   <div style={{ fontSize:32, marginBottom:8 }}>📐</div>
-                  <div style={{ marginBottom:8 }}>Hacé clic en <strong>"Calcular mora"</strong> para ver el interés correspondiente a las unidades con deuda vencida.</div>
+                  <div style={{ marginBottom:8 }}>
+                    Hacé clic en <strong>"Calcular mora"</strong> para ver el interés correspondiente.
+                  </div>
                   <div style={{ fontSize:12, color:AM }}>
-                    Se usa la tasa del consorcio ({consorcio?.interes_mora || 0}% mensual) y los días transcurridos desde el vencimiento.
+                    Tasa: {consorcio?.interes_mora || 0}% mensual sobre deuda vencida.
                   </div>
                 </Card>
               )}
@@ -1668,7 +1688,7 @@ export default function App() {
       case 'unidades':       return <Unidades session={session} consorcioId={cid} copropietarios={copropietarios} />
       case 'copropietarios': return <Copropietarios session={session} consorcioId={cid} onUpdate={setCopropietarios} />
       case 'expensas':       return <Expensas session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} adminPerfil={adminPerfil} />
-      case 'cobranzas':      return <Cobranzas session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} />
+      case 'cobranzas':      return <Cobranzas session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} adminPerfil={adminPerfil} />
       case 'morosos':        return <Morosos session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} />
       case 'proveedores':    return <Proveedores session={session} consorcioId={cid} />
       case 'actas':          return <Actas session={session} consorcioId={cid} copropietarios={copropietarios} />
