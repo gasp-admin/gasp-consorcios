@@ -1,4 +1,3 @@
-// build 20260512 
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
@@ -1662,20 +1661,22 @@ function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:24 }}>
               {[{l:'Unidades',v:totalUFs,c:AZ,icon:'🏢',action:'unidades'},{l:'Ocupadas',v:ocupadas,c:VD,icon:'✅',action:'unidades'},{l:'Copropietarios',v:copropietarios.length,c:AM,icon:'👤',action:'copropietarios'},{l:'Coef. total',v:coefTotal.toFixed(2)+'%',c:'#6d28d9',icon:'📊',action:null}].map((k,i)=>(
-                <Card key={i} style={{ textAlign:'center', cursor:k.action?'pointer':'default' }} onClick={()=>k.action&&setPagina(k.action)}>
+                <button key={i} onClick={()=>{ if(k.action) setPagina(k.action) }}
+                  style={{ textAlign:'center', cursor:k.action?'pointer':'default', background:'#fff', border:'0.5px solid #ddd', borderRadius:10, padding:16, width:'100%' }}>
                   <div style={{ fontSize:24, marginBottom:6 }}>{k.icon}</div>
                   <div style={{ fontSize:26, fontWeight:800, color:k.c }}>{k.v}</div>
                   <div style={{ fontSize:11, color:GR, marginTop:4 }}>{k.l}</div>
-                </Card>
+                </button>
               ))}
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
               {[{id:'expensas',icon:'💰',label:'Gestionar Expensas',desc:'Crear período, calcular, cobrar'},{id:'cobranzas',icon:'💳',label:'Cobranzas',desc:'Registrar pagos por unidad'},{id:'morosos',icon:'⚠️',label:'Ver Morosos',desc:'Cuotas pendientes y contacto'},{id:'actas',icon:'📖',label:'Libro de Actas',desc:'Asambleas y reuniones'}].map(m=>(
-                <Card key={m.id} style={{ cursor:'pointer' }} onClick={()=>setPagina(m.id)}>
+                <button key={m.id} onClick={()=>{ setPagina(m.id) }}
+                  style={{ cursor:'pointer', background:'#fff', border:'0.5px solid #ddd', borderRadius:10, padding:16, width:'100%', textAlign:'left' }}>
                   <div style={{ fontSize:28, marginBottom:8 }}>{m.icon}</div>
                   <div style={{ fontWeight:700, fontSize:15 }}>{m.label}</div>
                   <div style={{ fontSize:12, color:GR, marginTop:4 }}>{m.desc}</div>
-                </Card>
+                </button>
               ))}
             </div>
           </>
