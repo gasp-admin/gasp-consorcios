@@ -648,135 +648,259 @@ function Expensas({ session, consorcioId, unidades, copropietarios, adminPerfil 
 // 4. COBRANZAS (MÓDULO NUEVO)
 // ══════════════════════════════════════════════════════════════════════════════
 function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
-  const [expensas, setExpensas]   = useState([])
-  const [expSel, setExpSel]       = useState(null)
-  const [detalles, setDetalles]   = useState([])
-  const [cobranzas, setCobranzas] = useState([])
-  const [form, setForm]           = useState(null)
-  const [msg, setMsg]             = useState(null)
+  const [expensas, setExpensas]     = useState([])
+  const [expSel, setExpSel]         = useState(null)
+  const [detalles, setDetalles]     = useState([])
+  const [cobranzas, setCobranzas]   = useState([])
+  const [consorcio, setConsorcio]   = useState(null)
+  const [form, setForm]             = useState(null)
+  const [tabMora, setTabMora]       = useState(false)
+  const [previewMora, setPreviewMora] = useState([])
+  const [calculandoMora, setCalculandoMora] = useState(false)
+  const [aplicandoMora, setAplicandoMora]   = useState(false)
+  const [msg, setMsg]               = useState(null)
 
   async function cargarExpensas() {
-    const { data } = await supabase.from('con_expensas').select('*')
-      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
-      .order('periodo', { ascending:false })
-    setExpensas(data||[])
-    if (data?.length>0) seleccionarExpensa(data[0])
-  }
-  async function seleccionarExpensa(exp) {
-    setExpSel(exp)
-    const [d,c]=await Promise.all([
-      supabase.from('con_expensas_detalle').select('*').eq('expensa_id',exp.id).order('created_at'),
-      supabase.from('con_cobranzas').select('*').eq('expensa_id',exp.id).order('fecha',{ascending:false})
+    const [expRes, conRes] = await Promise.all([
+      supabase.from('con_expensas').select('*')
+        .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
+        .order('periodo', { ascending: false }),
+      supabase.from('con_consorcios').select('*').eq('id', consorcioId).single()
     ])
-    setDetalles(d.data||[]); setCobranzas(c.data||[])
+    setExpensas(expRes.data || [])
+    setConsorcio(conRes.data || null)
+    if (expRes.data?.length > 0) seleccionarExpensa(expRes.data[0])
   }
+
+  async function seleccionarExpensa(exp) {
+    setExpSel(exp); setPreviewMora([]); setTabMora(false)
+    const [d, c] = await Promise.all([
+      supabase.from('con_expensas_detalle').select('*').eq('expensa_id', exp.id).order('created_at'),
+      supabase.from('con_cobranzas').select('*').eq('expensa_id', exp.id).order('fecha', { ascending: false })
+    ])
+    setDetalles(d.data || []); setCobranzas(c.data || [])
+  }
+
   async function registrarPago() {
-    if (!form?.unidad_id||!form?.monto||!form?.fecha)
+    if (!form?.unidad_id || !form?.monto || !form?.fecha)
       return setMsg({ tipo:'warn', texto:'Unidad, fecha y monto son obligatorios' })
-    const monto=parseFloat(form.monto)
-    const { error:e1 }=await supabase.from('con_cobranzas').insert([{
-      id:'COB-'+Date.now(), admin_id:session.user.id, consorcio_id:consorcioId, expensa_id:expSel.id,
-      unidad_id:form.unidad_id, fecha:form.fecha, monto, medio_pago:form.medio_pago||'transferencia',
-      recibo_numero:form.recibo_numero||'', observaciones:form.observaciones||''
+    const monto = parseFloat(form.monto)
+    const { error } = await supabase.from('con_cobranzas').insert([{
+      id: 'COB-' + Date.now(),
+      admin_id: session.user.id, consorcio_id: consorcioId, expensa_id: expSel.id,
+      unidad_id: form.unidad_id, fecha: form.fecha, monto,
+      medio_pago: form.medio_pago || 'transferencia',
+      recibo_numero: form.recibo_numero || '',
+      observaciones: form.observaciones || ''
     }])
-    if (e1) return setMsg({ tipo:'error', texto:e1.message })
-    const det=detalles.find(d=>d.unidad_id===form.unidad_id)
+    if (error) return setMsg({ tipo:'error', texto: error.message })
+    const det = detalles.find(d => d.unidad_id === form.unidad_id)
     if (det) {
-      const nuevoPago=(parseFloat(det.pagos_periodo)||0)+monto
+      const nuevoPago = (parseFloat(det.pagos_periodo) || 0) + monto
+      // Si el pago cubre deuda + mora, limpiar mora también
+      const deudaTotal = (parseFloat(det.saldo_anterior)||0) + (parseFloat(det.monto)||0) + (parseFloat(det.interes_mora)||0)
+      const estado = nuevoPago >= deudaTotal ? 'pagada' : 'pendiente'
       await supabase.from('con_expensas_detalle')
-        .update({ pagos_periodo:nuevoPago, estado:'pagada', fecha_pago:form.fecha }).eq('id',det.id)
+        .update({ pagos_periodo: nuevoPago, estado, fecha_pago: estado==='pagada'?form.fecha:null }).eq('id', det.id)
     }
-    setForm(null); setMsg({ tipo:'ok', texto:`✓ Pago de ${fmt(monto)} registrado` }); seleccionarExpensa(expSel)
+    setForm(null)
+    setMsg({ tipo:'ok', texto: `✓ Pago de ${fmt(monto)} registrado` })
+    seleccionarExpensa(expSel)
   }
+
   async function eliminarCobranza(cob) {
     if (!confirm('¿Eliminar este pago?')) return
-    await supabase.from('con_cobranzas').delete().eq('id',cob.id)
-    const det=detalles.find(d=>d.unidad_id===cob.unidad_id)
+    await supabase.from('con_cobranzas').delete().eq('id', cob.id)
+    const det = detalles.find(d => d.unidad_id === cob.unidad_id)
     if (det) {
-      const nuevoPago=Math.max(0,(parseFloat(det.pagos_periodo)||0)-parseFloat(cob.monto))
+      const nuevoPago = Math.max(0, (parseFloat(det.pagos_periodo)||0) - parseFloat(cob.monto))
       await supabase.from('con_expensas_detalle')
-        .update({ pagos_periodo:nuevoPago, estado:nuevoPago>0?'pagada':'pendiente' }).eq('id',det.id)
+        .update({ pagos_periodo: nuevoPago, estado: nuevoPago > 0 ? 'pagada' : 'pendiente' }).eq('id', det.id)
     }
     seleccionarExpensa(expSel)
   }
+
+  // ── CÁLCULO DE MORA ─────────────────────────────────────────
+  async function previsualizarMora() {
+    if (!expSel) return
+    setCalculandoMora(true); setTabMora(true)
+    try {
+      // Llamar a la función PostgreSQL
+      const { data, error } = await supabase.rpc('calcular_mora_expensa', { p_expensa_id: expSel.id })
+      if (error) throw error
+      // Enriquecer con datos de UF
+      const enriquecido = (data || []).map(row => {
+        const u  = unidades.find(x => x.id === row.unidad_id) || {}
+        const cp = copropietarios.find(c => c.id === u.propietario_id) || {}
+        return { ...row, numero_uf: u.numero || row.unidad_id, propietario: cp.apellido_nombre || '—' }
+      })
+      setPreviewMora(enriquecido)
+      if (enriquecido.length === 0) setMsg({ tipo:'info', texto:'No hay unidades con deuda vencida para calcular mora.' })
+    } catch (e) {
+      setMsg({ tipo:'error', texto: 'Error calculando mora: ' + e.message })
+    }
+    setCalculandoMora(false)
+  }
+
+  async function aplicarMora() {
+    if (previewMora.length === 0) return
+    if (!confirm(`¿Aplicar interés por mora a ${previewMora.length} unidad/es? Esta acción actualizará los saldos.`)) return
+    setAplicandoMora(true)
+    let ok = 0
+    for (const row of previewMora) {
+      if (parseFloat(row.monto_interes) <= 0) continue
+      // Actualizar interes_mora en detalle
+      const { error: e1 } = await supabase.from('con_expensas_detalle')
+        .update({ interes_mora: row.nueva_mora_acum })
+        .eq('expensa_id', expSel.id)
+        .eq('unidad_id', row.unidad_id)
+      if (e1) { console.error(e1); continue }
+      // Registrar en log
+      await supabase.from('con_mora_log').insert([{
+        id: `MORA-${expSel.id}-${row.unidad_id}-${Date.now()}`,
+        admin_id: session.user.id, consorcio_id: consorcioId,
+        expensa_id: expSel.id, unidad_id: row.unidad_id,
+        periodo: expSel.periodo,
+        deuda_base: row.deuda_base, porcentaje: row.porcentaje_mora,
+        monto_interes: row.monto_interes, dias_mora: row.dias_mora,
+        fecha_calculo: new Date().toISOString().split('T')[0]
+      }])
+      ok++
+    }
+    setMsg({ tipo:'ok', texto: `✓ Mora aplicada a ${ok} unidad/es correctamente` })
+    setPreviewMora([]); setTabMora(false)
+    seleccionarExpensa(expSel)
+    setAplicandoMora(false)
+  }
+
   async function cerrarPeriodo() {
-    if (!expSel||!confirm(`¿Cerrar ${periodoLabel(expSel.periodo)}? Se trasladarán los saldos pendientes.`)) return
-    await supabase.from('con_expensas').update({ estado:'cerrada' }).eq('id',expSel.id)
-    const siguiente=expensas.find(e=>e.periodo>expSel.periodo)
+    if (!expSel || !confirm(`¿Cerrar ${periodoLabel(expSel.periodo)}? Se trasladarán los saldos pendientes al período siguiente.`)) return
+    await supabase.from('con_expensas').update({ estado: 'cerrada' }).eq('id', expSel.id)
+    const siguiente = expensas.find(e => e.periodo > expSel.periodo)
     if (siguiente) {
       for (const det of detalles) {
-        const salAnt=(parseFloat(det.saldo_anterior)||0)+(parseFloat(det.monto)||0)-(parseFloat(det.pagos_periodo)||0)
-        if (salAnt!==0) {
-          const {data:detSig}=await supabase.from('con_expensas_detalle').select('id').eq('expensa_id',siguiente.id).eq('unidad_id',det.unidad_id).single()
-          if (detSig) await supabase.from('con_expensas_detalle').update({saldo_anterior:salAnt}).eq('id',detSig.id)
+        const salAnt = (parseFloat(det.saldo_anterior)||0) + (parseFloat(det.monto)||0)
+          + (parseFloat(det.interes_mora)||0) - (parseFloat(det.pagos_periodo)||0)
+        if (salAnt > 0) {
+          const { data: detSig } = await supabase.from('con_expensas_detalle')
+            .select('id').eq('expensa_id', siguiente.id).eq('unidad_id', det.unidad_id).single()
+          if (detSig) await supabase.from('con_expensas_detalle').update({ saldo_anterior: salAnt }).eq('id', detSig.id)
         }
       }
-      setMsg({ tipo:'ok', texto:`✓ Período cerrado. Saldos trasladados a ${periodoLabel(siguiente.periodo)}` })
-    } else setMsg({ tipo:'ok', texto:'✓ Período cerrado.' })
+      setMsg({ tipo:'ok', texto: `✓ Período cerrado. Saldos trasladados a ${periodoLabel(siguiente.periodo)}` })
+    } else {
+      setMsg({ tipo:'ok', texto: '✓ Período cerrado.' })
+    }
     cargarExpensas()
   }
-  useEffect(()=>{ if (consorcioId) cargarExpensas() },[consorcioId])
 
-  const MEDIOS=['transferencia','efectivo','debito','cheque','otro']
-  const totalCobrado=cobranzas.reduce((a,c)=>a+parseFloat(c.monto||0),0)
-  const totalPendiente=detalles.filter(d=>d.estado!=='pagada').reduce((a,d)=>a+parseFloat(d.monto||0),0)
+  useEffect(() => { if (consorcioId) cargarExpensas() }, [consorcioId])
+
+  const MEDIOS = ['transferencia','efectivo','debito','cheque','otro']
+  const totalCobrado   = cobranzas.reduce((a,c) => a + parseFloat(c.monto||0), 0)
+  const totalPendiente = detalles.filter(d => d.estado !== 'pagada').reduce((a,d) => {
+    const saldo = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)
+    return a + Math.max(0, saldo)
+  }, 0)
+  const totalMora = detalles.reduce((a,d) => a + (parseFloat(d.interes_mora)||0), 0)
 
   return (
     <div>
+      {/* Header */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
         <div>
           <div style={{ fontWeight:700, fontSize:15 }}>💳 Cobranzas</div>
-          <div style={{ fontSize:12, color:GR }}>Registro de pagos por período</div>
+          <div style={{ fontSize:12, color:GR }}>
+            Registro de pagos · Interés mora: {consorcio?.interes_mora || 0}% mensual
+          </div>
         </div>
         {expSel && (
-          <div style={{ display:'flex', gap:8 }}>
-            <Btn small color={VD} onClick={()=>setForm({fecha:new Date().toISOString().split('T')[0],medio_pago:'transferencia'})}>+ Registrar pago</Btn>
-            {expSel.estado!=='cerrada' && <Btn small color={GR} onClick={cerrarPeriodo}>🔒 Cerrar período</Btn>}
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            <Btn small color={VD}
+              onClick={() => setForm({ fecha: new Date().toISOString().split('T')[0], medio_pago:'transferencia' })}>
+              + Registrar pago
+            </Btn>
+            <Btn small color={AM} onClick={previsualizarMora}>
+              {calculandoMora ? '⏳ Calculando...' : '📐 Calcular mora'}
+            </Btn>
+            {expSel.estado !== 'cerrada' && (
+              <Btn small color={GR} onClick={cerrarPeriodo}>🔒 Cerrar período</Btn>
+            )}
           </div>
         )}
       </div>
+
       <Msg data={msg} />
 
-      {/* Selector período */}
+      {/* Selector de período */}
       <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
-        {expensas.map(e=>{
-          const activo=expSel?.id===e.id
-          const ec=e.estado==='cerrada'?{c:GR,bg:'#f3f4f6'}:e.estado==='cobrada'?{c:VD,bg:'#dcfce7'}:{c:AM,bg:'#fef9c3'}
+        {expensas.map(e => {
+          const activo = expSel?.id === e.id
+          const ec = e.estado==='cerrada'?{c:GR,bg:'#f3f4f6'}:e.estado==='cobrada'?{c:VD,bg:'#dcfce7'}:{c:AM,bg:'#fef9c3'}
           return (
-            <button key={e.id} onClick={()=>seleccionarExpensa(e)}
-              style={{ padding:'6px 14px', borderRadius:8, border:'none', cursor:'pointer', fontSize:13, background:activo?AZ:'#f3f4f6', color:activo?'#fff':'#374151', fontWeight:activo?700:400 }}>
+            <button key={e.id} onClick={() => seleccionarExpensa(e)}
+              style={{ padding:'6px 14px', borderRadius:8, border:'none', cursor:'pointer', fontSize:13,
+                background:activo?AZ:'#f3f4f6', color:activo?'#fff':'#374151', fontWeight:activo?700:400 }}>
               {periodoLabel(e.periodo)}
-              <span style={{ marginLeft:6, fontSize:10, padding:'1px 6px', borderRadius:8, background:activo?'rgba(255,255,255,0.2)':ec.bg, color:activo?'#fff':ec.c, fontWeight:700 }}>{e.estado}</span>
+              <span style={{ marginLeft:6, fontSize:10, padding:'1px 6px', borderRadius:8,
+                background:activo?'rgba(255,255,255,0.2)':ec.bg, color:activo?'#fff':ec.c, fontWeight:700 }}>
+                {e.estado}
+              </span>
             </button>
           )
         })}
-        {expensas.length===0 && <div style={{ color:GR, fontSize:13 }}>No hay períodos de expensas. Ir a Expensas para crear uno.</div>}
+        {expensas.length === 0 && <div style={{ color:GR, fontSize:13 }}>No hay períodos de expensas. Ir a Expensas para crear uno.</div>}
       </div>
 
       {expSel && (
         <>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:16 }}>
-            {[{l:'Total expensa',v:fmt(expSel.total_expensa),c:AZ},{l:'Cobrado',v:fmt(totalCobrado),c:VD},{l:'Pendiente',v:fmt(totalPendiente),c:RJ}].map((k,i)=>(
+          {/* KPIs */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:16 }}>
+            {[
+              { l:'Total expensa', v:fmt(expSel.total_expensa), c:AZ },
+              { l:'Cobrado', v:fmt(totalCobrado), c:VD },
+              { l:'Pendiente', v:fmt(totalPendiente), c:RJ },
+              { l:'Mora acumulada', v:fmt(totalMora), c:AM },
+            ].map((k,i) => (
               <Card key={i} style={{ textAlign:'center' }}>
-                <div style={{ fontSize:20, fontWeight:800, color:k.c }}>{k.v}</div>
+                <div style={{ fontSize:18, fontWeight:800, color:k.c }}>{k.v}</div>
                 <div style={{ fontSize:11, color:GR, marginTop:4 }}>{k.l}</div>
               </Card>
             ))}
           </div>
 
-          {form && (
+          {/* Tabs: Estado UF | Mora */}
+          <div style={{ display:'flex', gap:4, marginBottom:14 }}>
+            {[
+              { id:false, label:'🏢 Estado por unidad' },
+              { id:true,  label:'📐 Interés por mora' },
+            ].map(t => (
+              <button key={String(t.id)} onClick={() => setTabMora(t.id)}
+                style={{ padding:'7px 18px', borderRadius:8, border:'none', cursor:'pointer', fontSize:13,
+                  background:tabMora===t.id?AZ:'#f3f4f6', color:tabMora===t.id?'#fff':'#555',
+                  fontWeight:tabMora===t.id?'bold':'normal' }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Formulario nuevo pago */}
+          {form && !tabMora && (
             <Card style={{ marginBottom:14, border:`1px solid ${VD}` }}>
               <div style={{ fontWeight:700, color:VD, marginBottom:12 }}>Registrar pago</div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:10 }}>
                 <div>
                   <div style={{ fontSize:12, color:'#6b7280', marginBottom:4, fontWeight:500 }}>Unidad <span style={{color:RJ}}>*</span></div>
-                  <select value={form.unidad_id||''} onChange={e=>setForm(x=>({...x,unidad_id:e.target.value}))}
+                  <select value={form.unidad_id||''} onChange={e => setForm(x=>({...x,unidad_id:e.target.value}))}
                     style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
                     <option value=''>— Seleccionar UF —</option>
-                    {detalles.map(d=>{
-                      const u=unidades.find(x=>x.id===d.unidad_id)
-                      const cp=u?copropietarios.find(c=>c.id===u.propietario_id):null
-                      return <option key={d.unidad_id} value={d.unidad_id}>{u?.numero||d.unidad_id} — {cp?.apellido_nombre||'Sin propietario'} ({fmt(d.monto)})</option>
+                    {detalles.map(d => {
+                      const u  = unidades.find(x=>x.id===d.unidad_id)
+                      const cp = u ? copropietarios.find(c=>c.id===u.propietario_id) : null
+                      const saldo = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)
+                      return <option key={d.unidad_id} value={d.unidad_id}>
+                        {u?.numero||d.unidad_id} — {cp?.apellido_nombre||'Sin propietario'} (Saldo: {fmt(Math.max(0,saldo))})
+                      </option>
                     })}
                   </select>
                 </div>
@@ -788,88 +912,209 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios }) {
               </div>
               <div style={{ display:'flex', gap:8 }}>
                 <Btn small color={VD} onClick={registrarPago}>💾 Guardar pago</Btn>
-                <BtnSec small onClick={()=>setForm(null)}>Cancelar</BtnSec>
+                <BtnSec small onClick={() => setForm(null)}>Cancelar</BtnSec>
               </div>
             </Card>
           )}
 
-          <div style={{ fontWeight:600, fontSize:13, marginBottom:8 }}>Estado por unidad — {periodoLabel(expSel.periodo)}</div>
-          <div style={{ overflowX:'auto', marginBottom:20 }}>
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-              <thead>
-                <tr style={{ background:'#f3f4f6' }}>
-                  {['UF','Copropietario','Saldo ant.','Expensa','Pagado','Saldo','Estado',''].map((h,i)=>(
-                    <th key={i} style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:'bold', color:GR, textTransform:'uppercase', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {detalles.map(d=>{
-                  const u=unidades.find(x=>x.id===d.unidad_id)
-                  const cp=u?copropietarios.find(c=>c.id===u.propietario_id):null
-                  const pagado=parseFloat(d.pagos_periodo)||0
-                  const salAnt=parseFloat(d.saldo_anterior)||0
-                  const monto=parseFloat(d.monto)||0
-                  const saldo=salAnt+monto-pagado
-                  const ec=d.estado==='pagada'?{c:VD,bg:'#dcfce7'}:saldo>0?{c:RJ,bg:'#fee2e2'}:{c:AM,bg:'#fef9c3'}
-                  return (
-                    <tr key={d.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
-                      <td style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>{u?.numero||d.unidad_id}</td>
-                      <td style={{ padding:'8px 10px' }}>{cp?.apellido_nombre||'—'}</td>
-                      <td style={{ padding:'8px 10px', color:salAnt>0?RJ:GR }}>{salAnt>0?fmt(salAnt):'—'}</td>
-                      <td style={{ padding:'8px 10px', fontWeight:600 }}>{fmt(monto)}</td>
-                      <td style={{ padding:'8px 10px', color:VD, fontWeight:600 }}>{pagado>0?fmt(pagado):'—'}</td>
-                      <td style={{ padding:'8px 10px', fontWeight:700, color:saldo>0?RJ:VD }}>{fmt(saldo)}</td>
-                      <td style={{ padding:'8px 10px' }}><Badge text={d.estado} color={ec.c} bg={ec.bg} /></td>
-                      <td style={{ padding:'8px 10px' }}>
-                        {d.estado!=='pagada' && <Btn small color={VD} onClick={()=>setForm({fecha:new Date().toISOString().split('T')[0],medio_pago:'transferencia',unidad_id:d.unidad_id,monto:monto})}>💳 Cobrar</Btn>}
-                        {d.estado==='pagada' && <Badge text="✓ Cobrado" color={VD} bg='#dcfce7' />}
-                      </td>
-                    </tr>
-                  )
-                })}
-                {detalles.length===0 && <tr><td colSpan={8} style={{ padding:20, textAlign:'center', color:GR }}>Sin distribución. Ir a Expensas → Calcular y distribuir.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-
-          {cobranzas.length>0 && (
+          {/* ── TAB: ESTADO POR UNIDAD ─────────────────────── */}
+          {!tabMora && (
             <>
-              <div style={{ fontWeight:600, fontSize:13, marginBottom:8 }}>Pagos registrados — {periodoLabel(expSel.periodo)}</div>
-              <div style={{ overflowX:'auto' }}>
+              <div style={{ fontWeight:600, fontSize:13, marginBottom:8 }}>
+                Estado por unidad — {periodoLabel(expSel.periodo)}
+              </div>
+              <div style={{ overflowX:'auto', marginBottom:20 }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
                   <thead>
                     <tr style={{ background:'#f3f4f6' }}>
-                      {['Fecha','UF','Copropietario','Medio','Monto','Recibo',''].map((h,i)=>(
+                      {['UF','Copropietario','Saldo ant.','Expensa','Mora','Pagado','Saldo total','Estado',''].map((h,i) => (
                         <th key={i} style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:'bold', color:GR, textTransform:'uppercase', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {cobranzas.map(c=>{
-                      const u=unidades.find(x=>x.id===c.unidad_id)
-                      const cp=u?copropietarios.find(x=>x.id===u.propietario_id):null
+                    {detalles.map(d => {
+                      const u    = unidades.find(x=>x.id===d.unidad_id)
+                      const cp   = u ? copropietarios.find(c=>c.id===u.propietario_id) : null
+                      const pagado  = parseFloat(d.pagos_periodo) || 0
+                      const salAnt  = parseFloat(d.saldo_anterior) || 0
+                      const monto   = parseFloat(d.monto) || 0
+                      const mora    = parseFloat(d.interes_mora) || 0
+                      const saldo   = Math.max(0, salAnt + monto + mora - pagado)
+                      const ec = d.estado==='pagada'?{c:VD,bg:'#dcfce7'}:saldo>0?{c:RJ,bg:'#fee2e2'}:{c:AM,bg:'#fef9c3'}
                       return (
-                        <tr key={c.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
-                          <td style={{ padding:'8px 10px' }}>{fmtD(c.fecha)}</td>
-                          <td style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>{u?.numero||c.unidad_id}</td>
+                        <tr key={d.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                          <td style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>{u?.numero||d.unidad_id}</td>
                           <td style={{ padding:'8px 10px' }}>{cp?.apellido_nombre||'—'}</td>
-                          <td style={{ padding:'8px 10px', textTransform:'capitalize' }}>{c.medio_pago||'—'}</td>
-                          <td style={{ padding:'8px 10px', fontWeight:700, color:VD }}>{fmt(c.monto)}</td>
-                          <td style={{ padding:'8px 10px', color:GR }}>{c.recibo_numero||'—'}</td>
-                          <td style={{ padding:'8px 10px' }}><Btn small onClick={()=>eliminarCobranza(c)} style={{ background:'#fee2e2', color:RJ }}>✕</Btn></td>
+                          <td style={{ padding:'8px 10px', color:salAnt>0?RJ:GR }}>{salAnt>0?fmt(salAnt):'—'}</td>
+                          <td style={{ padding:'8px 10px', fontWeight:600 }}>{fmt(monto)}</td>
+                          <td style={{ padding:'8px 10px', color:mora>0?AM:GR, fontWeight:mora>0?600:400 }}>{mora>0?fmt(mora):'—'}</td>
+                          <td style={{ padding:'8px 10px', color:VD, fontWeight:600 }}>{pagado>0?fmt(pagado):'—'}</td>
+                          <td style={{ padding:'8px 10px', fontWeight:700, color:saldo>0?RJ:VD }}>{fmt(saldo)}</td>
+                          <td style={{ padding:'8px 10px' }}><Badge text={d.estado} color={ec.c} bg={ec.bg} /></td>
+                          <td style={{ padding:'8px 10px' }}>
+                            {d.estado !== 'pagada' && (
+                              <Btn small color={VD} onClick={() => setForm({
+                                fecha: new Date().toISOString().split('T')[0],
+                                medio_pago: 'transferencia',
+                                unidad_id: d.unidad_id,
+                                monto: saldo  // pre-carga el saldo total
+                              })}>💳 Cobrar</Btn>
+                            )}
+                            {d.estado === 'pagada' && <Badge text="✓ Cobrado" color={VD} bg='#dcfce7' />}
+                          </td>
                         </tr>
                       )
                     })}
-                    <tr style={{ background:'#f3f4f6', fontWeight:700 }}>
-                      <td colSpan={4} style={{ padding:'8px 10px' }}>Total cobrado</td>
-                      <td style={{ padding:'8px 10px', color:VD }}>{fmt(totalCobrado)}</td>
-                      <td colSpan={2} />
-                    </tr>
+                    {detalles.length === 0 && (
+                      <tr><td colSpan={9} style={{ padding:20, textAlign:'center', color:GR }}>
+                        Sin distribución. Ir a Expensas → Calcular y distribuir.
+                      </td></tr>
+                    )}
                   </tbody>
                 </table>
               </div>
+
+              {/* Historial de pagos */}
+              {cobranzas.length > 0 && (
+                <>
+                  <div style={{ fontWeight:600, fontSize:13, marginBottom:8 }}>
+                    Pagos registrados — {periodoLabel(expSel.periodo)}
+                  </div>
+                  <div style={{ overflowX:'auto' }}>
+                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                      <thead>
+                        <tr style={{ background:'#f3f4f6' }}>
+                          {['Fecha','UF','Copropietario','Medio','Monto','Recibo',''].map((h,i) => (
+                            <th key={i} style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:'bold', color:GR, textTransform:'uppercase', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cobranzas.map(c => {
+                          const u  = unidades.find(x=>x.id===c.unidad_id)
+                          const cp = u ? copropietarios.find(x=>x.id===u.propietario_id) : null
+                          return (
+                            <tr key={c.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                              <td style={{ padding:'8px 10px' }}>{fmtD(c.fecha)}</td>
+                              <td style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>{u?.numero||c.unidad_id}</td>
+                              <td style={{ padding:'8px 10px' }}>{cp?.apellido_nombre||'—'}</td>
+                              <td style={{ padding:'8px 10px', textTransform:'capitalize' }}>{c.medio_pago||'—'}</td>
+                              <td style={{ padding:'8px 10px', fontWeight:700, color:VD }}>{fmt(c.monto)}</td>
+                              <td style={{ padding:'8px 10px', color:GR }}>{c.recibo_numero||'—'}</td>
+                              <td style={{ padding:'8px 10px' }}>
+                                <Btn small onClick={() => eliminarCobranza(c)} style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                        <tr style={{ background:'#f3f4f6', fontWeight:700 }}>
+                          <td colSpan={4} style={{ padding:'8px 10px' }}>Total cobrado</td>
+                          <td style={{ padding:'8px 10px', color:VD }}>{fmt(totalCobrado)}</td>
+                          <td colSpan={2} />
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </>
+          )}
+
+          {/* ── TAB: INTERÉS POR MORA ─────────────────────── */}
+          {tabMora && (
+            <div>
+              {/* Info de configuración */}
+              <Card style={{ marginBottom:14, background:'#fef9c3', border:'1px solid #f59e0b' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <div style={{ fontSize:13, color:'#78350f' }}>
+                    <strong>Tasa configurada:</strong> {consorcio?.interes_mora || 0}% mensual · 
+                    Vencimiento: {fmtD(expSel.fecha_vencimiento)} · 
+                    Días desde vencimiento: {expSel.fecha_vencimiento
+                      ? Math.max(0, Math.floor((new Date() - new Date(expSel.fecha_vencimiento + 'T00:00:00')) / 86400000))
+                      : '—'} días
+                  </div>
+                  <Btn small color={AM} onClick={previsualizarMora}>
+                    {calculandoMora ? '⏳ Calculando...' : '🔄 Recalcular'}
+                  </Btn>
+                </div>
+              </Card>
+
+              {calculandoMora && (
+                <div style={{ textAlign:'center', color:GR, padding:30 }}>Calculando intereses...</div>
+              )}
+
+              {!calculandoMora && previewMora.length > 0 && (
+                <>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                    <div style={{ fontWeight:600, fontSize:13 }}>
+                      Previsualización — {previewMora.length} unidad/es con mora
+                    </div>
+                    <Btn color={RJ} onClick={aplicarMora} disabled={aplicandoMora}>
+                      {aplicandoMora ? '⏳ Aplicando...' : '⚡ Aplicar mora a todas'}
+                    </Btn>
+                  </div>
+                  <div style={{ overflowX:'auto' }}>
+                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                      <thead>
+                        <tr style={{ background:'#fef2f2' }}>
+                          {['UF','Propietario','Deuda base','Días mora','Tasa %','Interés nuevo','Mora acumulada','Acción'].map((h,i) => (
+                            <th key={i} style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:'bold', color:RJ, textTransform:'uppercase', borderBottom:'1px solid #fecaca' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewMora.map((row, i) => (
+                          <tr key={i} style={{ borderBottom:'1px solid #fff1f1' }}>
+                            <td style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>{row.numero_uf}</td>
+                            <td style={{ padding:'8px 10px' }}>{row.propietario}</td>
+                            <td style={{ padding:'8px 10px', fontWeight:600, color:RJ }}>{fmt(row.deuda_base)}</td>
+                            <td style={{ padding:'8px 10px', textAlign:'center' }}>{row.dias_mora}</td>
+                            <td style={{ padding:'8px 10px', textAlign:'center' }}>{row.porcentaje_mora}%</td>
+                            <td style={{ padding:'8px 10px', fontWeight:700, color:AM }}>{fmt(row.monto_interes)}</td>
+                            <td style={{ padding:'8px 10px', fontWeight:700, color:RJ }}>{fmt(row.nueva_mora_acum)}</td>
+                            <td style={{ padding:'8px 10px' }}>
+                              <Btn small color={RJ} onClick={async () => {
+                                // Aplicar mora solo a esta UF
+                                if (parseFloat(row.monto_interes) <= 0) return
+                                await supabase.from('con_expensas_detalle')
+                                  .update({ interes_mora: row.nueva_mora_acum })
+                                  .eq('expensa_id', expSel.id).eq('unidad_id', row.unidad_id)
+                                await supabase.from('con_mora_log').insert([{
+                                  id: `MORA-${expSel.id}-${row.unidad_id}-${Date.now()}`,
+                                  admin_id: session.user.id, consorcio_id: consorcioId,
+                                  expensa_id: expSel.id, unidad_id: row.unidad_id,
+                                  periodo: expSel.periodo, deuda_base: row.deuda_base,
+                                  porcentaje: row.porcentaje_mora, monto_interes: row.monto_interes,
+                                  dias_mora: row.dias_mora, fecha_calculo: new Date().toISOString().split('T')[0]
+                                }])
+                                setMsg({ tipo:'ok', texto: `✓ Mora aplicada a UF ${row.numero_uf}: ${fmt(row.monto_interes)}` })
+                                await seleccionarExpensa(expSel)
+                                await previsualizarMora()
+                              }}>Aplicar</Btn>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ marginTop:12, padding:'10px 14px', background:'#fef2f2', borderRadius:8, fontSize:12, color:'#7f1d1d' }}>
+                    <strong>Total mora a aplicar:</strong> {fmt(previewMora.reduce((a,r)=>a+parseFloat(r.monto_interes||0),0))} · 
+                    <strong>Total mora acumulada:</strong> {fmt(previewMora.reduce((a,r)=>a+parseFloat(r.nueva_mora_acum||0),0))}
+                  </div>
+                </>
+              )}
+
+              {!calculandoMora && previewMora.length === 0 && (
+                <Card style={{ textAlign:'center', color:GR, padding:32 }}>
+                  <div style={{ fontSize:32, marginBottom:8 }}>📐</div>
+                  <div style={{ marginBottom:8 }}>Hacé clic en <strong>"Calcular mora"</strong> para ver el interés correspondiente a las unidades con deuda vencida.</div>
+                  <div style={{ fontSize:12, color:AM }}>
+                    Se usa la tasa del consorcio ({consorcio?.interes_mora || 0}% mensual) y los días transcurridos desde el vencimiento.
+                  </div>
+                </Card>
+              )}
+            </div>
           )}
         </>
       )}
