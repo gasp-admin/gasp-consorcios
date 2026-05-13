@@ -1908,6 +1908,629 @@ function ImportarExcel({ session, consorcioId, onDone }) {
   )
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CUENTA CORRIENTE POR UNIDAD
+// ══════════════════════════════════════════════════════════════════════════════
+function CtaCorriente({ session, consorcioId, unidades, copropietarios }) {
+  const [ufSel, setUfSel]       = useState('')
+  const [movs, setMovs]         = useState([])
+  const [cargando, setCargando] = useState(false)
+  const [saldo, setSaldo]       = useState(0)
+
+  async function cargarMovimientos(uid) {
+    if (!uid) return
+    setCargando(true)
+    const [{ data: dets }, { data: cobs }, { data: movUnit }] = await Promise.all([
+      supabase.from('con_expensas_detalle').select('*, con_expensas(periodo,fecha_vencimiento,tipo)')
+        .eq('unidad_id', uid).order('created_at', { ascending: true }),
+      supabase.from('con_cobranzas').select('*, con_expensas(periodo)')
+        .eq('unidad_id', uid).eq('estado', 'vigente').order('fecha', { ascending: true }),
+      supabase.from('con_movimientos_unidad').select('*')
+        .eq('unidad_id', uid).eq('estado', 'vigente').order('fecha', { ascending: true }),
+    ])
+
+    // Construir líneas de cuenta corriente
+    const lineas = []
+
+    // Expensas (débitos automáticos)
+    for (const d of (dets||[])) {
+      const periodo = d.con_expensas?.periodo || ''
+      const [y,m] = (periodo||'').split('-')
+      const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+      const perLabel = m ? `${meses[parseInt(m)-1]} ${y}` : periodo
+      if (parseFloat(d.saldo_anterior)||0 > 0) {
+        lineas.push({ fecha: d.created_at?.split('T')[0], tipo:'debito',
+          concepto: `Saldo anterior — ${perLabel}`, monto: parseFloat(d.saldo_anterior)||0,
+          origen: 'saldo_ant' })
+      }
+      lineas.push({ fecha: d.con_expensas?.fecha_vencimiento || d.created_at?.split('T')[0],
+        tipo:'debito', concepto: `Expensa ${perLabel} (${d.con_expensas?.tipo||''})`,
+        monto: parseFloat(d.monto)||0, origen: 'expensa', vto: d.con_expensas?.fecha_vencimiento })
+      if (parseFloat(d.interes_mora)||0 > 0) {
+        lineas.push({ fecha: d.created_at?.split('T')[0], tipo:'debito',
+          concepto: `Interés mora — ${perLabel}`, monto: parseFloat(d.interes_mora)||0,
+          origen: 'mora' })
+      }
+    }
+
+    // Notas de débito/crédito manuales
+    for (const m of (movUnit||[])) {
+      lineas.push({ fecha: m.fecha, tipo: m.tipo,
+        concepto: m.concepto, monto: parseFloat(m.monto)||0,
+        nro: m.numero_comprobante, origen: 'manual' })
+    }
+
+    // Cobranzas (créditos)
+    for (const c of (cobs||[])) {
+      const [y,m2] = (c.con_expensas?.periodo||'').split('-')
+      const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+      const perLabel = m2 ? `${meses[parseInt(m2)-1]} ${y}` : ''
+      lineas.push({ fecha: c.fecha, tipo:'credito',
+        concepto: `Pago expensas ${perLabel}${c.medio_pago?' ('+c.medio_pago+')':''}`,
+        monto: parseFloat(c.monto)||0, nro: c.recibo_numero, origen: 'cobranza' })
+    }
+
+    // Ordenar por fecha
+    lineas.sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
+
+    // Calcular saldo acumulado
+    let acc = 0
+    const conSaldo = lineas.map(l => {
+      if (l.tipo === 'debito')  acc += l.monto
+      if (l.tipo === 'credito') acc -= l.monto
+      return { ...l, saldo_acum: acc }
+    })
+
+    setMovs(conSaldo)
+    setSaldo(acc)
+    setCargando(false)
+  }
+
+  useEffect(() => { if (ufSel) cargarMovimientos(ufSel) }, [ufSel])
+
+  const uf  = unidades.find(u => u.id === ufSel)
+  const cp  = copropietarios.find(c => c.id === uf?.propietario_id)
+  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })
+
+  return (
+    <div>
+      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>📋 Cuenta corriente por unidad</div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Historial completo de débitos, créditos y saldo por unidad funcional
+      </div>
+
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, alignItems:'end' }}>
+          <Sel label="Unidad funcional" value={ufSel} onChange={setUfSel}
+            opts={[{ v:'', l:'— Seleccione UF —' },
+              ...unidades.map(u => {
+                const cp2 = copropietarios.find(c => c.id === u.propietario_id)
+                return { v: u.id, l: `${u.numero} — ${cp2?.apellido_nombre||'Sin propietario'}` }
+              })
+            ]} />
+          {uf && (
+            <div style={{ padding:'10px 14px', background:'#f0f4ff', borderRadius:8, fontSize:13 }}>
+              <strong>{cp?.apellido_nombre||'—'}</strong>
+              <div style={{ fontSize:11, color:GR }}>
+                {uf.tipo} {uf.piso ? `· Piso ${uf.piso}` : ''}
+                {uf.porcentaje_fiscal ? ` · Coef: ${Number(uf.porcentaje_fiscal).toFixed(4)}%` : ''}
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {ufSel && (
+        <>
+          {/* KPI saldo */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
+            <div style={{ background: saldo > 0 ? '#fee2e2' : '#dcfce7', borderRadius:10,
+              padding:'14px 18px', textAlign:'center' }}>
+              <div style={{ fontSize:11, color: saldo > 0 ? RJ : VD, fontWeight:600,
+                textTransform:'uppercase', marginBottom:4 }}>Saldo actual</div>
+              <div style={{ fontSize:22, fontWeight:800, color: saldo > 0 ? RJ : VD }}>
+                {saldo > 0 ? fmt(saldo) : '✓ Al día'}
+              </div>
+            </div>
+            <div style={{ background:'#fff', borderRadius:10, padding:'14px 18px',
+              textAlign:'center', boxShadow:'0 1px 6px #0001' }}>
+              <div style={{ fontSize:11, color:GR, fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>
+                Total débitos
+              </div>
+              <div style={{ fontSize:20, fontWeight:700, color:RJ }}>
+                {fmt(movs.filter(m=>m.tipo==='debito').reduce((a,m)=>a+m.monto,0))}
+              </div>
+            </div>
+            <div style={{ background:'#fff', borderRadius:10, padding:'14px 18px',
+              textAlign:'center', boxShadow:'0 1px 6px #0001' }}>
+              <div style={{ fontSize:11, color:GR, fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>
+                Total créditos
+              </div>
+              <div style={{ fontSize:20, fontWeight:700, color:VD }}>
+                {fmt(movs.filter(m=>m.tipo==='credito').reduce((a,m)=>a+m.monto,0))}
+              </div>
+            </div>
+          </div>
+
+          {/* Tabla */}
+          <Card>
+            {cargando ? (
+              <div style={{ textAlign:'center', padding:24, color:GR }}>⏳ Cargando...</div>
+            ) : movs.length === 0 ? (
+              <div style={{ textAlign:'center', padding:24, color:GR }}>Sin movimientos registrados</div>
+            ) : (
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <thead>
+                    <tr style={{ background:'#f3f4f6' }}>
+                      {['Fecha','Concepto','Débito','Crédito','Saldo'].map((h,i) => (
+                        <th key={i} style={{ padding:'7px 10px', textAlign: i>=2?'right':'left',
+                          fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb',
+                          whiteSpace:'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {movs.map((m, i) => (
+                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6',
+                        background: m.origen==='mora' ? '#fff8f0' : 'transparent' }}>
+                        <td style={{ padding:'7px 10px', whiteSpace:'nowrap', color:GR, fontSize:11 }}>
+                          {m.fecha ? new Date(m.fecha+'T00:00:00').toLocaleDateString('es-AR') : '—'}
+                        </td>
+                        <td style={{ padding:'7px 10px' }}>
+                          <div style={{ fontWeight: m.origen==='expensa'?600:400 }}>{m.concepto}</div>
+                          {m.nro && <div style={{ fontSize:10, color:GR }}>N° {m.nro}</div>}
+                        </td>
+                        <td style={{ padding:'7px 10px', textAlign:'right', color:RJ, fontWeight:600 }}>
+                          {m.tipo==='debito' ? fmt(m.monto) : ''}
+                        </td>
+                        <td style={{ padding:'7px 10px', textAlign:'right', color:VD, fontWeight:600 }}>
+                          {m.tipo==='credito' ? fmt(m.monto) : ''}
+                        </td>
+                        <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:700,
+                          color: m.saldo_acum > 0 ? RJ : VD }}>
+                          {fmt(Math.abs(m.saldo_acum))}
+                          {m.saldo_acum < 0 && <span style={{ fontSize:9, marginLeft:2 }}>CR</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ background:'#f0f4ff', borderTop:'2px solid #1A3FA0' }}>
+                      <td colSpan={2} style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>
+                        Saldo final
+                      </td>
+                      <td colSpan={3} style={{ padding:'8px 10px', textAlign:'right',
+                        fontWeight:800, fontSize:15, color: saldo > 0 ? RJ : VD }}>
+                        {saldo > 0 ? `Debe ${fmt(saldo)}` : `A favor ${fmt(Math.abs(saldo))}`}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MOVIMIENTOS POR UNIDAD — Notas de débito y crédito
+// ══════════════════════════════════════════════════════════════════════════════
+function MovimientosUnidad({ session, consorcioId, unidades, copropietarios, expensas }) {
+  const [form, setForm]       = useState(null)
+  const [movs, setMovs]       = useState([])
+  const [filtroUF, setFiltroUF] = useState('')
+  const [msg, setMsg]         = useState(null)
+  const [guardando, setGuardando] = useState(false)
+
+  async function cargar() {
+    const q = supabase.from('con_movimientos_unidad').select('*')
+      .eq('consorcio_id', consorcioId).order('created_at', { ascending: false }).limit(100)
+    if (filtroUF) q.eq('unidad_id', filtroUF)
+    const { data } = await q
+    setMovs(data || [])
+  }
+
+  async function guardar() {
+    if (!form?.unidad_id)  return setMsg({ tipo:'warn', texto:'Seleccioná una unidad' })
+    if (!form?.tipo)        return setMsg({ tipo:'warn', texto:'Seleccioná el tipo' })
+    if (!form?.concepto?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el concepto' })
+    if (!form?.monto || parseFloat(form.monto) <= 0) return setMsg({ tipo:'warn', texto:'Ingresá un monto válido' })
+    if (!form?.fecha)       return setMsg({ tipo:'warn', texto:'Ingresá la fecha' })
+
+    setGuardando(true)
+    const { error } = await supabase.from('con_movimientos_unidad').insert([{
+      id: `MOV-${Date.now()}`,
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      unidad_id: form.unidad_id,
+      expensa_id: form.expensa_id || null,
+      tipo: form.tipo,
+      concepto: form.concepto.trim(),
+      categoria: form.categoria || 'varios',
+      monto: parseFloat(form.monto),
+      fecha: form.fecha,
+      fecha_vencimiento: form.fecha_vencimiento || null,
+      numero_comprobante: form.numero_comprobante || null,
+      notas: form.notas || null,
+      estado: 'vigente',
+    }])
+
+    if (error) {
+      setMsg({ tipo:'error', texto: 'Error: ' + error.message })
+    } else {
+      setMsg({ tipo:'ok', texto: `✓ ${form.tipo === 'debito' ? 'Nota de débito' : 'Nota de crédito'} registrada` })
+      setForm(null)
+      cargar()
+    }
+    setGuardando(false)
+  }
+
+  async function anular(id) {
+    if (!confirm('¿Anular este movimiento?')) return
+    await supabase.from('con_movimientos_unidad')
+      .update({ estado:'anulado', anulado_por: session.user.id })
+      .eq('id', id)
+    cargar()
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtroUF])
+
+  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR')
+  const hoy = new Date().toISOString().split('T')[0]
+
+  const CATEGORIAS = [
+    { v:'ajuste_inicial',  l:'Ajuste inicial / saldo anterior' },
+    { v:'gasto_directo',   l:'Gasto directo a unidad' },
+    { v:'interes',         l:'Quita / ajuste de interés' },
+    { v:'convenio_pago',   l:'Convenio de pago' },
+    { v:'reintegro',       l:'Reintegro de gasto' },
+    { v:'varios',          l:'Varios' },
+  ]
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>↕️ Notas de débito / crédito</div>
+        <div style={{ display:'flex', gap:8 }}>
+          <Btn small color={RJ} onClick={() => setForm({ tipo:'debito',  fecha: hoy })}>+ Débito</Btn>
+          <Btn small color={VD} onClick={() => setForm({ tipo:'credito', fecha: hoy })}>+ Crédito</Btn>
+        </div>
+      </div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Ajustes directos en la cuenta corriente de una unidad funcional
+      </div>
+      <Msg data={msg} />
+
+      {/* Formulario */}
+      {form && (
+        <Card style={{ marginBottom:16, border:`1.5px solid ${form.tipo==='debito'?'#fca5a5':'#86efac'}`,
+          background: form.tipo==='debito' ? '#fff8f8' : '#f0fdf4' }}>
+          <div style={{ fontWeight:700, color: form.tipo==='debito'?RJ:VD, fontSize:13, marginBottom:14 }}>
+            {form.tipo === 'debito' ? '📤 Nueva nota de débito' : '📥 Nueva nota de crédito'}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+            <Sel label="Unidad" value={form.unidad_id||''} onChange={v => setForm(f => ({...f, unidad_id:v}))}
+              opts={[{ v:'', l:'— Seleccione UF —' },
+                ...unidades.map(u => {
+                  const cp2 = copropietarios.find(c => c.id === u.propietario_id)
+                  return { v:u.id, l:`${u.numero} — ${cp2?.apellido_nombre||'Sin prop.'}` }
+                })
+              ]} />
+            <Sel label="Categoría" value={form.categoria||'varios'} onChange={v => setForm(f => ({...f, categoria:v}))}
+              opts={CATEGORIAS} />
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:12, marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Concepto *</div>
+              <input value={form.concepto||''} onChange={e => setForm(f => ({...f, concepto:e.target.value}))}
+                placeholder="Descripción del movimiento"
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
+                  borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Monto *</div>
+              <input type="number" min="0" step="0.01" value={form.monto||''}
+                onChange={e => setForm(f => ({...f, monto:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
+                  borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Fecha *</div>
+              <input type="date" value={form.fecha||''} onChange={e => setForm(f => ({...f, fecha:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
+                  borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:14 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>N° comprobante</div>
+              <input value={form.numero_comprobante||''} placeholder="Opcional"
+                onChange={e => setForm(f => ({...f, numero_comprobante:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
+                  borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Vencimiento</div>
+              <input type="date" value={form.fecha_vencimiento||''}
+                onChange={e => setForm(f => ({...f, fecha_vencimiento:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
+                  borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Período asociado</div>
+              <select value={form.expensa_id||''} onChange={e => setForm(f => ({...f, expensa_id:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
+                  borderRadius:7, fontSize:13, background:'#fff' }}>
+                <option value="">Sin período</option>
+                {expensas.map(e => <option key={e.id} value={e.id}>{e.periodo}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Notas internas</div>
+            <input value={form.notas||''} placeholder="Opcional"
+              onChange={e => setForm(f => ({...f, notas:e.target.value}))}
+              style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
+                borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn onClick={guardar} disabled={guardando}
+              style={{ background: form.tipo==='debito'?RJ:VD, color:'#fff' }}>
+              {guardando ? '⏳' : '✓ Guardar'}
+            </Btn>
+            <BtnSec onClick={() => { setForm(null); setMsg(null) }}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+
+      {/* Filtro */}
+      <Card style={{ marginBottom:12 }}>
+        <div style={{ display:'flex', gap:12, alignItems:'center' }}>
+          <div style={{ flex:1 }}>
+            <Sel label="Filtrar por unidad" value={filtroUF} onChange={setFiltroUF}
+              opts={[{ v:'', l:'Todas las unidades' },
+                ...unidades.map(u => {
+                  const cp2 = copropietarios.find(c => c.id === u.propietario_id)
+                  return { v:u.id, l:`${u.numero} — ${cp2?.apellido_nombre||''}` }
+                })
+              ]} />
+          </div>
+          <div style={{ fontSize:13, color:GR, marginTop:18 }}>
+            {movs.filter(m=>m.estado==='vigente').length} movimientos
+          </div>
+        </div>
+      </Card>
+
+      {/* Listado */}
+      <Card>
+        {movs.length === 0 ? (
+          <div style={{ textAlign:'center', padding:24, color:GR }}>Sin movimientos registrados</div>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead>
+                <tr style={{ background:'#f3f4f6' }}>
+                  {['Fecha','Unidad','Tipo','Concepto','Monto','Estado',''].map((h,i) => (
+                    <th key={i} style={{ padding:'7px 10px', textAlign: i===4?'right':'left',
+                      fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {movs.map(m => {
+                  const uf  = unidades.find(u => u.id === m.unidad_id)
+                  return (
+                    <tr key={m.id} style={{ borderBottom:'1px solid #f3f4f6',
+                      opacity: m.estado==='anulado' ? 0.45 : 1,
+                      background: m.estado==='anulado' ? '#f9fafb' : 'transparent' }}>
+                      <td style={{ padding:'7px 10px', whiteSpace:'nowrap', color:GR, fontSize:11 }}>
+                        {m.fecha ? new Date(m.fecha+'T00:00:00').toLocaleDateString('es-AR') : '—'}
+                      </td>
+                      <td style={{ padding:'7px 10px', fontWeight:600 }}>UF {uf?.numero||'?'}</td>
+                      <td style={{ padding:'7px 10px' }}>
+                        <Badge text={m.tipo==='debito'?'Débito':'Crédito'}
+                          color={m.tipo==='debito'?RJ:VD}
+                          bg={m.tipo==='debito'?'#fee2e2':'#dcfce7'} />
+                      </td>
+                      <td style={{ padding:'7px 10px' }}>
+                        <div>{m.concepto}</div>
+                        {m.numero_comprobante && <div style={{ fontSize:10, color:GR }}>N° {m.numero_comprobante}</div>}
+                      </td>
+                      <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:700,
+                        color: m.tipo==='debito'?RJ:VD }}>{fmt(m.monto)}</td>
+                      <td style={{ padding:'7px 10px' }}>
+                        <Badge text={m.estado==='vigente'?'Vigente':'Anulado'}
+                          color={m.estado==='vigente'?VD:GR}
+                          bg={m.estado==='vigente'?'#dcfce7':'#f3f4f6'} />
+                      </td>
+                      <td style={{ padding:'7px 10px' }}>
+                        {m.estado === 'vigente' && (
+                          <Btn small onClick={() => anular(m.id)}
+                            style={{ background:'#fee2e2', color:RJ }}>✕ Anular</Btn>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CONTROL DE PERÍODOS
+// ══════════════════════════════════════════════════════════════════════════════
+function ControlPeriodos({ session, consorcioId, consorcioActivo, expensas }) {
+  const [periodos, setPeriodos]   = useState([])
+  const [msg, setMsg]             = useState(null)
+  const [procesando, setProcesando] = useState(false)
+
+  async function cargar() {
+    const { data } = await supabase.from('con_periodos').select('*')
+      .eq('consorcio_id', consorcioId).order('periodo', { ascending: false })
+    setPeriodos(data || [])
+  }
+
+  async function abrirPeriodo() {
+    const hoy = new Date()
+    const mes = String(hoy.getMonth()+1).padStart(2,'0')
+    const periodo = `${hoy.getFullYear()}-${mes}`
+
+    // Verificar si ya existe
+    const existe = periodos.find(p => p.periodo === periodo)
+    if (existe) return setMsg({ tipo:'warn', texto:`El período ${periodo} ya existe` })
+
+    setProcesando(true)
+    const { error } = await supabase.from('con_periodos').insert([{
+      id: `PER-${consorcioId}-${periodo}`,
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      periodo,
+      estado: 'abierto',
+      fecha_apertura: hoy.toISOString().split('T')[0],
+      expensas_generadas: expensas.some(e => e.periodo === periodo),
+    }])
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else { setMsg({ tipo:'ok', texto: `✓ Período ${periodo} abierto` }); cargar() }
+    setProcesando(false)
+  }
+
+  async function cerrarPeriodo(p) {
+    // Verificar que tenga expensas generadas
+    const tieneExpensa = expensas.some(e => e.periodo === p.periodo)
+    if (!tieneExpensa) {
+      if (!confirm(`El período ${p.periodo} no tiene expensas generadas. ¿Cerrar de todas formas?`)) return
+    }
+    if (!confirm(`¿Cerrar definitivamente el período ${p.periodo}? No se podrán registrar movimientos en períodos cerrados.`)) return
+
+    setProcesando(true)
+    const { error } = await supabase.from('con_periodos')
+      .update({ estado:'cerrado', fecha_cierre: new Date().toISOString().split('T')[0] })
+      .eq('id', p.id)
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else { setMsg({ tipo:'ok', texto: `✓ Período ${p.periodo} cerrado` }); cargar() }
+    setProcesando(false)
+  }
+
+  async function reabrirPeriodo(p) {
+    if (!confirm(`¿Reabrir el período ${p.periodo}?`)) return
+    setProcesando(true)
+    await supabase.from('con_periodos')
+      .update({ estado:'abierto', fecha_cierre: null })
+      .eq('id', p.id)
+    setMsg({ tipo:'ok', texto: `✓ Período ${p.periodo} reabierto` })
+    cargar()
+    setProcesando(false)
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
+
+  const periodoLabel = periodo => {
+    const [y,m] = (periodo||'').split('-')
+    const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+      'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+    return m ? `${meses[parseInt(m)-1]} ${y}` : periodo
+  }
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>🔒 Control de períodos</div>
+        <Btn onClick={abrirPeriodo} disabled={procesando}>+ Abrir período actual</Btn>
+      </div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Gestión del ciclo contable mensual de {consorcioActivo?.nombre}
+      </div>
+      <Msg data={msg} />
+
+      {/* Info */}
+      <Card style={{ marginBottom:16, background:'#eff6ff', border:'1px solid #bae6fd' }}>
+        <div style={{ fontSize:13, color:'#1e40af', lineHeight:1.8 }}>
+          <strong>Flujo recomendado por período:</strong>
+          <div style={{ marginTop:6, display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:8, fontSize:12 }}>
+            {['1. Cargar gastos','2. Generar expensa','3. Calcular mora','4. Registrar cobranzas','5. Cerrar período'].map((s,i) => (
+              <div key={i} style={{ background:'#dbeafe', borderRadius:6, padding:'6px 8px',
+                textAlign:'center', fontWeight:600, color:'#1e40af' }}>{s}</div>
+            ))}
+          </div>
+        </div>
+      </Card>
+
+      {/* Tabla de períodos */}
+      {periodos.length === 0 ? (
+        <Card>
+          <div style={{ textAlign:'center', padding:24, color:GR }}>
+            Sin períodos registrados. Haga clic en "Abrir período actual" para comenzar.
+          </div>
+        </Card>
+      ) : (
+        <Card>
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead>
+                <tr style={{ background:'#f3f4f6' }}>
+                  {['Período','Estado','Apertura','Cierre','Expensas','Acciones'].map((h,i) => (
+                    <th key={i} style={{ padding:'8px 12px', textAlign:'left',
+                      fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {periodos.map(p => {
+                  const tieneExpensa = expensas.some(e => e.periodo === p.periodo)
+                  return (
+                    <tr key={p.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                      <td style={{ padding:'10px 12px', fontWeight:700 }}>{periodoLabel(p.periodo)}</td>
+                      <td style={{ padding:'10px 12px' }}>
+                        <Badge text={p.estado==='abierto'?'🔓 Abierto':'🔒 Cerrado'}
+                          color={p.estado==='abierto'?VD:'#374151'}
+                          bg={p.estado==='abierto'?'#dcfce7':'#f3f4f6'} />
+                      </td>
+                      <td style={{ padding:'10px 12px', color:GR, fontSize:12 }}>
+                        {p.fecha_apertura ? new Date(p.fecha_apertura+'T00:00:00').toLocaleDateString('es-AR') : '—'}
+                      </td>
+                      <td style={{ padding:'10px 12px', color:GR, fontSize:12 }}>
+                        {p.fecha_cierre ? new Date(p.fecha_cierre+'T00:00:00').toLocaleDateString('es-AR') : '—'}
+                      </td>
+                      <td style={{ padding:'10px 12px' }}>
+                        <Badge text={tieneExpensa?'✓ Generadas':'Pendiente'}
+                          color={tieneExpensa?VD:AM}
+                          bg={tieneExpensa?'#dcfce7':'#fef9c3'} />
+                      </td>
+                      <td style={{ padding:'10px 12px' }}>
+                        {p.estado === 'abierto' ? (
+                          <Btn small onClick={() => cerrarPeriodo(p)} disabled={procesando}
+                            style={{ background:'#374151', color:'#fff' }}>
+                            🔒 Cerrar
+                          </Btn>
+                        ) : (
+                          <Btn small onClick={() => reabrirPeriodo(p)} disabled={procesando}
+                            style={{ background:'#f3f4f6', color:'#374151' }}>
+                            🔓 Reabrir
+                          </Btn>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
 function PerfilAdmin({ session }) {
   const [perfil, setPerfil] = useState({ nombre:'', telefono:'', matricula_rpac:'', email:'', direccion:'', horario:'', cuit:'', situacion_fiscal:'Monotributo' })
   const [guardando, setGuardando] = useState(false)
@@ -2051,7 +2674,10 @@ export default function App() {
     { id:'actas',          label:'Libro de Actas',    icon:'📖', sec:'Gestión' },
     { id:'emails',          label:'Enviar liquidación', icon:'✉️', sec:'Admin' },
     { id:'importar',        label:'Importar Excel',    icon:'📥', sec:'Admin' },
-    { id:'perfil',          label:'Mi perfil',         icon:'⚙️', sec:'Admin' },
+    { id:'cta_corriente',   label:'Cuenta corriente',  icon:'📋', sec:'Gestión' },
+    { id:'movimientos',      label:'Notas Déb/Cré',     icon:'↕️', sec:'Gestión' },
+    { id:'periodos',         label:'Control períodos',   icon:'🔒', sec:'Admin' },
+    { id:'perfil',           label:'Mi perfil',          icon:'⚙️', sec:'Admin' },
     ...(esSuperAdmin?[{id:'clientes',label:'Clientes GASP',icon:'🏢',sec:'Admin'}]:[]),
   ]
   const secciones=[...new Set(NAV.map(n=>n.sec))]
@@ -2198,6 +2824,9 @@ function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
       case 'proveedores':    return <Proveedores session={session} consorcioId={cid} />
       case 'actas':          return <Actas session={session} consorcioId={cid} copropietarios={copropietarios} />
       case 'perfil':         return <PerfilAdmin session={session} />
+      case 'cta_corriente':  return <CtaCorriente session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} />
+      case 'movimientos':    return <MovimientosUnidad session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
+      case 'periodos':       return <ControlPeriodos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} />
       case 'importar':       return <ImportarExcel session={session} consorcioId={cid} onDone={() => { cargar(); setPagina('unidades') }} />
       case 'emails':         return <EnviarEmails session={session} consorcioId={cid} unidades={unidades} adminPerfil={adminPerfil} />
       case 'clientes':       return <Card style={{ textAlign:'center', padding:40, color:GR }}><div style={{fontSize:32,marginBottom:12}}>🚧</div><div style={{fontWeight:600}}>Panel de clientes en desarrollo</div></Card>
