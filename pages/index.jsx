@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260514-sprint3'
+const BUILD_VERSION = '20260514-sprint4'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -1921,6 +1921,573 @@ function ImportarExcel({ session, consorcioId, onDone }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // REPORTE DE MOVIMIENTOS POR PERÍODO
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PLAN DE CUENTAS
+// ══════════════════════════════════════════════════════════════════════════════
+function PlanCuentas({ session, consorcioId }) {
+  const [cuentas, setCuentas] = useState([])
+  const [form, setForm]       = useState(null)
+  const [msg, setMsg]         = useState(null)
+  const [guardando, setGuardando] = useState(false)
+
+  const CATS_DEFAULT = [
+    { codigo:'1.1', nombre:'Sueldos y cargas sociales',  categoria:'sueldos',          criterio:'prorrateo', orden:1 },
+    { codigo:'1.2', nombre:'Servicios públicos',          categoria:'electricidad',     criterio:'prorrateo', orden:2 },
+    { codigo:'1.3', nombre:'Seguros',                     categoria:'seguros',          criterio:'prorrateo', orden:3 },
+    { codigo:'1.4', nombre:'Mantenimiento y reparaciones',categoria:'mantenimiento',    criterio:'prorrateo', orden:4 },
+    { codigo:'1.5', nombre:'Gastos bancarios',            categoria:'gastos_bancarios', criterio:'prorrateo', orden:5 },
+    { codigo:'1.6', nombre:'Honorarios administración',   categoria:'honorarios_admin', criterio:'prorrateo', orden:6 },
+    { codigo:'1.7', nombre:'Impuesto municipal',          categoria:'impuesto_municipal',criterio:'prorrateo',orden:7 },
+    { codigo:'1.8', nombre:'Varios y emergencias',        categoria:'varios',           criterio:'prorrateo', orden:8 },
+    { codigo:'2.1', nombre:'Fondo de obras',              categoria:'fondo_obras',      criterio:'prorrateo', orden:9 },
+    { codigo:'2.2', nombre:'Fondo de reserva',            categoria:'fondo_reserva',    criterio:'prorrateo', orden:10 },
+  ]
+
+  const CRITERIOS = [
+    { v:'prorrateo', l:'Prorrateo por coeficiente' },
+    { v:'directo',   l:'Cargo directo a unidad' },
+    { v:'fijo',      l:'Importe fijo por unidad' },
+  ]
+
+  async function cargar() {
+    const { data } = await supabase.from('con_plan_cuentas').select('*')
+      .eq('consorcio_id', consorcioId).order('orden')
+    setCuentas(data || [])
+  }
+
+  async function cargarDefaults() {
+    if (!confirm(`¿Cargar el plan de cuentas estándar? Se agregarán ${CATS_DEFAULT.length} rubros predefinidos.`)) return
+    const inserts = CATS_DEFAULT.map(c => ({
+      id: `PC-${consorcioId}-${c.codigo.replace('.','')}-${Date.now()}`,
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      ...c,
+      activo: true,
+    }))
+    const { error } = await supabase.from('con_plan_cuentas').upsert(inserts, { onConflict:'consorcio_id,codigo' })
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else { setMsg({ tipo:'ok', texto:'✓ Plan de cuentas estándar cargado' }); cargar() }
+  }
+
+  async function guardar() {
+    if (!form?.codigo?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el código' })
+    if (!form?.nombre?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el nombre' })
+    setGuardando(true)
+    const payload = {
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      codigo: form.codigo.trim(),
+      nombre: form.nombre.trim(),
+      categoria: form.categoria || 'varios',
+      criterio: form.criterio || 'prorrateo',
+      orden: parseInt(form.orden)||0,
+      activo: true,
+    }
+    const { error } = form.id
+      ? await supabase.from('con_plan_cuentas').update(payload).eq('id', form.id)
+      : await supabase.from('con_plan_cuentas').insert([{ id:`PC-${Date.now()}`, ...payload }])
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else { setMsg({ tipo:'ok', texto:'✓ Cuenta guardada' }); setForm(null); cargar() }
+    setGuardando(false)
+  }
+
+  async function toggleActivo(c) {
+    await supabase.from('con_plan_cuentas').update({ activo: !c.activo }).eq('id', c.id)
+    cargar()
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
+
+  const CRITERIO_LABEL = { prorrateo:'Prorrateo', directo:'Directo', fijo:'Fijo' }
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>📑 Plan de cuentas</div>
+        <div style={{ display:'flex', gap:8 }}>
+          {cuentas.length === 0 &&
+            <BtnSec onClick={cargarDefaults}>⬇ Cargar estándar</BtnSec>}
+          <Btn onClick={()=>setForm({ criterio:'prorrateo', orden: cuentas.length+1 })}>+ Nueva cuenta</Btn>
+        </div>
+      </div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Rubros de gastos configurables para este consorcio
+      </div>
+      <Msg data={msg} />
+
+      {form && (
+        <Card style={{ marginBottom:16, border:'1.5px solid #bae6fd' }}>
+          <div style={{ fontWeight:700, color:AZ, fontSize:13, marginBottom:14 }}>
+            {form.id ? 'Editar cuenta' : 'Nueva cuenta'}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 2fr 1fr', gap:12, marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Código *</div>
+              <input value={form.codigo||''} placeholder="1.1"
+                onChange={e=>setForm(f=>({...f,codigo:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Nombre *</div>
+              <input value={form.nombre||''} placeholder="Nombre del rubro"
+                onChange={e=>setForm(f=>({...f,nombre:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Orden</div>
+              <input type="number" value={form.orden||''} min="0"
+                onChange={e=>setForm(f=>({...f,orden:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+            <Sel label="Criterio de distribución" value={form.criterio||'prorrateo'}
+              onChange={v=>setForm(f=>({...f,criterio:v}))} opts={CRITERIOS} />
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Categoría interna</div>
+              <input value={form.categoria||''} placeholder="sueldos, seguros, varios..."
+                onChange={e=>setForm(f=>({...f,categoria:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn onClick={guardar} disabled={guardando}>{guardando?'⏳':'✓ Guardar'}</Btn>
+            <BtnSec onClick={()=>{setForm(null);setMsg(null)}}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+
+      {cuentas.length === 0 ? (
+        <Card>
+          <div style={{ textAlign:'center', padding:32, color:GR }}>
+            <div style={{ fontSize:28, marginBottom:8 }}>📑</div>
+            <div style={{ fontWeight:600, marginBottom:8 }}>Sin plan de cuentas configurado</div>
+            <div style={{ fontSize:12, marginBottom:16 }}>
+              Cargue el plan estándar o cree sus propios rubros
+            </div>
+            <Btn onClick={cargarDefaults}>⬇ Cargar plan estándar</Btn>
+          </div>
+        </Card>
+      ) : (
+        <Card>
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead>
+                <tr style={{ background:'#f3f4f6' }}>
+                  {['#','Código','Nombre','Criterio','Categoría','Estado',''].map((h,i) => (
+                    <th key={i} style={{ padding:'8px 10px', textAlign:'left',
+                      fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {cuentas.map(c => (
+                  <tr key={c.id} style={{ borderBottom:'1px solid #f3f4f6', opacity:c.activo?1:0.45 }}>
+                    <td style={{ padding:'8px 10px', color:GR, fontSize:11 }}>{c.orden}</td>
+                    <td style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>{c.codigo}</td>
+                    <td style={{ padding:'8px 10px', fontWeight:500 }}>{c.nombre}</td>
+                    <td style={{ padding:'8px 10px' }}>
+                      <Badge text={CRITERIO_LABEL[c.criterio]||c.criterio}
+                        color={AZ} bg='#eff6ff' />
+                    </td>
+                    <td style={{ padding:'8px 10px', color:GR, fontSize:12 }}>{c.categoria}</td>
+                    <td style={{ padding:'8px 10px' }}>
+                      <Badge text={c.activo?'Activa':'Inactiva'}
+                        color={c.activo?VD:GR} bg={c.activo?'#dcfce7':'#f3f4f6'} />
+                    </td>
+                    <td style={{ padding:'8px 10px' }}>
+                      <div style={{ display:'flex', gap:6 }}>
+                        <Btn small onClick={()=>setForm({...c})}
+                          style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
+                        <Btn small onClick={()=>toggleActivo(c)}
+                          style={{ background: c.activo?'#fee2e2':'#dcfce7',
+                            color: c.activo?RJ:VD }}>
+                          {c.activo?'✕':'✓'}
+                        </Btn>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INTERÉS DIFERENCIAL POR UNIDAD
+// ══════════════════════════════════════════════════════════════════════════════
+function MoraDiferencial({ session, consorcioId, unidades, copropietarios }) {
+  const [editId, setEditId]   = useState(null)
+  const [form, setForm]       = useState({})
+  const [msg, setMsg]         = useState(null)
+  const [guardando, setGuardando] = useState(false)
+
+  async function guardar(ufId) {
+    setGuardando(true)
+    const { error } = await supabase.from('con_unidades').update({
+      tasa_mora_diferencial: form.tasa ? parseFloat(form.tasa) : null,
+      convenio_pago: form.convenio_pago || false,
+      convenio_detalle: form.convenio_detalle || null,
+    }).eq('id', ufId)
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else { setMsg({ tipo:'ok', texto:'✓ Configuración guardada' }); setEditId(null); setForm({}) }
+    setGuardando(false)
+  }
+
+  const ufsConConfig = unidades.filter(u => u.tasa_mora_diferencial || u.convenio_pago)
+
+  return (
+    <div>
+      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>⚖️ Interés diferencial por unidad</div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Configure tasa de mora personalizada o convenio de pago para unidades específicas
+      </div>
+      <Msg data={msg} />
+
+      <Card style={{ marginBottom:16, background:'#eff6ff', border:'1px solid #bfdbfe' }}>
+        <div style={{ fontSize:12, color:'#1e40af', lineHeight:1.8 }}>
+          <strong>Funcionamiento:</strong> Si una UF tiene tasa diferencial, el cálculo de mora
+          usa esa tasa en lugar de la tasa global del consorcio. Si tiene convenio de pago activo,
+          se suspende el cálculo de mora automático para esa unidad.
+        </div>
+      </Card>
+
+      {/* UFs con config especial */}
+      {ufsConConfig.length > 0 && (
+        <Card style={{ marginBottom:16 }}>
+          <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:10 }}>
+            Unidades con configuración especial ({ufsConConfig.length})
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+            {ufsConConfig.map(u => {
+              const cp = copropietarios.find(c=>c.id===u.propietario_id)
+              return (
+                <div key={u.id} style={{ display:'flex', justifyContent:'space-between',
+                  alignItems:'center', padding:'10px 12px', background:'#f8fafc',
+                  borderRadius:8, border:'1px solid #e5e7eb' }}>
+                  <div>
+                    <span style={{ fontWeight:700 }}>UF {u.numero}</span>
+                    <span style={{ color:GR, fontSize:12, marginLeft:8 }}>{cp?.apellido_nombre}</span>
+                    {u.tasa_mora_diferencial &&
+                      <Badge text={`Mora: ${u.tasa_mora_diferencial}%`} color={AM} bg='#fef9c3'
+                        style={{ marginLeft:8 }} />}
+                    {u.convenio_pago &&
+                      <Badge text="Convenio activo" color='#7c3aed' bg='#ede9fe'
+                        style={{ marginLeft:8 }} />}
+                  </div>
+                  <Btn small onClick={()=>{
+                    setEditId(u.id)
+                    setForm({ tasa: u.tasa_mora_diferencial||'', convenio_pago: u.convenio_pago, convenio_detalle: u.convenio_detalle||'' })
+                  }} style={{ background:'#f3f4f6', color:'#374151' }}>✏ Editar</Btn>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Tabla todas las UFs */}
+      <Card>
+        <div style={{ fontWeight:600, fontSize:13, marginBottom:12 }}>Configurar por unidad</div>
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+            <thead>
+              <tr style={{ background:'#f3f4f6' }}>
+                {['UF','Propietario','Tasa mora','Convenio','Detalle convenio',''].map((h,i)=>(
+                  <th key={i} style={{ padding:'8px 10px', textAlign:'left', fontSize:11,
+                    fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {unidades.map(u => {
+                const cp = copropietarios.find(c=>c.id===u.propietario_id)
+                const esEditando = editId === u.id
+                return (
+                  <tr key={u.id} style={{ borderBottom:'1px solid #f3f4f6',
+                    background: esEditando?'#f0f9ff':'transparent' }}>
+                    <td style={{ padding:'8px 10px', fontWeight:700 }}>UF {u.numero}</td>
+                    <td style={{ padding:'8px 10px', fontSize:12, color:GR }}>{cp?.apellido_nombre||'—'}</td>
+                    {esEditando ? (
+                      <>
+                        <td style={{ padding:'6px 10px' }}>
+                          <input type="number" min="0" step="0.01" placeholder="% mora"
+                            value={form.tasa||''} onChange={e=>setForm(f=>({...f,tasa:e.target.value}))}
+                            style={{ width:80, padding:'5px 8px', border:'1px solid #93c5fd',
+                              borderRadius:6, fontSize:12 }} />
+                        </td>
+                        <td style={{ padding:'6px 10px' }}>
+                          <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12 }}>
+                            <input type="checkbox" checked={form.convenio_pago||false}
+                              onChange={e=>setForm(f=>({...f,convenio_pago:e.target.checked}))} />
+                            Activo
+                          </label>
+                        </td>
+                        <td style={{ padding:'6px 10px' }}>
+                          <input placeholder="Descripción del convenio"
+                            value={form.convenio_detalle||''} onChange={e=>setForm(f=>({...f,convenio_detalle:e.target.value}))}
+                            style={{ width:'100%', padding:'5px 8px', border:'1px solid #93c5fd',
+                              borderRadius:6, fontSize:12, boxSizing:'border-box' }} />
+                        </td>
+                        <td style={{ padding:'6px 10px' }}>
+                          <div style={{ display:'flex', gap:6 }}>
+                            <Btn small onClick={()=>guardar(u.id)} disabled={guardando}
+                              style={{ background:VD, color:'#fff' }}>{guardando?'⏳':'✓'}</Btn>
+                            <Btn small onClick={()=>{setEditId(null);setForm({})}}
+                              style={{ background:'#f3f4f6', color:GR }}>✕</Btn>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td style={{ padding:'8px 10px' }}>
+                          {u.tasa_mora_diferencial
+                            ? <Badge text={`${u.tasa_mora_diferencial}%`} color={AM} bg='#fef9c3' />
+                            : <span style={{ color:GR, fontSize:12 }}>Global</span>}
+                        </td>
+                        <td style={{ padding:'8px 10px' }}>
+                          {u.convenio_pago
+                            ? <Badge text="Sí" color='#7c3aed' bg='#ede9fe' />
+                            : <span style={{ color:GR, fontSize:12 }}>No</span>}
+                        </td>
+                        <td style={{ padding:'8px 10px', fontSize:11, color:GR }}>
+                          {u.convenio_detalle||'—'}
+                        </td>
+                        <td style={{ padding:'8px 10px' }}>
+                          <Btn small onClick={()=>{
+                            setEditId(u.id)
+                            setForm({ tasa:u.tasa_mora_diferencial||'', convenio_pago:u.convenio_pago, convenio_detalle:u.convenio_detalle||'' })
+                          }} style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MOVIMIENTOS VARIOS — ingresos y egresos extraordinarios
+// ══════════════════════════════════════════════════════════════════════════════
+function MovimientosVarios({ session, consorcioId, expensas }) {
+  const [movs, setMovs]       = useState([])
+  const [form, setForm]       = useState(null)
+  const [msg, setMsg]         = useState(null)
+  const [guardando, setGuardando] = useState(false)
+  const hoy = new Date().toISOString().split('T')[0]
+
+  async function cargar() {
+    const { data } = await supabase.from('con_movimientos_varios').select('*')
+      .eq('consorcio_id', consorcioId).order('fecha', { ascending:false }).limit(200)
+    setMovs(data || [])
+  }
+
+  async function guardar() {
+    if (!form?.tipo)             return setMsg({ tipo:'warn', texto:'Seleccioná el tipo' })
+    if (!form?.concepto?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el concepto' })
+    if (!form?.monto || parseFloat(form.monto)<=0) return setMsg({ tipo:'warn', texto:'Ingresá el monto' })
+    if (!form?.fecha)            return setMsg({ tipo:'warn', texto:'Ingresá la fecha' })
+    setGuardando(true)
+    const { error } = await supabase.from('con_movimientos_varios').insert([{
+      id: `MV-${Date.now()}`,
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      expensa_id: form.expensa_id || null,
+      tipo: form.tipo,
+      concepto: form.concepto.trim(),
+      categoria: form.categoria || 'varios',
+      monto: parseFloat(form.monto),
+      fecha: form.fecha,
+      medio_pago: form.medio_pago || 'transferencia',
+      referencia: form.referencia || null,
+      notas: form.notas || null,
+      estado: 'vigente',
+    }])
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else { setMsg({ tipo:'ok', texto:'✓ Movimiento registrado' }); setForm(null); cargar() }
+    setGuardando(false)
+  }
+
+  async function anular(id) {
+    if (!confirm('¿Anular este movimiento?')) return
+    await supabase.from('con_movimientos_varios').update({ estado:'anulado' }).eq('id', id)
+    cargar()
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
+
+  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR')
+  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
+
+  const totalIngresos = movs.filter(m=>m.tipo==='ingreso'&&m.estado==='vigente').reduce((a,m)=>a+(parseFloat(m.monto)||0),0)
+  const totalEgresos  = movs.filter(m=>m.tipo==='egreso' &&m.estado==='vigente').reduce((a,m)=>a+(parseFloat(m.monto)||0),0)
+
+  const CATEGORIAS_ING = ['alquiler_espacios','reintegro','multa','donacion','varios']
+  const CATEGORIAS_EGR = ['reparacion_urgente','honorarios_extra','impuesto','varios']
+  const MEDIOS = ['transferencia','efectivo','cheque_propio','cheque_tercero','otro']
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>🔄 Movimientos varios</div>
+        <div style={{ display:'flex', gap:8 }}>
+          <Btn small color={VD} onClick={()=>setForm({ tipo:'ingreso', fecha:hoy, medio_pago:'transferencia' })}>+ Ingreso</Btn>
+          <Btn small color={RJ} onClick={()=>setForm({ tipo:'egreso',  fecha:hoy, medio_pago:'transferencia' })}>+ Egreso</Btn>
+        </div>
+      </div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Ingresos y egresos extraordinarios — alquileres, multas, reparaciones urgentes, etc.
+      </div>
+      <Msg data={msg} />
+
+      {/* KPIs */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
+        {[
+          { l:'Ingresos varios', v:fmt(totalIngresos), c:VD, bg:'#f0fdf4' },
+          { l:'Egresos varios',  v:fmt(totalEgresos),  c:RJ, bg:'#fff1f2' },
+          { l:'Neto',           v:`${totalIngresos-totalEgresos>=0?'+':''}${fmt(totalIngresos-totalEgresos)}`,
+            c:totalIngresos>=totalEgresos?VD:RJ, bg:'#f8fafc' },
+        ].map((k,i)=>(
+          <div key={i} style={{ background:k.bg, borderRadius:10, padding:'14px 18px', textAlign:'center' }}>
+            <div style={{ fontSize:11, fontWeight:600, color:k.c, textTransform:'uppercase', marginBottom:4 }}>{k.l}</div>
+            <div style={{ fontSize:22, fontWeight:800, color:k.c }}>{k.v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Formulario */}
+      {form && (
+        <Card style={{ marginBottom:16,
+          border:`1.5px solid ${form.tipo==='ingreso'?'#86efac':'#fca5a5'}`,
+          background: form.tipo==='ingreso'?'#f0fdf4':'#fff8f8' }}>
+          <div style={{ fontWeight:700, color:form.tipo==='ingreso'?VD:RJ, fontSize:13, marginBottom:14 }}>
+            {form.tipo==='ingreso'?'📥 Nuevo ingreso extraordinario':'📤 Nuevo egreso extraordinario'}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:12, marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Concepto *</div>
+              <input value={form.concepto||''} placeholder="Descripción del movimiento"
+                onChange={e=>setForm(f=>({...f,concepto:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Monto *</div>
+              <input type="number" min="0" step="0.01" value={form.monto||''}
+                onChange={e=>setForm(f=>({...f,monto:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontWeight:700, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Fecha *</div>
+              <input type="date" value={form.fecha||''} onChange={e=>setForm(f=>({...f,fecha:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Categoría</div>
+              <select value={form.categoria||'varios'}
+                onChange={e=>setForm(f=>({...f,categoria:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+                {(form.tipo==='ingreso'?CATEGORIAS_ING:CATEGORIAS_EGR).map(c=>(
+                  <option key={c} value={c}>{c.replace(/_/g,' ')}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Medio de pago</div>
+              <select value={form.medio_pago||'transferencia'}
+                onChange={e=>setForm(f=>({...f,medio_pago:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+                {MEDIOS.map(m=><option key={m} value={m}>{m.replace(/_/g,' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Período asociado</div>
+              <select value={form.expensa_id||''} onChange={e=>setForm(f=>({...f,expensa_id:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+                <option value="">Sin período</option>
+                {expensas.map(e=><option key={e.id} value={e.id}>{e.periodo}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Referencia / Notas</div>
+            <input value={form.notas||''} placeholder="Opcional"
+              onChange={e=>setForm(f=>({...f,notas:e.target.value}))}
+              style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn onClick={guardar} disabled={guardando}
+              style={{ background:form.tipo==='ingreso'?VD:RJ, color:'#fff' }}>
+              {guardando?'⏳':'✓ Guardar'}
+            </Btn>
+            <BtnSec onClick={()=>{setForm(null);setMsg(null)}}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+
+      {/* Tabla */}
+      <Card>
+        {movs.length === 0 ? (
+          <div style={{ textAlign:'center', padding:24, color:GR }}>Sin movimientos registrados</div>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead>
+                <tr style={{ background:'#f3f4f6' }}>
+                  {['Fecha','Tipo','Concepto','Categoría','Medio','Monto','Estado',''].map((h,i)=>(
+                    <th key={i} style={{ padding:'7px 10px', textAlign:i===5?'right':'left',
+                      fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {movs.map(m=>(
+                  <tr key={m.id} style={{ borderBottom:'1px solid #f3f4f6', opacity:m.estado==='anulado'?0.45:1 }}>
+                    <td style={{ padding:'7px 10px', color:GR, fontSize:11 }}>{fmtD(m.fecha)}</td>
+                    <td style={{ padding:'7px 10px' }}>
+                      <Badge text={m.tipo==='ingreso'?'↓ Ingreso':'↑ Egreso'}
+                        color={m.tipo==='ingreso'?VD:RJ}
+                        bg={m.tipo==='ingreso'?'#dcfce7':'#fee2e2'} />
+                    </td>
+                    <td style={{ padding:'7px 10px', fontWeight:500 }}>{m.concepto}</td>
+                    <td style={{ padding:'7px 10px', color:GR, fontSize:11 }}>{m.categoria?.replace(/_/g,' ')}</td>
+                    <td style={{ padding:'7px 10px', color:GR, fontSize:11, textTransform:'capitalize' }}>{m.medio_pago?.replace(/_/g,' ')}</td>
+                    <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:700,
+                      color:m.tipo==='ingreso'?VD:RJ }}>{fmt(m.monto)}</td>
+                    <td style={{ padding:'7px 10px' }}>
+                      <Badge text={m.estado==='vigente'?'Vigente':'Anulado'}
+                        color={m.estado==='vigente'?VD:GR}
+                        bg={m.estado==='vigente'?'#dcfce7':'#f3f4f6'} />
+                    </td>
+                    <td style={{ padding:'7px 10px' }}>
+                      {m.estado==='vigente' && (
+                        <Btn small onClick={()=>anular(m.id)}
+                          style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
 function ReporteMovimientos({ session, consorcioId, consorcioActivo, expensas }) {
   const [expSel, setExpSel]     = useState('')
   const [datos, setDatos]       = useState(null)
@@ -3880,6 +4447,9 @@ export default function App() {
     { id:'cta_corriente',   label:'Cuenta corriente',  icon:'📋', sec:'Gestión' },
     { id:'movimientos',      label:'Notas Déb/Cré',     icon:'↕️', sec:'Gestión' },
     { id:'periodos',         label:'Control períodos',   icon:'🔒', sec:'Admin' },
+    { id:'plan_cuentas',     label:'Plan de cuentas',    icon:'📑', sec:'Config.' },
+    { id:'mora_diferencial', label:'Interés diferencial', icon:'⚖️', sec:'Config.' },
+    { id:'mov_varios',       label:'Movimientos varios',  icon:'🔄', sec:'Gestión' },
     { id:'reporte_movimientos', label:'Movimientos período', icon:'📈', sec:'Reportes' },
     { id:'estado_financiero',   label:'Estado financiero',   icon:'🏦', sec:'Reportes' },
     { id:'anular_cobranza',     label:'Anular cobranzas',    icon:'↩️', sec:'Reportes' },
@@ -4033,6 +4603,9 @@ function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
       case 'proveedores':    return <Proveedores session={session} consorcioId={cid} />
       case 'actas':          return <Actas session={session} consorcioId={cid} copropietarios={copropietarios} />
       case 'perfil':         return <PerfilAdmin session={session} />
+      case 'plan_cuentas':     return <PlanCuentas session={session} consorcioId={cid} />
+      case 'mora_diferencial': return <MoraDiferencial session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} />
+      case 'mov_varios':       return <MovimientosVarios session={session} consorcioId={cid} expensas={expensas} />
       case 'reporte_movimientos': return <ReporteMovimientos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} />
       case 'estado_financiero':   return <EstadoFinanciero session={session} consorcioId={cid} consorcioActivo={consorcioActivo} />
       case 'anular_cobranza':     return <AnularCobranzas session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
