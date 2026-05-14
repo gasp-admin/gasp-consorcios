@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260514-plan-cuentas'
+const BUILD_VERSION = '20260514-nav-tracking'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -1452,6 +1452,301 @@ function Actas({ session, consorcioId, copropietarios }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ENVIAR EMAILS — liquidación por Resend con link de portal
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SEGUIMIENTO DE EMAILS — tracking de envíos, entregas y aperturas
+// ══════════════════════════════════════════════════════════════════════════════
+function EmailTracking({ session, consorcioId }) {
+  const [logs, setLogs]           = useState([])
+  const [cargando, setCargando]   = useState(true)
+  const [filtroEstado, setFiltroEstado] = useState('')
+  const [filtroExp, setFiltroExp] = useState('')
+  const [expensas, setExpensas2]  = useState([])
+  const [stats, setStats]         = useState(null)
+
+  async function cargar() {
+    setCargando(true)
+    const [{ data: logsData }, { data: exps }] = await Promise.all([
+      supabase.from('con_email_log').select('*')
+        .eq('consorcio_id', consorcioId)
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase.from('con_expensas').select('id,periodo')
+        .eq('consorcio_id', consorcioId)
+        .order('periodo', { ascending: false }),
+    ])
+    const data = logsData || []
+    setLogs(data)
+    setExpensas2(exps || [])
+
+    // Calcular stats
+    const total    = data.length
+    const enviados = data.filter(l => l.estado === 'enviado').length
+    const errores  = data.filter(l => l.estado === 'error').length
+    const abiertos = data.filter(l => l.abierto).length
+    setStats({ total, enviados, errores, abiertos,
+      tasa_entrega: total > 0 ? Math.round(enviados/total*100) : 0,
+      tasa_apertura: enviados > 0 ? Math.round(abiertos/enviados*100) : 0,
+    })
+    setCargando(false)
+  }
+
+  async function verificarEstado(log) {
+    // Consultar a Resend el estado actual del email via Edge Function
+    try {
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const res = await fetch(`${SUPA_URL}/functions/v1/verificar-email-estado`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sess?.access_token}`,
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+        },
+        body: JSON.stringify({ resend_id: log.resend_id, log_id: log.id })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        cargar()
+        return data
+      }
+    } catch(e) {}
+  }
+
+  async function reenviar(log) {
+    if (!confirm(`¿Reenviar el email a ${log.destinatario}?`)) return
+    // Marcar como pendiente y disparar reenvío
+    await supabase.from('con_email_log').update({ estado:'pendiente_reenvio' }).eq('id', log.id)
+    cargar()
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
+
+  const fmtD = d => d ? new Date(d).toLocaleString('es-AR', {
+    day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'
+  }) : '—'
+
+  const periodoLabel = pid => {
+    const exp = expensas.find(e=>e.id===pid)
+    if (!exp) return '—'
+    const [y,m] = (exp.periodo||'').split('-')
+    const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    return m ? `${meses[parseInt(m)-1]} ${y}` : exp.periodo
+  }
+
+  const ESTADOS = {
+    enviado:          { label:'Enviado',    color:VD,  bg:'#dcfce7', icon:'✓' },
+    error:            { label:'Error',      color:RJ,  bg:'#fee2e2', icon:'✕' },
+    rebotado:         { label:'Rebotado',   color:RJ,  bg:'#fee2e2', icon:'↩' },
+    pendiente_reenvio:{ label:'Reenviando', color:AM,  bg:'#fef9c3', icon:'⟳' },
+  }
+
+  const logsFiltrados = logs.filter(l => {
+    if (filtroEstado && l.estado !== filtroEstado) return false
+    if (filtroExp && l.expensa_id !== filtroExp) return false
+    return true
+  })
+
+  // Agrupar por período para vista resumida
+  const porPeriodo = {}
+  for (const l of logs) {
+    const k = l.expensa_id || 'sin_periodo'
+    if (!porPeriodo[k]) porPeriodo[k] = { enviados:0, errores:0, abiertos:0, total:0 }
+    porPeriodo[k].total++
+    if (l.estado === 'enviado') porPeriodo[k].enviados++
+    if (l.estado === 'error')   porPeriodo[k].errores++
+    if (l.abierto)              porPeriodo[k].abiertos++
+  }
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>📬 Seguimiento de emails</div>
+        <Btn small onClick={cargar} style={{ background:'#f3f4f6', color:'#374151' }}>⟳ Actualizar</Btn>
+      </div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Estado de entrega y apertura de liquidaciones enviadas por email
+      </div>
+
+      {/* KPIs */}
+      {stats && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10, marginBottom:16 }}>
+          {[
+            { l:'Total enviados', v:stats.total,         c:AZ, bg:'#eff6ff' },
+            { l:'Entregados',     v:stats.enviados,       c:VD, bg:'#f0fdf4' },
+            { l:'Con error',      v:stats.errores,        c:RJ, bg:'#fff1f2' },
+            { l:'Tasa entrega',   v:stats.tasa_entrega+'%', c:AZ, bg:'#f8fafc' },
+            { l:'Aperturas',      v:stats.abiertos,       c:'#7c3aed', bg:'#faf5ff' },
+          ].map((k,i) => (
+            <div key={i} style={{ background:k.bg, borderRadius:10, padding:'12px 14px', textAlign:'center' }}>
+              <div style={{ fontSize:11, color:k.c, fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{k.l}</div>
+              <div style={{ fontSize:20, fontWeight:800, color:k.c }}>{k.v}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Resumen por período */}
+      {Object.keys(porPeriodo).length > 0 && (
+        <Card style={{ marginBottom:16 }}>
+          <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:12 }}>Resumen por período</div>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+            <thead>
+              <tr style={{ background:'#f3f4f6' }}>
+                {['Período','Enviados','Errores','Aperturas','Progreso'].map((h,i) => (
+                  <th key={i} style={{ padding:'6px 10px', textAlign:i===0?'left':'center',
+                    fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(porPeriodo).map(([pid, s]) => {
+                const pct = s.total > 0 ? Math.round(s.enviados/s.total*100) : 0
+                return (
+                  <tr key={pid} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                    <td style={{ padding:'8px 10px', fontWeight:600 }}>{periodoLabel(pid)}</td>
+                    <td style={{ padding:'8px 10px', textAlign:'center' }}>
+                      <span style={{ color:VD, fontWeight:700 }}>{s.enviados}</span>
+                      <span style={{ color:GR }}> / {s.total}</span>
+                    </td>
+                    <td style={{ padding:'8px 10px', textAlign:'center' }}>
+                      {s.errores > 0
+                        ? <span style={{ color:RJ, fontWeight:700 }}>{s.errores}</span>
+                        : <span style={{ color:VD }}>✓</span>}
+                    </td>
+                    <td style={{ padding:'8px 10px', textAlign:'center', color:'#7c3aed', fontWeight:600 }}>
+                      {s.abiertos || '—'}
+                    </td>
+                    <td style={{ padding:'8px 10px' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <div style={{ flex:1, background:'#f3f4f6', borderRadius:4, height:6 }}>
+                          <div style={{ width:`${pct}%`, background: pct===100?VD:AZ,
+                            height:6, borderRadius:4 }} />
+                        </div>
+                        <span style={{ fontSize:10, color:GR, whiteSpace:'nowrap' }}>{pct}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      {/* Filtros */}
+      <Card style={{ marginBottom:12 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+          <div>
+            <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Estado</div>
+            <select value={filtroEstado} onChange={e=>setFiltroEstado(e.target.value)}
+              style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+              <option value="">Todos</option>
+              <option value="enviado">Enviados</option>
+              <option value="error">Con error</option>
+              <option value="rebotado">Rebotados</option>
+            </select>
+          </div>
+          <Sel label="Período" value={filtroExp} onChange={setFiltroExp}
+            opts={[{v:'',l:'Todos los períodos'},
+              ...expensas.map(e => {
+                const [y,m] = (e.periodo||'').split('-')
+                const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+                return { v:e.id, l:m?`${meses[parseInt(m)-1]} ${y}`:e.periodo }
+              })
+            ]} />
+        </div>
+      </Card>
+
+      {/* Tabla detalle */}
+      <Card>
+        <div style={{ fontWeight:600, fontSize:13, marginBottom:10 }}>
+          Detalle ({logsFiltrados.length} registros)
+        </div>
+        {cargando ? (
+          <div style={{ textAlign:'center', padding:24, color:GR }}>⏳ Cargando...</div>
+        ) : logsFiltrados.length === 0 ? (
+          <div style={{ textAlign:'center', padding:24, color:GR }}>
+            <div style={{ fontSize:28, marginBottom:8 }}>📭</div>
+            <div>Sin emails registrados</div>
+          </div>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead>
+                <tr style={{ background:'#f3f4f6' }}>
+                  {['Fecha/Hora','Destinatario','Asunto','Estado','Abierto','Resend ID',''].map((h,i) => (
+                    <th key={i} style={{ padding:'7px 10px', textAlign:'left',
+                      fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb',
+                      whiteSpace:'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {logsFiltrados.map(log => {
+                  const est = ESTADOS[log.estado] || { label:log.estado, color:GR, bg:'#f3f4f6', icon:'?' }
+                  return (
+                    <tr key={log.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                      <td style={{ padding:'7px 10px', color:GR, fontSize:11, whiteSpace:'nowrap' }}>
+                        {fmtD(log.created_at)}
+                      </td>
+                      <td style={{ padding:'7px 10px', maxWidth:160 }}>
+                        <div style={{ fontWeight:500 }}>{log.destinatario}</div>
+                      </td>
+                      <td style={{ padding:'7px 10px', color:GR, fontSize:11, maxWidth:200 }}>
+                        {log.asunto?.replace('Expensas ','').slice(0,50)}
+                      </td>
+                      <td style={{ padding:'7px 10px', whiteSpace:'nowrap' }}>
+                        <Badge text={`${est.icon} ${est.label}`} color={est.color} bg={est.bg} />
+                        {log.estado === 'error' && log.error_msg && (
+                          <div style={{ fontSize:9, color:RJ, marginTop:2, maxWidth:120 }}>
+                            {(() => { try { return JSON.parse(log.error_msg).message } catch { return log.error_msg?.slice(0,40) } })()}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding:'7px 10px', textAlign:'center' }}>
+                        {log.abierto
+                          ? <span style={{ color:'#7c3aed', fontWeight:700 }} title={fmtD(log.fecha_apertura)}>👁 {log.fecha_apertura ? new Date(log.fecha_apertura).toLocaleDateString('es-AR') : 'Sí'}</span>
+                          : <span style={{ color:GR }}>—</span>}
+                      </td>
+                      <td style={{ padding:'7px 10px', fontSize:10, color:GR, fontFamily:'monospace' }}>
+                        {log.resend_id ? log.resend_id.slice(0,20)+'…' : '—'}
+                      </td>
+                      <td style={{ padding:'7px 10px' }}>
+                        <div style={{ display:'flex', gap:4 }}>
+                          {log.resend_id && (
+                            <Btn small onClick={()=>verificarEstado(log)}
+                              style={{ background:'#eff6ff', color:AZ }} title="Verificar estado en Resend">
+                              ⟳
+                            </Btn>
+                          )}
+                          {log.estado === 'error' && (
+                            <Btn small onClick={()=>reenviar(log)}
+                              style={{ background:'#fef9c3', color:AM }} title="Reenviar">
+                              ↩
+                            </Btn>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* Nota sobre tracking de aperturas */}
+      <div style={{ marginTop:12, padding:'10px 14px', background:'#f8fafc',
+        borderRadius:8, fontSize:11, color:GR, border:'1px solid #e5e7eb' }}>
+        ℹ️ El tracking de aperturas requiere que el dominio <strong>administracionpinamar.com</strong> esté
+        verificado en Resend y que el copropietario permita la carga de imágenes en su cliente de email.
+        El estado de entrega se actualiza presionando ⟳ en cada registro.
+      </div>
+    </div>
+  )
+}
+
 function EnviarEmails({ session, consorcioId, unidades, adminPerfil }) {
   const [expensas, setExpensas]   = useState([])
   const [expSel, setExpSel]       = useState('')
@@ -4442,29 +4737,47 @@ export default function App() {
   }
 
   const NAV=[
-    { id:'dashboard',      label:'Dashboard',        icon:'📊', sec:'Principal' },
-    { id:'unidades',       label:'Unidades (UFs)',    icon:'🏢', sec:'Gestión' },
-    { id:'copropietarios', label:'Copropietarios',    icon:'👤', sec:'Gestión' },
-    { id:'expensas',       label:'Expensas',          icon:'💰', sec:'Gestión' },
-    { id:'cobranzas',      label:'Cobranzas',         icon:'💳', sec:'Gestión' },
-    { id:'morosos',        label:'Morosos',           icon:'⚠️', sec:'Gestión' },
-    { id:'proveedores',    label:'Proveedores',       icon:'🔧', sec:'Gestión' },
-    { id:'actas',          label:'Libro de Actas',    icon:'📖', sec:'Gestión' },
-    { id:'emails',          label:'Enviar liquidación', icon:'✉️', sec:'Admin' },
-    { id:'importar',        label:'Importar Excel',    icon:'📥', sec:'Admin' },
-    { id:'cta_corriente',   label:'Cuenta corriente',  icon:'📋', sec:'Gestión' },
-    { id:'movimientos',      label:'Notas Déb/Cré',     icon:'↕️', sec:'Gestión' },
-    { id:'periodos',         label:'Control períodos',   icon:'🔒', sec:'Admin' },
-    { id:'plan_cuentas',     label:'Plan de cuentas',    icon:'📑', sec:'Config.' },
-    { id:'mora_diferencial', label:'Interés diferencial', icon:'⚖️', sec:'Config.' },
-    { id:'mov_varios',       label:'Movimientos varios',  icon:'🔄', sec:'Gestión' },
-    { id:'reporte_movimientos', label:'Movimientos período', icon:'📈', sec:'Reportes' },
-    { id:'estado_financiero',   label:'Estado financiero',   icon:'🏦', sec:'Reportes' },
-    { id:'anular_cobranza',     label:'Anular cobranzas',    icon:'↩️', sec:'Reportes' },
-    { id:'comprobantes',     label:'Comprobantes',       icon:'🧾', sec:'Gestión' },
-    { id:'pagos_prov',       label:'Pagos proveedores',  icon:'💸', sec:'Gestión' },
-    { id:'cta_proveedor',    label:'Cta. proveedores',   icon:'📊', sec:'Gestión' },
-    { id:'perfil',           label:'Mi perfil',          icon:'⚙️', sec:'Admin' },
+    // ── Principal ──────────────────────────────────────
+    { id:'dashboard',        label:'Dashboard',           icon:'📊', sec:'Principal' },
+
+    // ── Consorcio ──────────────────────────────────────
+    { id:'unidades',         label:'Unidades (UFs)',       icon:'🏢', sec:'Consorcio' },
+    { id:'copropietarios',   label:'Copropietarios',       icon:'👤', sec:'Consorcio' },
+    { id:'proveedores',      label:'Proveedores',          icon:'🔧', sec:'Consorcio' },
+    { id:'actas',            label:'Libro de Actas',       icon:'📖', sec:'Consorcio' },
+
+    // ── Expensas ───────────────────────────────────────
+    { id:'expensas',         label:'Expensas',             icon:'💰', sec:'Expensas' },
+    { id:'cobranzas',        label:'Cobranzas',            icon:'💳', sec:'Expensas' },
+    { id:'morosos',          label:'Morosos',              icon:'⚠️', sec:'Expensas' },
+    { id:'cta_corriente',    label:'Cta. corriente UF',    icon:'📋', sec:'Expensas' },
+    { id:'movimientos',      label:'Notas Déb/Cré',        icon:'↕️', sec:'Expensas' },
+    { id:'anular_cobranza',  label:'Anular cobranzas',     icon:'↩️', sec:'Expensas' },
+
+    // ── Proveedores ────────────────────────────────────
+    { id:'comprobantes',     label:'Comprobantes',         icon:'🧾', sec:'Proveedores' },
+    { id:'pagos_prov',       label:'Pagos proveedores',    icon:'💸', sec:'Proveedores' },
+    { id:'cta_proveedor',    label:'Cta. corriente prov.', icon:'📊', sec:'Proveedores' },
+
+    // ── Movimientos ────────────────────────────────────
+    { id:'mov_varios',       label:'Movimientos varios',   icon:'🔄', sec:'Movimientos' },
+
+    // ── Reportes ───────────────────────────────────────
+    { id:'reporte_movimientos', label:'Movim. por período', icon:'📈', sec:'Reportes' },
+    { id:'estado_financiero',   label:'Estado financiero',  icon:'🏦', sec:'Reportes' },
+
+    // ── Comunicaciones ─────────────────────────────────
+    { id:'emails',           label:'Enviar liquidación',   icon:'✉️', sec:'Comunicaciones' },
+    { id:'email_tracking',   label:'Seguimiento emails',   icon:'📬', sec:'Comunicaciones' },
+
+    // ── Configuración ──────────────────────────────────
+    { id:'plan_cuentas',     label:'Plan de cuentas',      icon:'📑', sec:'Configuración' },
+    { id:'mora_diferencial', label:'Interés diferencial',  icon:'⚖️', sec:'Configuración' },
+    { id:'periodos',         label:'Control períodos',     icon:'🔒', sec:'Configuración' },
+    { id:'importar',         label:'Importar Excel',       icon:'📥', sec:'Configuración' },
+
+    // ── Admin ──────────────────────────────────────────
+    { id:'perfil',           label:'Mi perfil',            icon:'⚙️', sec:'Admin' },
     ...(esSuperAdmin?[{id:'clientes',label:'Clientes GASP',icon:'🏢',sec:'Admin'}]:[]),
   ]
   const secciones=[...new Set(NAV.map(n=>n.sec))]
@@ -4625,6 +4938,7 @@ function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
       case 'movimientos':    return <MovimientosUnidad session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
       case 'periodos':       return <ControlPeriodos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} />
       case 'importar':       return <ImportarExcel session={session} consorcioId={cid} onDone={() => { cargar(); setPagina('unidades') }} />
+      case 'email_tracking': return <EmailTracking session={session} consorcioId={cid} />
       case 'emails':         return <EnviarEmails session={session} consorcioId={cid} unidades={unidades} adminPerfil={adminPerfil} />
       case 'clientes':       return <Card style={{ textAlign:'center', padding:40, color:GR }}><div style={{fontSize:32,marginBottom:12}}>🚧</div><div style={{fontWeight:600}}>Panel de clientes en desarrollo</div></Card>
       default:               return <Dashboard consorcios={consorcios} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} formCon={formCon} setFormCon={setFormCon} msgCon={msgCon} guardarConsorcio={guardarConsorcio} setConsorcioActivo={setConsorcioActivo} cargarConsorcio={cargarConsorcio} setPagina={setPagina} />
