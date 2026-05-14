@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260514-sprint1-fix'
+const BUILD_VERSION = '20260514-sprint2'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -1913,6 +1913,568 @@ function ImportarExcel({ session, consorcioId, onDone }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // CUENTA CORRIENTE POR UNIDAD
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMPROBANTES DE PROVEEDORES
+// ══════════════════════════════════════════════════════════════════════════════
+function Comprobantes({ session, consorcioId, proveedores, expensas }) {
+  const [comprobantes, setComprobantes] = useState([])
+  const [form, setForm]   = useState(null)
+  const [filtro, setFiltro] = useState('')
+  const [msg, setMsg]     = useState(null)
+  const [guardando, setGuardando] = useState(false)
+  const hoy = new Date().toISOString().split('T')[0]
+
+  async function cargar() {
+    const q = supabase.from('con_comprobantes_proveedor').select('*')
+      .eq('consorcio_id', consorcioId).order('fecha', { ascending:false }).limit(200)
+    if (filtro) q.eq('proveedor_id', filtro)
+    const { data } = await q
+    setComprobantes(data || [])
+  }
+
+  async function guardar() {
+    if (!form?.proveedor_id) return setMsg({ tipo:'warn', texto:'Seleccioná un proveedor' })
+    if (!form?.concepto?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el concepto' })
+    if (!form?.monto_total || parseFloat(form.monto_total) <= 0) return setMsg({ tipo:'warn', texto:'Ingresá el monto' })
+    if (!form?.fecha) return setMsg({ tipo:'warn', texto:'Ingresá la fecha' })
+    setGuardando(true)
+    const total = parseFloat(form.monto_total)
+    const { error } = await supabase.from('con_comprobantes_proveedor').insert([{
+      id: `COMP-${Date.now()}`,
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      proveedor_id: form.proveedor_id,
+      expensa_id: form.expensa_id || null,
+      tipo: form.tipo || 'factura',
+      numero: form.numero || null,
+      fecha: form.fecha,
+      fecha_vencimiento: form.fecha_vencimiento || null,
+      concepto: form.concepto.trim(),
+      monto_neto: parseFloat(form.monto_neto||0),
+      iva: parseFloat(form.iva||0),
+      otros_impuestos: parseFloat(form.otros_impuestos||0),
+      monto_total: total,
+      saldo_pendiente: total,
+      estado: 'pendiente',
+      notas: form.notas || null,
+    }])
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else { setMsg({ tipo:'ok', texto:'✓ Comprobante registrado' }); setForm(null); cargar() }
+    setGuardando(false)
+  }
+
+  async function anular(id) {
+    if (!confirm('¿Anular este comprobante?')) return
+    await supabase.from('con_comprobantes_proveedor').update({ estado:'anulado' }).eq('id', id)
+    cargar()
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtro])
+
+  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR')
+  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
+
+  const totalPendiente = comprobantes.filter(c=>c.estado==='pendiente'||c.estado==='pagado_parcial')
+    .reduce((a,c) => a + (parseFloat(c.saldo_pendiente)||0), 0)
+
+  const TIPOS = [
+    {v:'factura',l:'Factura'},{v:'remito',l:'Remito'},{v:'ticket',l:'Ticket'},
+    {v:'nota_debito',l:'Nota de débito'},{v:'nota_credito',l:'Nota de crédito'}
+  ]
+  const ESTADOS_COLOR = {
+    pendiente:    { c:AM,  bg:'#fef9c3', t:'Pendiente' },
+    pagado_parcial:{ c:'#7c3aed', bg:'#ede9fe', t:'Pago parcial' },
+    pagado:       { c:VD,  bg:'#dcfce7', t:'Pagado' },
+    anulado:      { c:GR,  bg:'#f3f4f6', t:'Anulado' },
+  }
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>🧾 Comprobantes de proveedores</div>
+        <Btn onClick={() => setForm({ tipo:'factura', fecha:hoy })}>+ Nuevo comprobante</Btn>
+      </div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Facturas, remitos y notas de proveedores con seguimiento de saldo
+      </div>
+      <Msg data={msg} />
+
+      {/* KPIs */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:16 }}>
+        {[
+          { l:'Total registrado', v:fmt(comprobantes.reduce((a,c)=>a+(parseFloat(c.monto_total)||0),0)), c:AZ },
+          { l:'Pendiente de pago', v:fmt(totalPendiente), c:RJ },
+          { l:'Pagados', v:comprobantes.filter(c=>c.estado==='pagado').length, c:VD },
+          { l:'Comprobantes', v:comprobantes.filter(c=>c.estado!=='anulado').length, c:GR },
+        ].map((k,i) => (
+          <div key={i} style={{ background:'#fff', borderRadius:10, padding:'14px 16px',
+            textAlign:'center', boxShadow:'0 1px 6px #0001' }}>
+            <div style={{ fontSize:11, color:GR, fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{k.l}</div>
+            <div style={{ fontSize:20, fontWeight:800, color:k.c }}>{k.v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Formulario */}
+      {form && (
+        <Card style={{ marginBottom:16, border:'1.5px solid #bae6fd' }}>
+          <div style={{ fontWeight:700, color:AZ, fontSize:13, marginBottom:14 }}>🧾 Nuevo comprobante</div>
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:12, marginBottom:12 }}>
+            <Sel label="Proveedor *" value={form.proveedor_id||''} onChange={v=>setForm(f=>({...f,proveedor_id:v}))}
+              opts={[{v:'',l:'— Seleccione —'},...proveedores.map(p=>({v:p.id,l:p.razon_social}))]} />
+            <Sel label="Tipo" value={form.tipo||'factura'} onChange={v=>setForm(f=>({...f,tipo:v}))} opts={TIPOS} />
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>N° comprobante</div>
+              <input value={form.numero||''} placeholder="0001-00012345"
+                onChange={e=>setForm(f=>({...f,numero:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:12, marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Concepto *</div>
+              <input value={form.concepto||''} placeholder="Descripción del servicio/producto"
+                onChange={e=>setForm(f=>({...f,concepto:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Fecha *</div>
+              <input type="date" value={form.fecha||''} onChange={e=>setForm(f=>({...f,fecha:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Vencimiento</div>
+              <input type="date" value={form.fecha_vencimiento||''} onChange={e=>setForm(f=>({...f,fecha_vencimiento:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:12, marginBottom:12 }}>
+            {[
+              { k:'monto_neto', l:'Monto neto' },
+              { k:'iva', l:'IVA' },
+              { k:'otros_impuestos', l:'Otros imp.' },
+              { k:'monto_total', l:'Total *' },
+            ].map(f2 => (
+              <div key={f2.k}>
+                <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>{f2.l}</div>
+                <input type="number" min="0" step="0.01" value={form[f2.k]||''}
+                  onChange={e => {
+                    const val = e.target.value
+                    setForm(f => {
+                      const upd = {...f, [f2.k]: val}
+                      if (f2.k !== 'monto_total') {
+                        upd.monto_total = (
+                          (parseFloat(upd.monto_neto)||0) +
+                          (parseFloat(upd.iva)||0) +
+                          (parseFloat(upd.otros_impuestos)||0)
+                        ).toFixed(2)
+                      }
+                      return upd
+                    })
+                  }}
+                  style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7,
+                    fontSize:13, boxSizing:'border-box',
+                    fontWeight: f2.k==='monto_total'?700:400,
+                    background: f2.k==='monto_total'?'#f0f4ff':'#fff' }} />
+              </div>
+            ))}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Período asociado</div>
+              <select value={form.expensa_id||''} onChange={e=>setForm(f=>({...f,expensa_id:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+                <option value="">Sin período</option>
+                {expensas.map(e=><option key={e.id} value={e.id}>{e.periodo}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Notas</div>
+              <input value={form.notas||''} placeholder="Opcional"
+                onChange={e=>setForm(f=>({...f,notas:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn onClick={guardar} disabled={guardando}>{guardando?'⏳':'✓ Guardar'}</Btn>
+            <BtnSec onClick={()=>{setForm(null);setMsg(null)}}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+
+      {/* Filtro */}
+      <Card style={{ marginBottom:12 }}>
+        <Sel label="Filtrar por proveedor" value={filtro} onChange={setFiltro}
+          opts={[{v:'',l:'Todos los proveedores'},...proveedores.map(p=>({v:p.id,l:p.razon_social}))]} />
+      </Card>
+
+      {/* Tabla */}
+      <Card>
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+            <thead>
+              <tr style={{ background:'#f3f4f6' }}>
+                {['Fecha','Proveedor','Tipo','N°','Concepto','Total','Saldo','Estado',''].map((h,i) => (
+                  <th key={i} style={{ padding:'7px 10px', textAlign:i>=5?'right':'left',
+                    fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb', whiteSpace:'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {comprobantes.length === 0 ? (
+                <tr><td colSpan={9} style={{ padding:24, textAlign:'center', color:GR }}>Sin comprobantes registrados</td></tr>
+              ) : comprobantes.map(c => {
+                const prov = proveedores.find(p=>p.id===c.proveedor_id)
+                const est  = ESTADOS_COLOR[c.estado] || ESTADOS_COLOR.pendiente
+                return (
+                  <tr key={c.id} style={{ borderBottom:'1px solid #f3f4f6', opacity:c.estado==='anulado'?0.45:1 }}>
+                    <td style={{ padding:'7px 10px', whiteSpace:'nowrap', color:GR, fontSize:11 }}>{fmtD(c.fecha)}</td>
+                    <td style={{ padding:'7px 10px', fontWeight:600, maxWidth:140 }}>{prov?.razon_social||'—'}</td>
+                    <td style={{ padding:'7px 10px', textTransform:'capitalize', color:GR }}>{c.tipo}</td>
+                    <td style={{ padding:'7px 10px', fontSize:11, color:GR }}>{c.numero||'—'}</td>
+                    <td style={{ padding:'7px 10px', maxWidth:160 }}>{c.concepto}</td>
+                    <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:600 }}>{fmt(c.monto_total)}</td>
+                    <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:700,
+                      color: parseFloat(c.saldo_pendiente)>0 ? RJ : VD }}>
+                      {c.estado==='pagado' ? '✓' : fmt(c.saldo_pendiente)}
+                    </td>
+                    <td style={{ padding:'7px 10px' }}>
+                      <Badge text={est.t} color={est.c} bg={est.bg} />
+                    </td>
+                    <td style={{ padding:'7px 10px' }}>
+                      {c.estado !== 'anulado' && c.estado !== 'pagado' && (
+                        <Btn small onClick={()=>anular(c.id)} style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PAGOS A PROVEEDORES
+// ══════════════════════════════════════════════════════════════════════════════
+function PagosProveedor({ session, consorcioId, proveedores }) {
+  const [pagos, setPagos]         = useState([])
+  const [compPendientes, setCompPendientes] = useState([])
+  const [form, setForm]           = useState(null)
+  const [filtro, setFiltro]       = useState('')
+  const [msg, setMsg]             = useState(null)
+  const [guardando, setGuardando] = useState(false)
+  const hoy = new Date().toISOString().split('T')[0]
+
+  async function cargar() {
+    const [{ data: p }, { data: cp }] = await Promise.all([
+      supabase.from('con_pagos_proveedor').select('*')
+        .eq('consorcio_id', consorcioId).order('fecha', { ascending:false }).limit(200),
+      supabase.from('con_comprobantes_proveedor').select('*')
+        .eq('consorcio_id', consorcioId)
+        .in('estado', ['pendiente','pagado_parcial'])
+        .order('fecha_vencimiento', { ascending:true })
+    ])
+    setPagos(p||[])
+    setCompPendientes(cp||[])
+  }
+
+  async function guardar() {
+    if (!form?.proveedor_id) return setMsg({ tipo:'warn', texto:'Seleccioná un proveedor' })
+    if (!form?.monto || parseFloat(form.monto)<=0) return setMsg({ tipo:'warn', texto:'Ingresá el monto' })
+    if (!form?.fecha) return setMsg({ tipo:'warn', texto:'Ingresá la fecha' })
+    setGuardando(true)
+    const { error } = await supabase.from('con_pagos_proveedor').insert([{
+      id: `PAG-${Date.now()}`,
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      proveedor_id: form.proveedor_id,
+      comprobante_id: form.comprobante_id || null,
+      fecha: form.fecha,
+      monto: parseFloat(form.monto),
+      medio_pago: form.medio_pago || 'transferencia',
+      numero_cheque: form.numero_cheque || null,
+      banco: form.banco || null,
+      referencia: form.referencia || null,
+      notas: form.notas || null,
+    }])
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else { setMsg({ tipo:'ok', texto:'✓ Pago registrado' }); setForm(null); cargar() }
+    setGuardando(false)
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
+
+  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR')
+  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
+
+  const MEDIOS = [
+    {v:'transferencia',l:'Transferencia'},{v:'cheque_propio',l:'Cheque propio'},
+    {v:'cheque_tercero',l:'Cheque de tercero'},{v:'efectivo',l:'Efectivo'},{v:'otro',l:'Otro'}
+  ]
+
+  const compsFiltro = compPendientes.filter(c =>
+    !form?.proveedor_id || c.proveedor_id === form.proveedor_id
+  )
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>💸 Pagos a proveedores</div>
+        <Btn onClick={()=>setForm({ medio_pago:'transferencia', fecha:hoy })}>+ Registrar pago</Btn>
+      </div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Registre pagos de facturas y comprobantes pendientes
+      </div>
+      <Msg data={msg} />
+
+      {/* Pendientes de pago */}
+      {compPendientes.length > 0 && !form && (
+        <Card style={{ marginBottom:16, background:'#fff8f0', border:'1px solid #fed7aa' }}>
+          <div style={{ fontWeight:600, color:AM, fontSize:13, marginBottom:10 }}>
+            ⚠️ {compPendientes.length} comprobante{compPendientes.length>1?'s':''} pendiente{compPendientes.length>1?'s':''} de pago
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            {compPendientes.slice(0,5).map(c => {
+              const prov = proveedores.find(p=>p.id===c.proveedor_id)
+              const vencido = c.fecha_vencimiento && c.fecha_vencimiento < hoy
+              return (
+                <div key={c.id} style={{ display:'flex', justifyContent:'space-between',
+                  alignItems:'center', padding:'8px 10px', background:'#fff',
+                  borderRadius:8, border: vencido?'1px solid #fca5a5':'1px solid #e5e7eb' }}>
+                  <div>
+                    <span style={{ fontWeight:600, fontSize:13 }}>{prov?.razon_social}</span>
+                    <span style={{ fontSize:11, color:GR, marginLeft:8 }}>{c.concepto}</span>
+                    {vencido && <span style={{ fontSize:10, color:RJ, marginLeft:8, fontWeight:600 }}>VENCIDO</span>}
+                  </div>
+                  <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                    <span style={{ fontWeight:700, color:RJ }}>{fmt(c.saldo_pendiente)}</span>
+                    <Btn small color={VD} onClick={()=>setForm({
+                      medio_pago:'transferencia', fecha:hoy,
+                      proveedor_id:c.proveedor_id, comprobante_id:c.id,
+                      monto: c.saldo_pendiente
+                    })}>Pagar</Btn>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Formulario */}
+      {form && (
+        <Card style={{ marginBottom:16, border:'1.5px solid #86efac' }}>
+          <div style={{ fontWeight:700, color:VD, fontSize:13, marginBottom:14 }}>💸 Registrar pago</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
+            <Sel label="Proveedor *" value={form.proveedor_id||''} onChange={v=>setForm(f=>({...f,proveedor_id:v,comprobante_id:''}))}
+              opts={[{v:'',l:'— Seleccione —'},...proveedores.map(p=>({v:p.id,l:p.razon_social}))]} />
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Comprobante (opcional)</div>
+              <select value={form.comprobante_id||''} onChange={e=>setForm(f=>({...f,comprobante_id:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+                <option value="">Sin comprobante</option>
+                {compsFiltro.map(c=>(
+                  <option key={c.id} value={c.id}>{c.tipo} {c.numero||''} — ${Number(c.saldo_pendiente).toLocaleString('es-AR')}</option>
+                ))}
+              </select>
+            </div>
+            <Sel label="Medio de pago" value={form.medio_pago||'transferencia'} onChange={v=>setForm(f=>({...f,medio_pago:v}))} opts={MEDIOS} />
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Monto *</div>
+              <input type="number" min="0" step="0.01" value={form.monto||''}
+                onChange={e=>setForm(f=>({...f,monto:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontWeight:700, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Fecha *</div>
+              <input type="date" value={form.fecha||''} onChange={e=>setForm(f=>({...f,fecha:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Referencia / N° cheque</div>
+              <input value={form.referencia||''} placeholder="Nro. operación, cheque, etc."
+                onChange={e=>setForm(f=>({...f,referencia:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn onClick={guardar} disabled={guardando} style={{ background:VD, color:'#fff' }}>{guardando?'⏳':'✓ Registrar pago'}</Btn>
+            <BtnSec onClick={()=>{setForm(null);setMsg(null)}}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+
+      {/* Historial */}
+      <Card>
+        <div style={{ fontWeight:600, fontSize:13, marginBottom:12 }}>Historial de pagos</div>
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+            <thead>
+              <tr style={{ background:'#f3f4f6' }}>
+                {['Fecha','Proveedor','Concepto/Comp.','Medio','Monto'].map((h,i) => (
+                  <th key={i} style={{ padding:'7px 10px', textAlign:i===4?'right':'left',
+                    fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pagos.length === 0 ? (
+                <tr><td colSpan={5} style={{ padding:24, textAlign:'center', color:GR }}>Sin pagos registrados</td></tr>
+              ) : pagos.map(p => {
+                const prov = proveedores.find(pr=>pr.id===p.proveedor_id)
+                const comp = compPendientes.find(c=>c.id===p.comprobante_id)
+                return (
+                  <tr key={p.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                    <td style={{ padding:'7px 10px', whiteSpace:'nowrap', color:GR, fontSize:11 }}>{fmtD(p.fecha)}</td>
+                    <td style={{ padding:'7px 10px', fontWeight:600 }}>{prov?.razon_social||'—'}</td>
+                    <td style={{ padding:'7px 10px', color:GR, fontSize:11 }}>
+                      {comp ? `${comp.tipo} ${comp.numero||''}` : p.referencia||'—'}
+                    </td>
+                    <td style={{ padding:'7px 10px', textTransform:'capitalize', color:GR }}>{p.medio_pago?.replace('_',' ')}</td>
+                    <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:700, color:VD }}>{fmt(p.monto)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CUENTA CORRIENTE POR PROVEEDOR
+// ══════════════════════════════════════════════════════════════════════════════
+function CtaProveedor({ session, consorcioId, proveedores }) {
+  const [provSel, setProvSel] = useState('')
+  const [comps, setComps]     = useState([])
+  const [pagos, setPagos]     = useState([])
+  const [cargando, setCargando] = useState(false)
+
+  async function cargar(pid) {
+    if (!pid) return
+    setCargando(true)
+    const [{ data:c }, { data:p }] = await Promise.all([
+      supabase.from('con_comprobantes_proveedor').select('*')
+        .eq('proveedor_id', pid).eq('consorcio_id', consorcioId)
+        .order('fecha', { ascending:true }),
+      supabase.from('con_pagos_proveedor').select('*')
+        .eq('proveedor_id', pid).eq('consorcio_id', consorcioId)
+        .order('fecha', { ascending:true }),
+    ])
+    setComps(c||[])
+    setPagos(p||[])
+    setCargando(false)
+  }
+
+  useEffect(() => { if (provSel) cargar(provSel) }, [provSel])
+
+  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
+  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
+
+  const totalDeuda    = comps.filter(c=>c.estado!=='anulado').reduce((a,c)=>a+(parseFloat(c.monto_total)||0),0)
+  const totalPagado   = pagos.reduce((a,p)=>a+(parseFloat(p.monto)||0),0)
+  const saldoAdeudado = Math.max(0, totalDeuda - totalPagado)
+  const prov = proveedores.find(p=>p.id===provSel)
+
+  // Construir movimientos combinados
+  const movs = [
+    ...comps.filter(c=>c.estado!=='anulado').map(c=>({ fecha:c.fecha, tipo:'debito', concepto:`${c.tipo} ${c.numero||''} — ${c.concepto}`, monto:parseFloat(c.monto_total)||0 })),
+    ...pagos.map(p=>({ fecha:p.fecha, tipo:'credito', concepto:`Pago — ${p.medio_pago?.replace('_',' ')||''}${p.referencia?' ('+p.referencia+')':''}`, monto:parseFloat(p.monto)||0 })),
+  ].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))
+
+  let acc = 0
+  const conSaldo = movs.map(m => {
+    if (m.tipo==='debito')  acc += m.monto
+    if (m.tipo==='credito') acc -= m.monto
+    return { ...m, saldo_acum: acc }
+  })
+
+  return (
+    <div>
+      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>📊 Cuenta corriente proveedor</div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>Comprobantes, pagos y saldo adeudado por proveedor</div>
+
+      <Card style={{ marginBottom:16 }}>
+        <Sel label="Proveedor" value={provSel} onChange={setProvSel}
+          opts={[{v:'',l:'— Seleccione proveedor —'},...proveedores.map(p=>({v:p.id,l:p.razon_social}))]} />
+      </Card>
+
+      {provSel && (
+        <>
+          {/* Info proveedor + KPIs */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
+            <div style={{ background: saldoAdeudado>0?'#fee2e2':'#dcfce7', borderRadius:10, padding:'14px 18px', textAlign:'center' }}>
+              <div style={{ fontSize:11, fontWeight:600, color:saldoAdeudado>0?RJ:VD, textTransform:'uppercase', marginBottom:4 }}>Saldo adeudado</div>
+              <div style={{ fontSize:22, fontWeight:800, color:saldoAdeudado>0?RJ:VD }}>
+                {saldoAdeudado>0 ? fmt(saldoAdeudado) : '✓ Sin deuda'}
+              </div>
+            </div>
+            <div style={{ background:'#fff', borderRadius:10, padding:'14px 18px', textAlign:'center', boxShadow:'0 1px 6px #0001' }}>
+              <div style={{ fontSize:11, fontWeight:600, color:GR, textTransform:'uppercase', marginBottom:4 }}>Total facturado</div>
+              <div style={{ fontSize:20, fontWeight:700, color:RJ }}>{fmt(totalDeuda)}</div>
+            </div>
+            <div style={{ background:'#fff', borderRadius:10, padding:'14px 18px', textAlign:'center', boxShadow:'0 1px 6px #0001' }}>
+              <div style={{ fontSize:11, fontWeight:600, color:GR, textTransform:'uppercase', marginBottom:4 }}>Total pagado</div>
+              <div style={{ fontSize:20, fontWeight:700, color:VD }}>{fmt(totalPagado)}</div>
+            </div>
+          </div>
+
+          <Card>
+            {cargando ? (
+              <div style={{ textAlign:'center', padding:24, color:GR }}>⏳ Cargando...</div>
+            ) : conSaldo.length===0 ? (
+              <div style={{ textAlign:'center', padding:24, color:GR }}>Sin movimientos para este proveedor</div>
+            ) : (
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <thead>
+                    <tr style={{ background:'#f3f4f6' }}>
+                      {['Fecha','Concepto','Débito','Crédito','Saldo'].map((h,i)=>(
+                        <th key={i} style={{ padding:'7px 10px', textAlign:i>=2?'right':'left',
+                          fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {conSaldo.map((m,i)=>(
+                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                        <td style={{ padding:'7px 10px', whiteSpace:'nowrap', color:GR, fontSize:11 }}>{fmtD(m.fecha)}</td>
+                        <td style={{ padding:'7px 10px' }}>{m.concepto}</td>
+                        <td style={{ padding:'7px 10px', textAlign:'right', color:RJ, fontWeight:600 }}>{m.tipo==='debito'?fmt(m.monto):''}</td>
+                        <td style={{ padding:'7px 10px', textAlign:'right', color:VD, fontWeight:600 }}>{m.tipo==='credito'?fmt(m.monto):''}</td>
+                        <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:700, color:m.saldo_acum>0?RJ:VD }}>
+                          {fmt(Math.abs(m.saldo_acum))}{m.saldo_acum<0&&<span style={{fontSize:9,marginLeft:2}}>CR</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ background:'#f0f4ff', borderTop:'2px solid #1A3FA0' }}>
+                      <td colSpan={2} style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>Saldo final</td>
+                      <td colSpan={3} style={{ padding:'8px 10px', textAlign:'right', fontWeight:800, fontSize:15, color:saldoAdeudado>0?RJ:VD }}>
+                        {saldoAdeudado>0 ? `Debe ${fmt(saldoAdeudado)}` : 'Sin deuda'}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
 function CtaCorriente({ session, consorcioId, unidades, copropietarios }) {
   const [ufSel, setUfSel]       = useState('')
   const [movs, setMovs]         = useState([])
@@ -2600,6 +3162,7 @@ export default function App() {
   const [copropietarios, setCopropietarios] = useState([])
   const [adminPerfil, setAdminPerfil]     = useState({})
   const [expensas, setExpensas]           = useState([])
+  const [proveedores, setProveedores]     = useState([])
   const [esSuperAdmin, setEsSuperAdmin]   = useState(false)
   const [email, setEmail]                 = useState('')
   const [pass, setPass]                   = useState('')
@@ -2639,9 +3202,10 @@ export default function App() {
     const [u,cp,exp]=await Promise.all([
       supabase.from('con_unidades').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('numero'),
       supabase.from('con_copropietarios').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('apellido_nombre'),
-      supabase.from('con_expensas').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('periodo',{ascending:false})
+      supabase.from('con_expensas').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('periodo',{ascending:false}),
+      supabase.from('con_proveedores').select('*').eq('admin_id',uid||session?.user?.id).order('razon_social')
     ])
-    setUnidades(u.data||[]); setCopropietarios(cp.data||[]); setExpensas(exp.data||[])
+    setUnidades(u.data||[]); setCopropietarios(cp.data||[]); setExpensas(exp.data||[]); setProveedores(prov.data||[])
   }
   async function login() {
     setLoginLoading(true); setLoginError('')
@@ -2680,6 +3244,9 @@ export default function App() {
     { id:'cta_corriente',   label:'Cuenta corriente',  icon:'📋', sec:'Gestión' },
     { id:'movimientos',      label:'Notas Déb/Cré',     icon:'↕️', sec:'Gestión' },
     { id:'periodos',         label:'Control períodos',   icon:'🔒', sec:'Admin' },
+    { id:'comprobantes',     label:'Comprobantes',       icon:'🧾', sec:'Gestión' },
+    { id:'pagos_prov',       label:'Pagos proveedores',  icon:'💸', sec:'Gestión' },
+    { id:'cta_proveedor',    label:'Cta. proveedores',   icon:'📊', sec:'Gestión' },
     { id:'perfil',           label:'Mi perfil',          icon:'⚙️', sec:'Admin' },
     ...(esSuperAdmin?[{id:'clientes',label:'Clientes GASP',icon:'🏢',sec:'Admin'}]:[]),
   ]
@@ -2827,7 +3394,11 @@ function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
       case 'proveedores':    return <Proveedores session={session} consorcioId={cid} />
       case 'actas':          return <Actas session={session} consorcioId={cid} copropietarios={copropietarios} />
       case 'perfil':         return <PerfilAdmin session={session} />
-      case 'cta_corriente':  return <CtaCorriente session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} />
+      case 'comprobantes':   return <Comprobantes session={session} consorcioId={cid} proveedores={proveedores} expensas={expensas} />
+      case 'pagos_prov':     return <PagosProveedor session={session} consorcioId={cid} proveedores={proveedores} />
+      case 'cta_proveedor':  return <CtaProveedor session={session} consorcioId={cid} proveedores={proveedores} />
+      case 'cta_corriente':
+  return <CtaCorriente session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} />
       case 'movimientos':    return <MovimientosUnidad session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
       case 'periodos':       return <ControlPeriodos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} />
       case 'importar':       return <ImportarExcel session={session} consorcioId={cid} onDone={() => { cargar(); setPagina('unidades') }} />
