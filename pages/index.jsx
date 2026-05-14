@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260514-nav-tracking'
+const BUILD_VERSION = '20260514-fix-dashboard'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -4656,6 +4656,109 @@ function PerfilAdmin({ session }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // APP PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
+
+function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
+  formCon, setFormCon, msgCon, guardarConsorcio, setConsorcioActivo,
+  cargarConsorcio, setPagina }) {
+  const totalUFs  = unidades.length
+  const ocupadas  = unidades.filter(u => u.estado==='ocupada').length
+  const coefTotal = unidades.reduce((a,u) => a + Number(u.porcentaje_fiscal||0), 0)
+    return (
+      <div>
+        {consorcios.length>1 && (
+          <div style={{ marginBottom:16, display:'flex', gap:10, alignItems:'center' }}>
+            <span style={{ fontSize:13, color:GR, fontWeight:500, whiteSpace:'nowrap' }}>Consorcio:</span>
+            <select
+              value={consorcioActivo?.id||''}
+              onChange={e => {
+                const c = consorcios.find(x => x.id === e.target.value)
+                if (c) { setConsorcioActivo(c); cargarConsorcio(c.id) }
+              }}
+              style={{ flex:1, padding:'7px 11px', borderRadius:8, border:'1px solid #d1d5db', fontSize:13, background:'#fff', cursor:'pointer' }}>
+              {consorcios.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+            <Btn small onClick={()=>setFormCon({})}>+ Nuevo</Btn>
+          </div>
+        )}
+        {consorcios.length===0 && (
+          <Card style={{ textAlign:'center', padding:40, marginBottom:20, border:`2px dashed ${AZ}` }}>
+            <div style={{ fontSize:40, marginBottom:12 }}>🏢</div>
+            <div style={{ fontWeight:700, fontSize:16, marginBottom:8 }}>Bienvenido a GASP Consorcios</div>
+            <div style={{ color:GR, fontSize:13, marginBottom:20 }}>Creá tu primer consorcio para comenzar</div>
+            <Btn onClick={()=>setFormCon({})}>+ Crear primer consorcio</Btn>
+          </Card>
+        )}
+        {formCon && (
+          <Card style={{ marginBottom:20, border:`1px solid ${AZ}` }}>
+            <div style={{ fontWeight:700, color:AZ, marginBottom:14 }}>{formCon.id?'Editar consorcio':'Nuevo consorcio'}</div>
+            {msgCon && <Msg data={msgCon} />}
+            <div style={{ fontWeight:600, color:GR, fontSize:12, marginBottom:10, textTransform:'uppercase', letterSpacing:'0.5px' }}>Datos generales</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+              <Input label="Nombre del consorcio" value={formCon.nombre} onChange={v=>setFormCon(x=>({...x,nombre:v}))} required />
+              <Input label="CUIT" value={formCon.cuit} onChange={v=>setFormCon(x=>({...x,cuit:v}))} placeholder="30-XXXXXXXX-X" />
+              <Input label="Dirección" value={formCon.direccion} onChange={v=>setFormCon(x=>({...x,direccion:v}))} />
+              <Input label="Localidad" value={formCon.localidad} onChange={v=>setFormCon(x=>({...x,localidad:v}))} />
+              <Input label="Clave SUTERH" value={formCon.clave_suterh} onChange={v=>setFormCon(x=>({...x,clave_suterh:v}))} />
+              <Input label="Interés mora mensual %" value={formCon.interes_mora} onChange={v=>setFormCon(x=>({...x,interes_mora:v}))} type="number" placeholder="5" />
+            </div>
+            <div style={{ fontWeight:600, color:GR, fontSize:12, marginBottom:10, textTransform:'uppercase', letterSpacing:'0.5px' }}>Datos bancarios</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+              <Input label="CBU" value={formCon.cbu} onChange={v=>setFormCon(x=>({...x,cbu:v}))} placeholder="28505909300941..." />
+              <Input label="Alias CBU" value={formCon.alias_cbu} onChange={v=>setFormCon(x=>({...x,alias_cbu:v}))} placeholder="PALABRA.PALABRA.PALABRA" />
+              <Input label="Banco" value={formCon.banco} onChange={v=>setFormCon(x=>({...x,banco:v}))} placeholder="Macro" />
+              <Input label="Sucursal" value={formCon.sucursal} onChange={v=>setFormCon(x=>({...x,sucursal:v}))} placeholder="Pinamar" />
+              <Input label="Nº de cuenta" value={formCon.nro_cuenta} onChange={v=>setFormCon(x=>({...x,nro_cuenta:v}))} />
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <Btn onClick={guardarConsorcio}>{formCon.id?'💾 Actualizar':'Crear'}</Btn>
+              <BtnSec onClick={()=>setFormCon(null)}>Cancelar</BtnSec>
+            </div>
+          </Card>
+        )}
+        {consorcioActivo && (
+          <>
+            <div style={{ background:`linear-gradient(135deg,${AZ} 0%,${AZ2} 100%)`, borderRadius:12, padding:24, marginBottom:20, color:'#fff' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                <div>
+                  <div style={{ fontSize:11, opacity:0.7, textTransform:'uppercase', letterSpacing:1 }}>Consorcio activo</div>
+                  <div style={{ fontSize:22, fontWeight:800, marginTop:4 }}>{consorcioActivo.nombre}</div>
+                  {consorcioActivo.direccion && <div style={{ fontSize:13, opacity:0.8, marginTop:2 }}>📍 {consorcioActivo.direccion}{consorcioActivo.localidad?`, ${consorcioActivo.localidad}`:''}</div>}
+                  {consorcioActivo.cbu && <div style={{ fontSize:11, opacity:0.7, marginTop:4 }}>CBU: {consorcioActivo.cbu} · Alias: {consorcioActivo.alias_cbu}</div>}
+                </div>
+                <BtnSec small onClick={()=>setFormCon({...consorcioActivo})} style={{ background:'rgba(255,255,255,0.15)', color:'#fff', border:'1px solid rgba(255,255,255,0.3)' }}>✏ Editar</BtnSec>
+              </div>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:24 }}>
+              {[{l:'Unidades',v:totalUFs,c:AZ,icon:'🏢',action:'unidades'},{l:'Ocupadas',v:ocupadas,c:VD,icon:'✅',action:'unidades'},{l:'Copropietarios',v:copropietarios.length,c:AM,icon:'👤',action:'copropietarios'},{l:'Coef. total',v:coefTotal.toFixed(2)+'%',c:'#6d28d9',icon:'📊',action:null}].map((k,i)=>(
+                <button key={i} onClick={()=>{ if(k.action) setPagina(k.action) }}
+                  style={{ textAlign:'center', cursor:k.action?'pointer':'default', background:'#fff', border:'0.5px solid #ddd', borderRadius:10, padding:16, width:'100%' }}>
+                  <div style={{ fontSize:24, marginBottom:6 }}>{k.icon}</div>
+                  <div style={{ fontSize:26, fontWeight:800, color:k.c }}>{k.v}</div>
+                  <div style={{ fontSize:11, color:GR, marginTop:4 }}>{k.l}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+              {[{id:'expensas',icon:'💰',label:'Gestionar Expensas',desc:'Crear período, calcular, cobrar'},{id:'cobranzas',icon:'💳',label:'Cobranzas',desc:'Registrar pagos por unidad'},{id:'morosos',icon:'⚠️',label:'Ver Morosos',desc:'Cuotas pendientes y contacto'},{id:'actas',icon:'📖',label:'Libro de Actas',desc:'Asambleas y reuniones'}].map(m=>(
+                <button key={m.id} onClick={()=>{ setPagina(m.id) }}
+                  style={{ cursor:'pointer', background:'#fff', border:'0.5px solid #ddd', borderRadius:10, padding:16, width:'100%', textAlign:'left' }}>
+                  <div style={{ fontSize:28, marginBottom:8 }}>{m.icon}</div>
+                  <div style={{ fontWeight:700, fontSize:15 }}>{m.label}</div>
+                  <div style={{ fontSize:12, color:GR, marginTop:4 }}>{m.desc}</div>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {consorcios.length===1 && (
+          <div style={{ marginTop:20, textAlign:'right' }}>
+            <BtnSec small onClick={()=>setFormCon({})}>+ Agregar otro consorcio</BtnSec>
+          </div>
+        )}
+      </div>
+    )
+}
+
 export default function App() {
   const [session, setSession]             = useState(null)
   const [cargando, setCargando]           = useState(true)
@@ -4808,107 +4911,6 @@ export default function App() {
 // ══════════════════════════════════════════════════════════════════════════════
 // DASHBOARD — componente independiente (fuera de App para evitar re-renders)
 // ══════════════════════════════════════════════════════════════════════════════
-function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
-  formCon, setFormCon, msgCon, guardarConsorcio, setConsorcioActivo,
-  cargarConsorcio, setPagina }) {
-  const totalUFs  = unidades.length
-  const ocupadas  = unidades.filter(u => u.estado==='ocupada').length
-  const coefTotal = unidades.reduce((a,u) => a + Number(u.porcentaje_fiscal||0), 0)
-    return (
-      <div>
-        {consorcios.length>1 && (
-          <div style={{ marginBottom:16, display:'flex', gap:10, alignItems:'center' }}>
-            <span style={{ fontSize:13, color:GR, fontWeight:500, whiteSpace:'nowrap' }}>Consorcio:</span>
-            <select
-              value={consorcioActivo?.id||''}
-              onChange={e => {
-                const c = consorcios.find(x => x.id === e.target.value)
-                if (c) { setConsorcioActivo(c); cargarConsorcio(c.id) }
-              }}
-              style={{ flex:1, padding:'7px 11px', borderRadius:8, border:'1px solid #d1d5db', fontSize:13, background:'#fff', cursor:'pointer' }}>
-              {consorcios.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
-            <Btn small onClick={()=>setFormCon({})}>+ Nuevo</Btn>
-          </div>
-        )}
-        {consorcios.length===0 && (
-          <Card style={{ textAlign:'center', padding:40, marginBottom:20, border:`2px dashed ${AZ}` }}>
-            <div style={{ fontSize:40, marginBottom:12 }}>🏢</div>
-            <div style={{ fontWeight:700, fontSize:16, marginBottom:8 }}>Bienvenido a GASP Consorcios</div>
-            <div style={{ color:GR, fontSize:13, marginBottom:20 }}>Creá tu primer consorcio para comenzar</div>
-            <Btn onClick={()=>setFormCon({})}>+ Crear primer consorcio</Btn>
-          </Card>
-        )}
-        {formCon && (
-          <Card style={{ marginBottom:20, border:`1px solid ${AZ}` }}>
-            <div style={{ fontWeight:700, color:AZ, marginBottom:14 }}>{formCon.id?'Editar consorcio':'Nuevo consorcio'}</div>
-            {msgCon && <Msg data={msgCon} />}
-            <div style={{ fontWeight:600, color:GR, fontSize:12, marginBottom:10, textTransform:'uppercase', letterSpacing:'0.5px' }}>Datos generales</div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
-              <Input label="Nombre del consorcio" value={formCon.nombre} onChange={v=>setFormCon(x=>({...x,nombre:v}))} required />
-              <Input label="CUIT" value={formCon.cuit} onChange={v=>setFormCon(x=>({...x,cuit:v}))} placeholder="30-XXXXXXXX-X" />
-              <Input label="Dirección" value={formCon.direccion} onChange={v=>setFormCon(x=>({...x,direccion:v}))} />
-              <Input label="Localidad" value={formCon.localidad} onChange={v=>setFormCon(x=>({...x,localidad:v}))} />
-              <Input label="Clave SUTERH" value={formCon.clave_suterh} onChange={v=>setFormCon(x=>({...x,clave_suterh:v}))} />
-              <Input label="Interés mora mensual %" value={formCon.interes_mora} onChange={v=>setFormCon(x=>({...x,interes_mora:v}))} type="number" placeholder="5" />
-            </div>
-            <div style={{ fontWeight:600, color:GR, fontSize:12, marginBottom:10, textTransform:'uppercase', letterSpacing:'0.5px' }}>Datos bancarios</div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
-              <Input label="CBU" value={formCon.cbu} onChange={v=>setFormCon(x=>({...x,cbu:v}))} placeholder="28505909300941..." />
-              <Input label="Alias CBU" value={formCon.alias_cbu} onChange={v=>setFormCon(x=>({...x,alias_cbu:v}))} placeholder="PALABRA.PALABRA.PALABRA" />
-              <Input label="Banco" value={formCon.banco} onChange={v=>setFormCon(x=>({...x,banco:v}))} placeholder="Macro" />
-              <Input label="Sucursal" value={formCon.sucursal} onChange={v=>setFormCon(x=>({...x,sucursal:v}))} placeholder="Pinamar" />
-              <Input label="Nº de cuenta" value={formCon.nro_cuenta} onChange={v=>setFormCon(x=>({...x,nro_cuenta:v}))} />
-            </div>
-            <div style={{ display:'flex', gap:8 }}>
-              <Btn onClick={guardarConsorcio}>{formCon.id?'💾 Actualizar':'Crear'}</Btn>
-              <BtnSec onClick={()=>setFormCon(null)}>Cancelar</BtnSec>
-            </div>
-          </Card>
-        )}
-        {consorcioActivo && (
-          <>
-            <div style={{ background:`linear-gradient(135deg,${AZ} 0%,${AZ2} 100%)`, borderRadius:12, padding:24, marginBottom:20, color:'#fff' }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-                <div>
-                  <div style={{ fontSize:11, opacity:0.7, textTransform:'uppercase', letterSpacing:1 }}>Consorcio activo</div>
-                  <div style={{ fontSize:22, fontWeight:800, marginTop:4 }}>{consorcioActivo.nombre}</div>
-                  {consorcioActivo.direccion && <div style={{ fontSize:13, opacity:0.8, marginTop:2 }}>📍 {consorcioActivo.direccion}{consorcioActivo.localidad?`, ${consorcioActivo.localidad}`:''}</div>}
-                  {consorcioActivo.cbu && <div style={{ fontSize:11, opacity:0.7, marginTop:4 }}>CBU: {consorcioActivo.cbu} · Alias: {consorcioActivo.alias_cbu}</div>}
-                </div>
-                <BtnSec small onClick={()=>setFormCon({...consorcioActivo})} style={{ background:'rgba(255,255,255,0.15)', color:'#fff', border:'1px solid rgba(255,255,255,0.3)' }}>✏ Editar</BtnSec>
-              </div>
-            </div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:24 }}>
-              {[{l:'Unidades',v:totalUFs,c:AZ,icon:'🏢',action:'unidades'},{l:'Ocupadas',v:ocupadas,c:VD,icon:'✅',action:'unidades'},{l:'Copropietarios',v:copropietarios.length,c:AM,icon:'👤',action:'copropietarios'},{l:'Coef. total',v:coefTotal.toFixed(2)+'%',c:'#6d28d9',icon:'📊',action:null}].map((k,i)=>(
-                <button key={i} onClick={()=>{ if(k.action) setPagina(k.action) }}
-                  style={{ textAlign:'center', cursor:k.action?'pointer':'default', background:'#fff', border:'0.5px solid #ddd', borderRadius:10, padding:16, width:'100%' }}>
-                  <div style={{ fontSize:24, marginBottom:6 }}>{k.icon}</div>
-                  <div style={{ fontSize:26, fontWeight:800, color:k.c }}>{k.v}</div>
-                  <div style={{ fontSize:11, color:GR, marginTop:4 }}>{k.l}</div>
-                </button>
-              ))}
-            </div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-              {[{id:'expensas',icon:'💰',label:'Gestionar Expensas',desc:'Crear período, calcular, cobrar'},{id:'cobranzas',icon:'💳',label:'Cobranzas',desc:'Registrar pagos por unidad'},{id:'morosos',icon:'⚠️',label:'Ver Morosos',desc:'Cuotas pendientes y contacto'},{id:'actas',icon:'📖',label:'Libro de Actas',desc:'Asambleas y reuniones'}].map(m=>(
-                <button key={m.id} onClick={()=>{ setPagina(m.id) }}
-                  style={{ cursor:'pointer', background:'#fff', border:'0.5px solid #ddd', borderRadius:10, padding:16, width:'100%', textAlign:'left' }}>
-                  <div style={{ fontSize:28, marginBottom:8 }}>{m.icon}</div>
-                  <div style={{ fontWeight:700, fontSize:15 }}>{m.label}</div>
-                  <div style={{ fontSize:12, color:GR, marginTop:4 }}>{m.desc}</div>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-        {consorcios.length===1 && (
-          <div style={{ marginTop:20, textAlign:'right' }}>
-            <BtnSec small onClick={()=>setFormCon({})}>+ Agregar otro consorcio</BtnSec>
-          </div>
-        )}
-      </div>
-    )
-}
 
 
   const cid=consorcioActivo?.id
