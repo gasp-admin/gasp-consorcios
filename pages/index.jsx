@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260513-sprint1'
+const BUILD_VERSION = '20260514-sprint1-fix'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -2599,6 +2599,7 @@ export default function App() {
   const [unidades, setUnidades]           = useState([])
   const [copropietarios, setCopropietarios] = useState([])
   const [adminPerfil, setAdminPerfil]     = useState({})
+  const [expensas, setExpensas]           = useState([])
   const [esSuperAdmin, setEsSuperAdmin]   = useState(false)
   const [email, setEmail]                 = useState('')
   const [pass, setPass]                   = useState('')
@@ -2635,11 +2636,12 @@ export default function App() {
     } catch(e) { console.error(e) } finally { if (inicial) setCargando(false) }
   }
   async function cargarConsorcio(cid,uid) {
-    const [u,cp]=await Promise.all([
+    const [u,cp,exp]=await Promise.all([
       supabase.from('con_unidades').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('numero'),
-      supabase.from('con_copropietarios').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('apellido_nombre')
+      supabase.from('con_copropietarios').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('apellido_nombre'),
+      supabase.from('con_expensas').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('periodo',{ascending:false})
     ])
-    setUnidades(u.data||[]); setCopropietarios(cp.data||[])
+    setUnidades(u.data||[]); setCopropietarios(cp.data||[]); setExpensas(exp.data||[])
   }
   async function login() {
     setLoginLoading(true); setLoginError('')
