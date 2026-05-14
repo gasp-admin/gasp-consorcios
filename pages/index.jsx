@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260514-sprint4'
-const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const BUILD_VERSION = '20260514-sprint4b'
+const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
 
@@ -1483,12 +1483,13 @@ function EnviarEmails({ session, consorcioId, unidades, adminPerfil }) {
 
     setEnviando(true); setResultado(null); setMsg(null)
     try {
-      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/enviar-liquidacion`, {
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const res = await fetch(`${SUPA_URL}/functions/v1/enviar-liquidacion`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+          'Authorization': `Bearer ${sess?.access_token}`,
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
         },
         body: JSON.stringify({
           expensa_id: expSel,
