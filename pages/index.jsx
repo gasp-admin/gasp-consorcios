@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260515-liquidacion'
+const BUILD_VERSION = '20260515-fix-ts'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -666,7 +666,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         .neq('id', expSel.id).eq('estado','cerrada')
         .order('periodo', { ascending: false }).limit(1)
 
-      let saldosAnt: Record<string,number> = {}
+      let saldosAnt = {}
       if (expAnterior?.[0]) {
         const { data: detsAnt } = await supabase.from('con_expensas_detalle')
           .select('unidad_id, monto, saldo_anterior, pagos_periodo, interes_mora')
@@ -701,7 +701,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       setPaso(4)
       await cargar()
 
-    } catch(e: any) {
+    } catch(e) {
       setMsg({ tipo:'error', texto: 'Error: ' + e.message })
     }
     setProcesando(false)
@@ -902,7 +902,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
 
           {/* Resumen gastos por rubro */}
           {gastos.length > 0 && (() => {
-            const porRubro: Record<string,number> = {}
+            const porRubro = {}
             for (const g of gastos) {
               porRubro[g.categoria||'varios'] = (porRubro[g.categoria||'varios']||0) + (parseFloat(g.monto)||0)
             }
