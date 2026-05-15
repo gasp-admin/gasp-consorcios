@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260514-uf-nro-ep-siro'
+const BUILD_VERSION = '20260514-fix-charcode'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -3038,9 +3038,8 @@ INSTRUCCIONES IMPORTANTES:
       // Parsear JSON — limpiar posibles backticks
       let json
       try {
-        const limpio = texto.replace(/```json
-?/g,'').replace(/```
-?/g,'').trim()
+        const BT = String.fromCharCode(96)
+        const limpio = texto.split(BT+BT+BT+'json').join('').split(BT+BT+BT).join('').trim()
         json = JSON.parse(limpio)
       } catch(e) {
         throw new Error('La IA no devolvió un JSON válido. Intentá con otro PDF o verificá el formato.')
