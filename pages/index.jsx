@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260515-fix-ts'
+const BUILD_VERSION = '20260515-fix-ts2'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -707,9 +707,9 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     setProcesando(false)
   }
 
-  const fmt  = (n: any) => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
-  const fmtD = (d: string) => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
-  const periodoLabel = (p: string) => {
+  const fmt  = (n) => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
+  const fmtD = (d) => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
+  const periodoLabel = (p) => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const mes = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
