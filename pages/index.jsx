@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260514-fix-dashboard'
+const BUILD_VERSION = '20260514-uf-nro-ep-siro'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -251,6 +251,41 @@ function Unidades({ session, consorcioId, copropietarios }) {
               opts={[{v:'',l:'— Sin asignar —'}, ...copropietarios.map(c=>({v:c.id,l:c.apellido_nombre}))]} />
             <Input label="Descripción" value={form.descripcion} onChange={v=>F({descripcion:v})} placeholder="Observaciones..." />
           </div>
+          {/* Sección cobranzas automáticas */}
+          <div style={{ borderTop:'1px solid #e5e7eb', paddingTop:12, marginTop:4, marginBottom:12 }}>
+            <div style={{ fontSize:11, fontWeight:600, color:GR, textTransform:'uppercase',
+              letterSpacing:'0.05em', marginBottom:10 }}>
+              Cobranzas automáticas
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div>
+                <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>
+                  Nro. Expensas Pagas
+                </div>
+                <input value={form.nro_ep||''}
+                  onChange={e=>F({nro_ep:e.target.value})}
+                  placeholder="ej: 1, 2, 3..."
+                  style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
+                    borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+                <div style={{ fontSize:10, color:GR, marginTop:3 }}>
+                  Número interno asignado por Expensas Pagas a esta UF
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>
+                  Nro. referencia SIRO
+                </div>
+                <input value={form.nro_siro||''}
+                  onChange={e=>F({nro_siro:e.target.value})}
+                  placeholder="ej: 00001"
+                  style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
+                    borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+                <div style={{ fontSize:10, color:GR, marginTop:3 }}>
+                  Código de referencia usado en SIRO Banco Roela
+                </div>
+              </div>
+            </div>
+          </div>
           <div style={{ display:'flex', gap:8 }}>
             <Btn onClick={guardar}>💾 Guardar</Btn>
             <BtnSec onClick={() => setForm(null)}>Cancelar</BtnSec>
@@ -267,7 +302,7 @@ function Unidades({ session, consorcioId, copropietarios }) {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead>
               <tr style={{ background:'#f3f4f6' }}>
-                {['UF','Tipo','Piso','Sup.','Coef. %','Copropietario','Estado',''].map((h,i) => (
+                {['UF','Tipo','Piso','Sup.','Coef. %','Copropietario','Cob. Auto','Estado',''].map((h,i) => (
                   <th key={i} style={{ padding:'8px 12px', textAlign:'left', fontSize:11, fontWeight:'bold', color:GR, textTransform:'uppercase', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
                 ))}
               </tr>
@@ -284,6 +319,11 @@ function Unidades({ session, consorcioId, copropietarios }) {
                     <td style={{ padding:'10px 12px' }}>{u.superficie_cubierta?u.superficie_cubierta+' m²':'—'}</td>
                     <td style={{ padding:'10px 12px', fontWeight:600 }}>{u.porcentaje_fiscal?Number(u.porcentaje_fiscal).toFixed(4)+'%':'—'}</td>
                     <td style={{ padding:'10px 12px' }}>{cp?.apellido_nombre||'—'}</td>
+                    <td style={{ padding:'10px 12px' }}>
+                      {u.nro_ep && <span style={{ fontSize:10, background:'#eff6ff', color:AZ, borderRadius:4, padding:'1px 5px', marginRight:4 }}>EP:{u.nro_ep}</span>}
+                      {u.nro_siro && <span style={{ fontSize:10, background:'#faf5ff', color:'#7c3aed', borderRadius:4, padding:'1px 5px' }}>SIRO:{u.nro_siro}</span>}
+                      {!u.nro_ep && !u.nro_siro && <span style={{ color:GR }}>—</span>}
+                    </td>
                     <td style={{ padding:'10px 12px' }}><Badge text={u.estado} color={ec.c} bg={ec.bg} /></td>
                     <td style={{ padding:'10px 12px' }}>
                       <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
@@ -1456,6 +1496,918 @@ function Actas({ session, consorcioId, copropietarios }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // SEGUIMIENTO DE EMAILS — tracking de envíos, entregas y aperturas
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COBRANZAS AUTOMÁTICAS — importar pagos desde Expensas Pagas y SIRO Roela
+// ══════════════════════════════════════════════════════════════════════════════
+function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades, copropietarios, expensas }) {
+  const [tab, setTab]             = useState('importar')  // importar | config | historial
+  const [archivo, setArchivo]     = useState(null)
+  const [sistema, setSistema]     = useState('expensas_pagas')
+  const [expSel, setExpSel]       = useState('')
+  const [preview, setPreview]     = useState([])
+  const [procesando, setProcesando] = useState(false)
+  const [msg, setMsg]             = useState(null)
+  const [config, setConfig]       = useState(null)
+  const [historial, setHistorial] = useState([])
+  const [siroConectado, setSiroConectado] = useState(false)
+  const [cargandoSiro, setCargandoSiro]   = useState(false)
+
+  const hoy = new Date().toISOString().split('T')[0]
+
+  async function cargarConfig() {
+    const { data } = await supabase.from('con_config_cobranza').select('*')
+      .eq('consorcio_id', consorcioId).single()
+    setConfig(data || {})
+  }
+
+  async function cargarHistorial() {
+    const { data } = await supabase.from('con_cobranzas_automaticas_log').select('*')
+      .eq('consorcio_id', consorcioId).order('created_at', { ascending: false }).limit(20)
+    setHistorial(data || [])
+  }
+
+  async function guardarConfig() {
+    if (!config) return
+    const payload = { ...config, admin_id: session.user.id, consorcio_id: consorcioId,
+      id: `CFG-${consorcioId}`, updated_at: new Date().toISOString() }
+    const { error } = await supabase.from('con_config_cobranza').upsert([payload], { onConflict:'consorcio_id' })
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else setMsg({ tipo:'ok', texto:'✓ Configuración guardada' })
+  }
+
+  // ── PARSERS ──────────────────────────────────────────────────────────────
+
+  function parsearRD(texto) {
+    // RD Expensas Pagas: tipo(1)+ref_uf(9)+fecha(8)+bruto(11)+comision(12)+neto(10)+canal(15)
+    const lineas = texto.split(/\r?\n/).filter(l => l.trim())
+    const header = lineas[0]
+    const convenio_header = header.slice(1,5)
+    const fecha_arch = `${header.slice(5,9)}-${header.slice(9,11)}-${header.slice(11,13)}`
+    const registros = []
+    for (const line of lineas.slice(1)) {
+      if (!line || line[0] === '9') continue
+      try {
+        const ref      = line.slice(1,10)
+        const convenio = ref.slice(0,4)
+        const nro_uf   = parseInt(ref.slice(4)) || 0
+        const fecha    = `${line.slice(10,14)}-${line.slice(14,16)}-${line.slice(16,18)}`
+        const bruto    = parseInt(line.slice(18,29)) / 100
+        const comision = parseInt(line.slice(29,41)) / 100
+        const neto     = parseInt(line.slice(41,51)) / 100
+        const canal    = line.slice(51).trim()
+        registros.push({ convenio, nro_uf, fecha, bruto, comision, neto, canal, raw: line })
+      } catch(e) {}
+    }
+    return { convenio_header, fecha_arch, registros, total: registros.reduce((a,r)=>a+r.neto,0) }
+  }
+
+  function parsearSIRO(texto) {
+    // SIRO Roela: fecha_pago(8)+fecha_acred(8)+fecha_vto(8)+nro_cbte(12)+cod_canal(5)+...+importe(12 en pos 49:61)+canal_txt(2)
+    const CANALES_SIRO = {
+      '11390':'PagoMisCuentas','13900':'PagoMisCuentas',
+      '00024':'PagoFacil','02400':'PagoFacil','02200':'PagoFacil',
+      '00005':'RapiPago','00500':'RapiPago',
+      '00006':'PagoFacil','00600':'PagoFacil',
+    }
+    const lineas = texto.split(/\r?\n/).filter(l => l.trim())
+    const registros = []
+    for (const line of lineas) {
+      if (line.length < 61) continue
+      try {
+        const fecha_pago = `${line.slice(0,4)}-${line.slice(4,6)}-${line.slice(6,8)}`
+        const fecha_acred = `${line.slice(8,12)}-${line.slice(12,14)}-${line.slice(14,16)}`
+        const nro_cbte   = line.slice(24,36).trim()
+        const cod_canal  = line.slice(36,41)
+        const importe    = parseInt(line.slice(49,61)) / 100
+        const canal_txt  = line.slice(-2).trim()
+        const canal_name = CANALES_SIRO[cod_canal] || canal_txt
+        if (isNaN(importe) || importe <= 0) continue
+        // El nro_uf en SIRO está en el nro_cbte — extraer los últimos dígitos significativos
+        const nro_uf_siro = nro_cbte.replace(/^0+/, '') || '0'
+        registros.push({ nro_cbte, nro_uf_siro, fecha_pago, fecha_acred, importe, canal_name, raw: line })
+      } catch(e) {}
+    }
+    return { registros, total: registros.reduce((a,r)=>a+r.importe,0) }
+  }
+
+  function procesarArchivo(file) {
+    setArchivo(file); setPreview([]); setMsg(null)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const texto = e.target.result
+      try {
+        let parsed
+        if (sistema === 'expensas_pagas') {
+          parsed = parsearRD(texto)
+          setPreview(parsed.registros.slice(0,8).map(r => ({
+            referencia: `Conv.${r.convenio} UF#${r.nro_uf}`,
+            fecha: r.fecha,
+            importe: r.neto,
+            canal: r.canal,
+            _raw: r,
+          })))
+          setMsg({ tipo:'info', texto:`✓ ${parsed.registros.length} pagos detectados — Total neto: $${parsed.total.toLocaleString('es-AR')}` })
+        } else {
+          parsed = parsearSIRO(texto)
+          setPreview(parsed.registros.slice(0,8).map(r => ({
+            referencia: r.nro_cbte,
+            fecha: r.fecha_pago,
+            importe: r.importe,
+            canal: r.canal_name,
+            _raw: r,
+          })))
+          setMsg({ tipo:'info', texto:`✓ ${parsed.registros.length} pagos detectados — Total: $${parsed.total.toLocaleString('es-AR')}` })
+        }
+      } catch(e) {
+        setMsg({ tipo:'error', texto: 'Error procesando archivo: ' + e.message })
+      }
+    }
+    reader.readAsText(file, 'latin-1')
+  }
+
+  async function importarPagos() {
+    if (!archivo || !expSel) return setMsg({ tipo:'warn', texto:'Seleccioná el período primero' })
+    setProcesando(true); setMsg(null)
+
+    const reader = new FileReader()
+    reader.onload = async (e) => {
+      const texto = e.target.result
+      let registros = []
+
+      if (sistema === 'expensas_pagas') {
+        const parsed = parsearRD(texto)
+        registros = parsed.registros
+      } else {
+        const parsed = parsearSIRO(texto)
+        registros = parsed.registros.map(r => ({
+          // Para SIRO: buscar UF por nro_siro o por número de comprobante
+          nro_uf_siro: r.nro_uf_siro,
+          nro_cbte: r.nro_cbte,
+          fecha: r.fecha_pago,
+          neto: r.importe,
+          canal: r.canal_name,
+          _raw: r,
+        }))
+      }
+
+      let ok = 0, errores = [], sinMatch = []
+      const epConvenio = config?.ep_convenio_id || ''
+
+      for (const reg of registros) {
+        // Buscar la UF correspondiente
+        let uf = null
+
+        if (sistema === 'expensas_pagas') {
+          // Buscar por nro_ep (número interno Expensas Pagas)
+          const nroStr = String(reg.nro_uf)
+          uf = unidades.find(u =>
+            u.nro_ep === nroStr ||
+            u.nro_ep === nroStr.padStart(2,'0') ||
+            u.nro_ep === nroStr.padStart(3,'0') ||
+            // Fallback: número correlativo por posición si la UF tiene ese número
+            u.numero === nroStr
+          )
+        } else {
+          // SIRO: buscar por nro_siro o por comprobante
+          uf = unidades.find(u =>
+            u.nro_siro && (u.nro_siro === reg.nro_uf_siro || u.nro_siro === reg.nro_cbte)
+          )
+        }
+
+        if (!uf) {
+          sinMatch.push(`Ref ${reg.nro_uf || reg.nro_cbte}: sin coincidencia`)
+          continue
+        }
+
+        // Verificar si ya existe esa cobranza (deduplicar)
+        const { data: existe } = await supabase.from('con_cobranzas').select('id')
+          .eq('unidad_id', uf.id).eq('expensa_id', expSel)
+          .eq('monto', reg.neto).eq('fecha', reg.fecha).limit(1)
+
+        if (existe?.length > 0) {
+          sinMatch.push(`UF ${uf.numero}: pago duplicado (${reg.fecha})`)
+          continue
+        }
+
+        // Registrar cobranza
+        const cp = copropietarios.find(c => c.id === uf.propietario_id)
+        const { error } = await supabase.from('con_cobranzas').insert([{
+          id: `COB-AUTO-${uf.id}-${Date.now()}-${ok}`,
+          admin_id: session.user.id,
+          consorcio_id: consorcioId,
+          expensa_id: expSel,
+          unidad_id: uf.id,
+          fecha: reg.fecha,
+          monto: reg.neto,
+          medio_pago: sistema === 'expensas_pagas' ? 'debito_automatico' : 'siro',
+          canal_cobro: reg.canal,
+          estado: 'vigente',
+          notas: `Importado desde ${sistema === 'expensas_pagas' ? 'Expensas Pagas' : 'SIRO Roela'} — ${archivo.name}`,
+        }])
+
+        if (error) {
+          errores.push(`UF ${uf.numero}: ${error.message}`)
+        } else {
+          // Actualizar pagos_periodo en expensas_detalle
+          const { data: det } = await supabase.from('con_expensas_detalle').select('pagos_periodo')
+            .eq('expensa_id', expSel).eq('unidad_id', uf.id).single()
+          if (det) {
+            const nuevoPago = (parseFloat(det.pagos_periodo)||0) + reg.neto
+            await supabase.from('con_expensas_detalle').update({
+              pagos_periodo: nuevoPago,
+              estado: nuevoPago >= (det.monto||0) ? 'pagada' : 'pendiente'
+            }).eq('expensa_id', expSel).eq('unidad_id', uf.id)
+          }
+          ok++
+        }
+      }
+
+      // Log de la importación
+      await supabase.from('con_cobranzas_automaticas_log').insert([{
+        id: `LOG-${Date.now()}`,
+        admin_id: session.user.id,
+        consorcio_id: consorcioId,
+        expensa_id: expSel,
+        sistema,
+        archivo_nombre: archivo.name,
+        fecha_proceso: hoy,
+        total_registros: registros.length,
+        registros_ok: ok,
+        registros_error: errores.length + sinMatch.length,
+        total_importe: registros.reduce((a,r)=>a+(r.neto||0),0),
+        detalle_errores: [...errores, ...sinMatch].join('\n') || null,
+      }])
+
+      const msgs = [`✓ ${ok} cobranzas importadas`]
+      if (sinMatch.length > 0) msgs.push(`${sinMatch.length} sin coincidencia`)
+      if (errores.length > 0) msgs.push(`${errores.length} errores`)
+
+      setMsg({ tipo: errores.length > 0 ? 'warn' : 'ok', texto: msgs.join(' · ') })
+      cargarHistorial()
+      setProcesando(false)
+    }
+    reader.readAsText(archivo, 'latin-1')
+  }
+
+  // ── API SIRO ─────────────────────────────────────────────────────────────
+  async function consultarAPIRoela() {
+    if (!config?.siro_api_usuario || !config?.siro_api_password) {
+      return setMsg({ tipo:'warn', texto:'Configurá usuario y contraseña API de SIRO primero' })
+    }
+    if (!expSel) return setMsg({ tipo:'warn', texto:'Seleccioná el período primero' })
+    setCargandoSiro(true); setMsg(null)
+
+    try {
+      // 1. Obtener token
+      const tokenRes = await fetch('https://apisiro.bancoroela.com.ar:49220/auth/singin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          Usuario: config.siro_api_usuario,
+          Password: config.siro_api_password,
+        })
+      })
+
+      if (!tokenRes.ok) throw new Error(`Error autenticación SIRO: ${tokenRes.status}`)
+      const tokenData = await tokenRes.json()
+      const accessToken = tokenData.access_token
+
+      // 2. Consultar listado de cobranzas del período
+      const exp = expensas.find(e => e.id === expSel)
+      const periodo = exp?.periodo || ''
+      const [y, m] = periodo.split('-')
+      const fechaDesde = `${y}${m}01`
+      const fechaHasta = `${y}${m}${new Date(parseInt(y), parseInt(m), 0).getDate()}`
+
+      const listadoRes = await fetch('https://apisiro.bancoroela.com.ar:49220/siro/Listados/Proceso', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          cuit_administrador: config.siro_cuit_admin || config.siro_api_usuario,
+          fecha_desde: fechaDesde,
+          fecha_hasta: fechaHasta,
+          nro_convenio: config.siro_convenio_id,
+        })
+      })
+
+      if (!listadoRes.ok) throw new Error(`Error SIRO API: ${listadoRes.status}`)
+      const listado = await listadoRes.json()
+
+      // Procesar los registros de la API
+      const registros = listado.data || listado || []
+      let ok = 0, sinMatch = []
+
+      for (const pago of registros) {
+        const nroRef = String(pago.nro_referencia || pago.cliente || '')
+        const uf = unidades.find(u => u.nro_siro === nroRef || u.numero === nroRef)
+        if (!uf) { sinMatch.push(nroRef); continue }
+
+        const monto = parseFloat(pago.importe_pagado || pago.importe || 0)
+        const fecha = pago.fecha_pago || hoy
+
+        const { error } = await supabase.from('con_cobranzas').insert([{
+          id: `COB-SIRO-API-${uf.id}-${Date.now()}-${ok}`,
+          admin_id: session.user.id, consorcio_id: consorcioId, expensa_id: expSel,
+          unidad_id: uf.id, fecha, monto,
+          medio_pago: 'siro', canal_cobro: pago.canal || 'SIRO API',
+          estado: 'vigente',
+          notas: `SIRO API — ${pago.nro_comprobante || ''}`,
+        }])
+
+        if (!error) {
+          ok++
+          const { data: det } = await supabase.from('con_expensas_detalle').select('pagos_periodo,monto')
+            .eq('expensa_id', expSel).eq('unidad_id', uf.id).single()
+          if (det) {
+            const nuevoPago = (parseFloat(det.pagos_periodo)||0) + monto
+            await supabase.from('con_expensas_detalle').update({
+              pagos_periodo: nuevoPago,
+              estado: nuevoPago >= (det.monto||0) ? 'pagada' : 'pendiente'
+            }).eq('expensa_id', expSel).eq('unidad_id', uf.id)
+          }
+        }
+      }
+
+      setMsg({ tipo:'ok', texto:`✓ API SIRO: ${ok} pagos importados · ${sinMatch.length} sin coincidencia · ${registros.length} total` })
+      setSiroConectado(true)
+      cargarHistorial()
+
+    } catch(e) {
+      setMsg({ tipo:'error', texto: 'Error API SIRO: ' + e.message })
+    }
+    setCargandoSiro(false)
+  }
+
+  useEffect(() => { if (consorcioId) { cargarConfig(); cargarHistorial() } }, [consorcioId])
+
+  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
+  const periodoLabel = p => {
+    if (!p) return '—'
+    const [y,m] = p.split('-')
+    const mes = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    return m ? `${mes[parseInt(m)-1]} ${y}` : p
+  }
+
+  return (
+    <div>
+      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>🏦 Cobranzas automáticas</div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Importar pagos desde sistemas de cobranza y registrarlos automáticamente
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:0, marginBottom:20, borderBottom:'2px solid #e5e7eb' }}>
+        {[
+          { id:'importar', l:'📥 Importar archivo' },
+          { id:'api',      l:'🔌 API SIRO Roela' },
+          { id:'config',   l:'⚙️ Configuración' },
+          { id:'historial',l:'📋 Historial' },
+        ].map(t => (
+          <button key={t.id} onClick={()=>setTab(t.id)}
+            style={{ padding:'8px 16px', border:'none', borderBottom: tab===t.id ?`2px solid ${AZ}`:'2px solid transparent',
+              background:'transparent', color: tab===t.id ? AZ : GR, fontWeight: tab===t.id ? 700 : 400,
+              fontSize:13, cursor:'pointer', marginBottom:-2 }}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      <Msg data={msg} />
+
+      {/* ── TAB: IMPORTAR ARCHIVO ── */}
+      {tab === 'importar' && (
+        <div>
+          <Card style={{ marginBottom:16 }}>
+            <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:14 }}>
+              Seleccionar archivo y período
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+              <div>
+                <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Sistema de cobranza</div>
+                <select value={sistema} onChange={e=>{ setSistema(e.target.value); setArchivo(null); setPreview([]) }}
+                  style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+                  <option value="expensas_pagas">Expensas Pagas (archivo RD)</option>
+                  <option value="siro">SIRO Banco Roela (archivo TXT)</option>
+                </select>
+              </div>
+              <Sel label="Período a imputar" value={expSel} onChange={setExpSel}
+                opts={[{v:'',l:'— Seleccione período —'},
+                  ...expensas.map(e => ({ v:e.id, l:`${periodoLabel(e.periodo)} — ${e.tipo||''}` }))
+                ]} />
+            </div>
+
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>
+                Archivo {sistema === 'expensas_pagas' ? 'RD (Retorno de Débito)' : 'SIRO (Rendición TXT)'}
+              </div>
+              <input type="file" accept=".txt"
+                onChange={e => e.target.files[0] && procesarArchivo(e.target.files[0])}
+                style={{ fontSize:13 }} />
+            </div>
+
+            {/* Info formato */}
+            <div style={{ background:'#f0f9ff', border:'1px solid #bae6fd', borderRadius:8,
+              padding:'10px 14px', fontSize:11, color:'#0369a1' }}>
+              {sistema === 'expensas_pagas' ? (
+                <>
+                  <strong>Formato Expensas Pagas RD:</strong> El archivo se llama{' '}
+                  <code>XXXX_RD_AAAAMMDD.txt</code> donde XXXX es el ID del consorcio.
+                  Identifica el pago por <strong>número de UF interno</strong>.
+                  Configurar el nro_ep de cada UF en la pestaña ⚙️ Configuración.
+                </>
+              ) : (
+                <>
+                  <strong>Formato SIRO Banco Roela:</strong> El archivo se llama{' '}
+                  <code>CobranzasSiro_CUIT_FECHA.txt</code>.
+                  Cada línea tiene 125 caracteres. El importe está en las posiciones 49-61.
+                  Configurar nro_siro de cada UF en ⚙️ Configuración.
+                </>
+              )}
+            </div>
+          </Card>
+
+          {/* Preview */}
+          {preview.length > 0 && (
+            <Card style={{ marginBottom:16 }}>
+              <div style={{ fontWeight:600, fontSize:13, marginBottom:10 }}>
+                Vista previa — primeros {preview.length} registros
+              </div>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                <thead>
+                  <tr style={{ background:'#f3f4f6' }}>
+                    {['Referencia UF','Fecha','Importe neto','Canal'].map((h,i) => (
+                      <th key={i} style={{ padding:'6px 10px', textAlign:i===2?'right':'left',
+                        fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.map((r,i) => {
+                    const uf = sistema === 'expensas_pagas'
+                      ? unidades.find(u => u.nro_ep === String(r._raw?.nro_uf))
+                      : unidades.find(u => u.nro_siro === r._raw?.nro_uf_siro)
+                    return (
+                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6',
+                        background: uf ? 'transparent' : '#fff8f0' }}>
+                        <td style={{ padding:'6px 10px' }}>
+                          <span style={{ fontWeight:600 }}>{r.referencia}</span>
+                          {uf ? (
+                            <span style={{ marginLeft:8, fontSize:10, color:VD }}>
+                              → UF {uf.numero}
+                            </span>
+                          ) : (
+                            <span style={{ marginLeft:8, fontSize:10, color:AM }}>
+                              ⚠ sin coincidencia
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding:'6px 10px', color:GR, fontSize:11 }}>{r.fecha}</td>
+                        <td style={{ padding:'6px 10px', textAlign:'right', fontWeight:700, color:VD }}>{fmt(r.importe)}</td>
+                        <td style={{ padding:'6px 10px', color:GR, fontSize:11 }}>{r.canal}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <div style={{ marginTop:12, display:'flex', gap:8 }}>
+                <Btn onClick={importarPagos} disabled={procesando || !expSel}>
+                  {procesando ? '⏳ Importando...' : '✓ Importar y registrar pagos'}
+                </Btn>
+                <BtnSec onClick={()=>{setArchivo(null);setPreview([]);setMsg(null)}}>
+                  Cancelar
+                </BtnSec>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB: API SIRO ── */}
+      {tab === 'api' && (
+        <div>
+          <Card style={{ marginBottom:16 }}>
+            <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:14 }}>
+              🔌 Integración directa con API SIRO Banco Roela
+            </div>
+            <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8,
+              padding:'12px 14px', fontSize:12, marginBottom:16 }}>
+              Consulta los pagos directamente desde el servidor de SIRO sin necesidad de descargar archivos manualmente.
+              Requiere credenciales API provistas por su ejecutivo de cuentas en Banco Roela.
+            </div>
+
+            <Sel label="Período a importar" value={expSel} onChange={setExpSel}
+              opts={[{v:'',l:'— Seleccione período —'},
+                ...expensas.map(e => ({ v:e.id, l:`${periodoLabel(e.periodo)} — ${e.tipo||''}` }))
+              ]} />
+
+            <div style={{ marginTop:14, display:'flex', gap:8 }}>
+              <Btn onClick={consultarAPIRoela} disabled={cargandoSiro || !expSel || !config?.siro_api_usuario}
+                style={{ background: config?.siro_api_usuario ? AZ : GR }}>
+                {cargandoSiro ? '⏳ Consultando SIRO...' : '🔌 Consultar y registrar pagos'}
+              </Btn>
+            </div>
+
+            {!config?.siro_api_usuario && (
+              <div style={{ marginTop:10, fontSize:12, color:AM }}>
+                ⚠️ Configurá las credenciales API en la pestaña ⚙️ Configuración
+              </div>
+            )}
+
+            {siroConectado && (
+              <div style={{ marginTop:10, fontSize:12, color:VD, fontWeight:600 }}>
+                ✓ Conectado a API SIRO Banco Roela
+              </div>
+            )}
+          </Card>
+
+          <Card style={{ background:'#eff6ff', border:'1px solid #bfdbfe' }}>
+            <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:10 }}>
+              ¿Cómo obtener las credenciales API?
+            </div>
+            <div style={{ fontSize:12, color:'#374151', lineHeight:1.9 }}>
+              1. Contactar a Banco Roela: <strong>mesadeayuda@bancoroela.com.ar</strong><br/>
+              2. WhatsApp desarrolladores: <strong>+54 9 3513 95-1668</strong><br/>
+              3. Indicar: número de convenio SIRO + CUIT del administrador<br/>
+              4. Solicitar activación de <strong>API SIRO</strong> (gestión de cobranzas)<br/>
+              5. Banco Roela proveerá: usuario API + contraseña API
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ── TAB: CONFIGURACIÓN ── */}
+      {tab === 'config' && config && (
+        <div>
+          {/* Expensas Pagas */}
+          <Card style={{ marginBottom:16 }}>
+            <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:14 }}>
+              Expensas Pagas
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
+              <div>
+                <label style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10, fontSize:13 }}>
+                  <input type="checkbox" checked={config.ep_activo||false}
+                    onChange={e=>setConfig(c=>({...c,ep_activo:e.target.checked}))} />
+                  <strong>Activo</strong>
+                </label>
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>ID Convenio (4 dígitos)</div>
+                <input value={config.ep_convenio_id||''} placeholder="ej: 0145"
+                  onChange={e=>setConfig(c=>({...c,ep_convenio_id:e.target.value}))}
+                  style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>ID Consorcio (4 dígitos)</div>
+                <input value={config.ep_consorcio_id||''} placeholder="ej: 1872"
+                  onChange={e=>setConfig(c=>({...c,ep_consorcio_id:e.target.value}))}
+                  style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+              </div>
+            </div>
+            <div style={{ fontSize:11, color:GR, marginBottom:12 }}>
+              Los números EP de cada UF se configuran en el módulo Unidades (campo "Nro EP").
+            </div>
+          </Card>
+
+          {/* SIRO */}
+          <Card style={{ marginBottom:16 }}>
+            <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:14 }}>
+              SIRO Banco Roela
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+              <div>
+                <label style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10, fontSize:13 }}>
+                  <input type="checkbox" checked={config.siro_activo||false}
+                    onChange={e=>setConfig(c=>({...c,siro_activo:e.target.checked}))} />
+                  <strong>SIRO activo</strong>
+                </label>
+              </div>
+              <div>
+                <label style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10, fontSize:13 }}>
+                  <input type="checkbox" checked={config.siro_api_activo||false}
+                    onChange={e=>setConfig(c=>({...c,siro_api_activo:e.target.checked}))} />
+                  <strong>API activa</strong>
+                </label>
+              </div>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+              {[
+                { k:'siro_convenio_id', l:'Nro. convenio (10 dígitos)', p:'ej: 0000001234' },
+                { k:'siro_cuit_admin',  l:'CUIT administrador', p:'ej: 20186006802' },
+                { k:'siro_api_usuario', l:'Usuario API', p:'Provisto por Banco Roela' },
+                { k:'siro_api_password',l:'Contraseña API', p:'Provisto por Banco Roela' },
+              ].map(f => (
+                <div key={f.k}>
+                  <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>{f.l}</div>
+                  <input type={f.k.includes('password')?'password':'text'}
+                    value={config[f.k]||''} placeholder={f.p}
+                    onChange={e=>setConfig(c=>({...c,[f.k]:e.target.value}))}
+                    style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Btn onClick={guardarConfig}>✓ Guardar configuración</Btn>
+        </div>
+      )}
+
+      {/* ── TAB: HISTORIAL ── */}
+      {tab === 'historial' && (
+        <Card>
+          <div style={{ fontWeight:600, fontSize:13, marginBottom:12 }}>
+            Últimas importaciones ({historial.length})
+          </div>
+          {historial.length === 0 ? (
+            <div style={{ color:GR, fontSize:13, padding:'16px 0' }}>Sin importaciones previas</div>
+          ) : (
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead>
+                <tr style={{ background:'#f3f4f6' }}>
+                  {['Fecha','Sistema','Archivo','Período','OK','Errores','Total'].map((h,i) => (
+                    <th key={i} style={{ padding:'7px 10px', textAlign:i>=4?'center':'left',
+                      fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {historial.map(h => (
+                  <tr key={h.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                    <td style={{ padding:'7px 10px', color:GR, fontSize:11 }}>
+                      {new Date(h.created_at).toLocaleDateString('es-AR')}
+                    </td>
+                    <td style={{ padding:'7px 10px' }}>
+                      <Badge text={h.sistema==='expensas_pagas'?'Exp. Pagas':'SIRO'}
+                        color={h.sistema==='expensas_pagas'?AZ:'#7c3aed'}
+                        bg={h.sistema==='expensas_pagas'?'#eff6ff':'#faf5ff'} />
+                    </td>
+                    <td style={{ padding:'7px 10px', fontSize:11, color:GR, maxWidth:150 }}>
+                      {h.archivo_nombre}
+                    </td>
+                    <td style={{ padding:'7px 10px', fontSize:11 }}>
+                      {periodoLabel(expensas.find(e=>e.id===h.expensa_id)?.periodo)}
+                    </td>
+                    <td style={{ padding:'7px 10px', textAlign:'center', color:VD, fontWeight:700 }}>
+                      {h.registros_ok}
+                    </td>
+                    <td style={{ padding:'7px 10px', textAlign:'center',
+                      color: h.registros_error > 0 ? RJ : GR, fontWeight: h.registros_error > 0 ? 700 : 400 }}>
+                      {h.registros_error || '—'}
+                    </td>
+                    <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:700 }}>
+                      {fmt(h.total_importe)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GENERAR DÉBITO — generar archivos para Expensas Pagas y SIRO
+// ══════════════════════════════════════════════════════════════════════════════
+function GenerarDebito({ session, consorcioId, consorcioActivo, unidades, copropietarios, expensas }) {
+  const [expSel, setExpSel]   = useState('')
+  const [sistema, setSistema] = useState('expensas_pagas')
+  const [config, setConfig]   = useState(null)
+  const [detalles, setDetalles] = useState([])
+  const [msg, setMsg]         = useState(null)
+  const [generando, setGenerando] = useState(false)
+
+  async function cargarConfig() {
+    const { data } = await supabase.from('con_config_cobranza').select('*')
+      .eq('consorcio_id', consorcioId).single()
+    setConfig(data || {})
+  }
+
+  async function cargarDetalles(eid) {
+    const { data } = await supabase.from('con_expensas_detalle').select('*')
+      .eq('expensa_id', eid)
+    setDetalles(data || [])
+  }
+
+  useEffect(() => { if (consorcioId) cargarConfig() }, [consorcioId])
+  useEffect(() => { if (expSel) cargarDetalles(expSel) }, [expSel])
+
+  function generarArchivoEP() {
+    // Formato DI Expensas Pagas (233 chars por registro)
+    const exp     = expensas.find(e => e.id === expSel)
+    const periodo = exp?.periodo || ''
+    const [y, m]  = periodo.split('-')
+
+    const convenio = (config?.ep_convenio_id || '0000').padStart(4,'0')
+    const consId   = (config?.ep_consorcio_id || '0000').padStart(4,'0')
+    const ahora    = new Date()
+    const fecha    = `${ahora.getFullYear()}${String(ahora.getMonth()+1).padStart(2,'0')}${String(ahora.getDate()).padStart(2,'0')}`
+    const hora     = `${String(ahora.getHours()).padStart(2,'0')}${String(ahora.getMinutes()).padStart(2,'0')}${String(ahora.getSeconds()).padStart(2,'0')}`
+
+    // Header
+    let contenido = `1${consId}${fecha}${hora}\r\n`
+
+    let totalImporte = 0
+    let nroReg = 0
+
+    for (const det of detalles) {
+      const uf = unidades.find(u => u.id === det.unidad_id)
+      const cp = copropietarios.find(c => c.id === uf?.propietario_id)
+      if (!uf) continue
+
+      const nroEP = String(uf.nro_ep || detalles.indexOf(det) + 1).padStart(5, '0')
+      const nombre = (cp?.apellido_nombre || '').padEnd(60, ' ').slice(0,60)
+      const periodoStr = `${y}-${m}`.padEnd(7,' ')
+      const impMin = Math.round((parseFloat(det.monto)||0) * 100)
+      const impMax = Math.round((parseFloat(det.monto)||0) * 1.03 * 100) // +3% por mora
+
+      // Fecha vto 1: día 10 del mes siguiente
+      const vto1 = `${y}${m}10`
+      // Fecha vto 2: día 20 del mes siguiente
+      const vto2 = `${y}${m}20`
+
+      const impMin10 = String(impMin).padStart(10,'0')
+      const impMax10 = String(impMax).padStart(10,'0')
+      const nroUFConv = `${convenio}${nroEP}`.padStart(9,'0')
+
+      // Construcción del registro (233 chars)
+      // Usamos el formato exacto del archivo DI de ejemplo
+      let reg = `5${convenio}${nroEP}${periodoStr}${nombre}` +
+        `${' '.repeat(48)}${fecha}${impMin10}1${vto2}${String(impMax).padStart(10,'0')}` +
+        `5${consId}${convenio}${nroEP}${String(parseInt(m)+1>12?1:parseInt(m)+1).padStart(2,'0').padEnd(4,'0')}` +
+        `10${impMin10}1${impMax10}5${consId}${String(ahora.getMonth()).padStart(2,'0')}`
+
+      // Asegurar largo 233
+      reg = reg.slice(0, 233).padEnd(233, '0')
+      contenido += reg + '\r\n'
+      totalImporte += impMin
+      nroReg++
+    }
+
+    // Total
+    const totStr = String(totalImporte).padStart(15,'0')
+    const regStr = String(nroReg).padStart(6,'0')
+    contenido += `9${consId}${fecha}${hora}${regStr}${totStr}...\r\n`
+
+    // Descargar
+    const blob = new Blob([contenido], { type:'text/plain;charset=latin-1' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = `DI_${consId}_${fecha}${hora}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+    setMsg({ tipo:'ok', texto:`✓ Archivo DI generado — ${nroReg} unidades — Total: $${(totalImporte/100).toLocaleString('es-AR')}` })
+  }
+
+  function generarArchivoSIRO() {
+    // Formato TXT para subir a onlinesiro.com.ar
+    // Columnas: nro_referencia | nombre | importe_minimo | fecha_vto1 | importe_maximo | fecha_vto2
+    // (formato CSV/TXT que acepta la web de SIRO para carga masiva de deuda)
+    const exp = expensas.find(e => e.id === expSel)
+    const periodo = exp?.periodo || ''
+    const [y, m] = periodo.split('-')
+
+    let contenido = `NRO_REFERENCIA;NOMBRE;IMPORTE_1;FECHA_VTO_1;IMPORTE_2;FECHA_VTO_2\r\n`
+    let nroReg = 0
+
+    for (const det of detalles) {
+      const uf = unidades.find(u => u.id === det.unidad_id)
+      const cp = copropietarios.find(c => c.id === uf?.propietario_id)
+      if (!uf) continue
+
+      const nroSiro = uf.nro_siro || String(detalles.indexOf(det)+1).padStart(5,'0')
+      const nombre  = (cp?.apellido_nombre || '').replace(/;/g,'')
+      const imp1    = (parseFloat(det.monto)||0).toFixed(2)
+      const imp2    = ((parseFloat(det.monto)||0) * 1.03).toFixed(2)
+      const vto1    = `${String(parseInt(m)>9?parseInt(m):m).padStart(2,'0')}/${y}`  // MM/YYYY
+      const vto2    = `${String(parseInt(m)>9?parseInt(m):m).padStart(2,'0')}/${y}`
+
+      contenido += `${nroSiro};${nombre};${imp1};10/${vto1};${imp2};20/${vto1}\r\n`
+      nroReg++
+    }
+
+    const blob = new Blob([contenido], { type:'text/plain;charset=utf-8' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    const ahora = new Date()
+    a.download = `SIRO_Deuda_${consorcioId}_${ahora.getFullYear()}${String(ahora.getMonth()+1).padStart(2,'0')}${String(ahora.getDate()).padStart(2,'0')}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+    setMsg({ tipo:'ok', texto:`✓ Archivo SIRO generado — ${nroReg} unidades` })
+  }
+
+  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
+  const periodoLabel = p => {
+    if (!p) return '—'
+    const [y,m] = p.split('-')
+    const mes = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    return m ? `${mes[parseInt(m)-1]} ${y}` : p
+  }
+
+  return (
+    <div>
+      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>📤 Generar archivo de débito</div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Genera el archivo para informar la deuda a los sistemas de cobranza
+      </div>
+      <Msg data={msg} />
+
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:14 }}>Configuración</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+          <div>
+            <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Sistema destino</div>
+            <select value={sistema} onChange={e=>setSistema(e.target.value)}
+              style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+              <option value="expensas_pagas">Expensas Pagas (archivo DI)</option>
+              <option value="siro">SIRO Banco Roela (CSV para carga web)</option>
+            </select>
+          </div>
+          <Sel label="Período" value={expSel} onChange={setExpSel}
+            opts={[{v:'',l:'— Seleccione período —'},
+              ...expensas.map(e => ({ v:e.id, l:`${periodoLabel(e.periodo)} — ${e.tipo||''}` }))
+            ]} />
+        </div>
+
+        {expSel && detalles.length > 0 && (
+          <>
+            {/* Resumen */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10, marginBottom:16 }}>
+              {[
+                { l:'Unidades', v:detalles.length },
+                { l:'Total a cobrar', v:fmt(detalles.reduce((a,d)=>a+(parseFloat(d.monto)||0),0)) },
+                { l:'Sin Nro EP', v:unidades.filter(u=>!u.nro_ep&&detalles.some(d=>d.unidad_id===u.id)).length },
+                { l:'Sin Nro SIRO', v:unidades.filter(u=>!u.nro_siro&&detalles.some(d=>d.unidad_id===u.id)).length },
+              ].map((k,i) => (
+                <div key={i} style={{ background:'#f8fafc', borderRadius:8, padding:'10px 12px', textAlign:'center' }}>
+                  <div style={{ fontSize:11, color:GR, fontWeight:600, marginBottom:4 }}>{k.l}</div>
+                  <div style={{ fontSize:17, fontWeight:800, color:i===2&&k.v>0?AM:i===3&&k.v>0?AM:AZ }}>{k.v}</div>
+                </div>
+              ))}
+            </div>
+
+            {sistema === 'expensas_pagas' && !config?.ep_convenio_id && (
+              <div style={{ background:'#fef9c3', border:'1px solid #f59e0b', borderRadius:8,
+                padding:'10px 14px', marginBottom:12, fontSize:12, color:'#92400e' }}>
+                ⚠️ Configurar ID Convenio EP en Cobranzas automáticas → ⚙️ Configuración
+              </div>
+            )}
+
+            <Btn onClick={sistema === 'expensas_pagas' ? generarArchivoEP : generarArchivoSIRO}
+              disabled={!expSel}>
+              📥 Descargar archivo {sistema === 'expensas_pagas' ? 'DI (Expensas Pagas)' : 'SIRO'}
+            </Btn>
+
+            {/* Tabla previa */}
+            <div style={{ marginTop:16, overflowX:'auto' }}>
+              <div style={{ fontWeight:600, fontSize:12, color:GR, marginBottom:8 }}>
+                Detalle de UFs a incluir
+              </div>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+                <thead>
+                  <tr style={{ background:'#f3f4f6' }}>
+                    {['UF','Propietario','Importe','Nro EP','Nro SIRO'].map((h,i) => (
+                      <th key={i} style={{ padding:'5px 8px', textAlign:i>=2?'right':'left',
+                        fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {detalles.map(det => {
+                    const uf = unidades.find(u=>u.id===det.unidad_id)
+                    const cp = copropietarios.find(c=>c.id===uf?.propietario_id)
+                    return (
+                      <tr key={det.id} style={{ borderBottom:'1px solid #f9fafb' }}>
+                        <td style={{ padding:'5px 8px', fontWeight:600 }}>UF {uf?.numero}</td>
+                        <td style={{ padding:'5px 8px' }}>{cp?.apellido_nombre||'—'}</td>
+                        <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:600 }}>{fmt(det.monto)}</td>
+                        <td style={{ padding:'5px 8px', textAlign:'right' }}>
+                          {uf?.nro_ep || <span style={{color:AM}}>—</span>}
+                        </td>
+                        <td style={{ padding:'5px 8px', textAlign:'right' }}>
+                          {uf?.nro_siro || <span style={{color:AM}}>—</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Card>
+    </div>
+  )
+}
+
 function EmailTracking({ session, consorcioId }) {
   const [logs, setLogs]           = useState([])
   const [cargando, setCargando]   = useState(true)
@@ -1972,6 +2924,609 @@ function EnviarEmails({ session, consorcioId, unidades, adminPerfil }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // IMPORTAR EXCEL — copropietarios, unidades y datos desde planilla
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MIGRAR DESDE PDF — Extracción con IA de liquidación anterior
+// ══════════════════════════════════════════════════════════════════════════════
+function ImportarPDF({ session, consorcioId, consorcioActivo, onDone }) {
+  const [archivo, setArchivo]       = useState(null)
+  const [paso, setPaso]             = useState(1) // 1=subir, 2=revisión, 3=confirmar, 4=listo
+  const [extrayendo, setExtrayendo] = useState(false)
+  const [importando, setImportando] = useState(false)
+  const [msg, setMsg]               = useState(null)
+  const [datos, setDatos]           = useState(null)     // datos extraídos por IA
+  const [edits, setEdits]           = useState({})       // ediciones manuales del usuario
+  const [progreso, setProgreso]     = useState('')
+
+  // Convertir PDF a base64 para enviarlo a Claude
+  function pdfABase64(file) {
+    return new Promise((res, rej) => {
+      const reader = new FileReader()
+      reader.onload = () => res(reader.result.split(',')[1])
+      reader.onerror = () => rej(new Error('Error leyendo archivo'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  async function extraerConIA() {
+    if (!archivo) return setMsg({ tipo:'warn', texto:'Seleccioná un archivo PDF primero' })
+    setExtrayendo(true)
+    setProgreso('Leyendo PDF...')
+    setMsg(null)
+
+    try {
+      const base64 = await pdfABase64(archivo)
+      setProgreso('Enviando a Claude para análisis...')
+
+      const prompt = `Sos un asistente especializado en liquidaciones de expensas de consorcios en Argentina.
+Analizá este PDF de liquidación de expensas y extraé la siguiente información en formato JSON estricto.
+El JSON debe tener EXACTAMENTE esta estructura, sin texto adicional antes ni después:
+
+{
+  "periodo": "YYYY-MM",
+  "consorcio": {
+    "nombre": "nombre del consorcio",
+    "direccion": "dirección",
+    "cuit": "XX-XXXXXXXX-X",
+    "cbu": "número CBU si aparece",
+    "banco": "nombre del banco si aparece"
+  },
+  "totales": {
+    "total_gastos": 0,
+    "total_expensa": 0,
+    "saldo_caja_anterior": 0,
+    "saldo_caja_actual": 0,
+    "total_cobrado": 0,
+    "total_deuda": 0
+  },
+  "gastos": [
+    { "concepto": "nombre del gasto", "monto": 0, "categoria": "categoria" }
+  ],
+  "unidades": [
+    {
+      "numero": "identificador de unidad ej: 1A, 2B, PB1",
+      "propietario": "apellido y nombre",
+      "coeficiente": 0.0000,
+      "expensa": 0,
+      "saldo_anterior": 0,
+      "mora": 0,
+      "total_deuda": 0,
+      "pagado": 0,
+      "estado": "pagado|pendiente|moroso"
+    }
+  ],
+  "administrador": {
+    "nombre": "nombre del administrador",
+    "matricula": "número de matrícula RPAC si aparece"
+  }
+}
+
+INSTRUCCIONES IMPORTANTES:
+- Extraé TODOS los datos numéricos sin signos de peso, solo números con decimales separados por punto.
+- Si un dato no aparece en el PDF, usá null.
+- Para el período usá formato YYYY-MM (ej: 2026-04 para Abril 2026).
+- Las categorías de gastos deben ser una de: sueldos, electricidad, contratos, mantenimiento, seguros, honorarios_admin, gastos_bancarios, impuesto_municipal, varios.
+- Para el estado de las unidades: "pagado" si pagó todo, "moroso" si tiene deuda del período anterior, "pendiente" si debe solo el período actual.
+- Extraé TODAS las unidades que aparezcan en la liquidación.
+- Respondé ÚNICAMENTE con el JSON, sin explicaciones ni markdown.`
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 8000,
+          messages: [{
+            role: 'user',
+            content: [
+              {
+                type: 'document',
+                source: { type: 'base64', media_type: 'application/pdf', data: base64 }
+              },
+              { type: 'text', text: prompt }
+            ]
+          }]
+        })
+      })
+
+      if (!response.ok) throw new Error(`Error API: ${response.status}`)
+      const result = await response.json()
+      const texto  = result.content?.[0]?.text || ''
+
+      setProgreso('Procesando respuesta...')
+
+      // Parsear JSON — limpiar posibles backticks
+      let json
+      try {
+        const limpio = texto.replace(/```json
+?/g,'').replace(/```
+?/g,'').trim()
+        json = JSON.parse(limpio)
+      } catch(e) {
+        throw new Error('La IA no devolvió un JSON válido. Intentá con otro PDF o verificá el formato.')
+      }
+
+      setDatos(json)
+      setEdits({}) // resetear ediciones
+      setPaso(2)
+      setProgreso('')
+      setMsg({ tipo:'ok', texto:`✓ Extracción completada — ${json.unidades?.length||0} unidades detectadas` })
+
+    } catch(e) {
+      setMsg({ tipo:'error', texto: 'Error: ' + e.message })
+      setProgreso('')
+    }
+    setExtrayendo(false)
+  }
+
+  async function confirmarImportacion() {
+    if (!datos) return
+    if (!consorcioId) return setMsg({ tipo:'warn', texto:'Seleccioná un consorcio primero' })
+    if (!confirm(`¿Confirmar importación?
+
+Se crearán:
+• ${datos.unidades?.length||0} registros de saldo inicial por unidad
+• ${datos.gastos?.length||0} gastos del período anterior
+
+Esta acción no se puede deshacer fácilmente.`)) return
+
+    setImportando(true)
+    setMsg(null)
+    const uid = session.user.id
+    const hoy = new Date().toISOString().split('T')[0]
+    const periodo = datos.periodo || new Date().toISOString().slice(0,7)
+    let ok = 0, errs = []
+
+    try {
+      // 1. Actualizar datos del consorcio si no tiene
+      if (datos.consorcio && consorcioActivo) {
+        const upd = {}
+        if (!consorcioActivo.cbu && datos.consorcio.cbu) upd.cbu = datos.consorcio.cbu
+        if (!consorcioActivo.banco && datos.consorcio.banco) upd.banco = datos.consorcio.banco
+        if (Object.keys(upd).length > 0) {
+          await supabase.from('con_consorcios').update(upd).eq('id', consorcioId)
+        }
+      }
+
+      // 2. Crear expensa de apertura/migración
+      const expId = `EXP-MIG-${consorcioId}-${Date.now()}`
+      await supabase.from('con_expensas').insert([{
+        id: expId,
+        admin_id: uid,
+        consorcio_id: consorcioId,
+        periodo,
+        tipo: 'migracion',
+        estado: 'cerrada',
+        total_gastos: datos.totales?.total_gastos || 0,
+        total_expensa: datos.totales?.total_expensa || 0,
+        descripcion: `Período migrado desde liquidación anterior (${archivo?.name})`,
+      }])
+
+      // 3. Cargar gastos del período anterior
+      for (const g of (datos.gastos||[])) {
+        if (!g.concepto || !g.monto) continue
+        const { error } = await supabase.from('con_gastos').insert([{
+          id: `GAS-MIG-${Date.now()}-${ok}`,
+          admin_id: uid,
+          consorcio_id: consorcioId,
+          expensa_id: expId,
+          fecha: hoy,
+          concepto: g.concepto,
+          categoria: g.categoria || 'varios',
+          proveedor_nombre: g.proveedor || null,
+          monto: parseFloat(g.monto) || 0,
+        }])
+        if (error) errs.push(`Gasto "${g.concepto}": ${error.message}`)
+        else ok++
+      }
+
+      // 4. Registrar saldo inicial por unidad como nota de débito/crédito
+      // Buscar las UFs existentes por número
+      const { data: ufsExistentes } = await supabase
+        .from('con_unidades').select('id,numero').eq('consorcio_id', consorcioId)
+
+      for (const u of (datos.unidades||[])) {
+        if (!u.numero) continue
+
+        const saldoAnterior = parseFloat(u.saldo_anterior) || 0
+        const deudaTotal    = parseFloat(u.total_deuda) || parseFloat(u.expensa) || 0
+        const pagado        = parseFloat(u.pagado) || 0
+
+        // Encontrar la UF por número (aproximado)
+        const uf = ufsExistentes?.find(x =>
+          x.numero?.toLowerCase().trim() === u.numero?.toLowerCase().trim()
+        )
+
+        if (!uf) {
+          // Crear copropietario y UF si no existe
+          const cpId = `CP-MIG-${Date.now()}-${ok}`
+          await supabase.from('con_copropietarios').insert([{
+            id: cpId,
+            admin_id: uid,
+            consorcio_id: consorcioId,
+            apellido_nombre: u.propietario || `Propietario UF ${u.numero}`,
+          }])
+
+          const ufId = `UF-MIG-${Date.now()}-${ok}`
+          await supabase.from('con_unidades').insert([{
+            id: ufId,
+            admin_id: uid,
+            consorcio_id: consorcioId,
+            numero: u.numero,
+            tipo: 'departamento',
+            porcentaje_fiscal: parseFloat(u.coeficiente) || null,
+            pct_gtos_grales:   parseFloat(u.coeficiente) || null,
+            pct_fdo_obras:     parseFloat(u.coeficiente) || null,
+            estado: 'ocupada',
+            propietario_id: cpId,
+            portal_token: Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2),
+          }])
+
+          // Registrar detalle de expensa con saldo
+          if (deudaTotal > 0 || saldoAnterior > 0) {
+            await supabase.from('con_expensas_detalle').insert([{
+              id: `DET-MIG-${Date.now()}-${ok}`,
+              admin_id: uid,
+              consorcio_id: consorcioId,
+              expensa_id: expId,
+              unidad_id: ufId,
+              monto: parseFloat(u.expensa) || 0,
+              saldo_anterior: saldoAnterior,
+              pagos_periodo: pagado,
+              interes_mora: parseFloat(u.mora) || 0,
+              estado: u.estado === 'pagado' ? 'pagada' : u.estado === 'moroso' ? 'morosa' : 'pendiente',
+            }])
+          }
+          ok++
+        } else {
+          // UF existente — registrar solo el saldo como nota de débito
+          if (deudaTotal > 0 || saldoAnterior > 0) {
+            const saldo = Math.max(0, deudaTotal - pagado)
+            if (saldo > 0) {
+              await supabase.from('con_movimientos_unidad').insert([{
+                id: `MOV-MIG-${Date.now()}-${ok}`,
+                admin_id: uid,
+                consorcio_id: consorcioId,
+                unidad_id: uf.id,
+                expensa_id: expId,
+                tipo: 'debito',
+                concepto: `Saldo inicial migrado — período ${periodo}`,
+                categoria: 'ajuste_inicial',
+                monto: saldo,
+                fecha: hoy,
+                notas: `Migrado desde: ${archivo?.name}`,
+                estado: 'vigente',
+              }])
+            }
+            ok++
+          }
+        }
+      }
+
+      // 5. Registrar saldo de caja como movimiento varios si existe
+      if (datos.totales?.saldo_caja_actual && datos.totales.saldo_caja_actual > 0) {
+        await supabase.from('con_movimientos_varios').insert([{
+          id: `MV-MIG-${Date.now()}`,
+          admin_id: uid,
+          consorcio_id: consorcioId,
+          expensa_id: expId,
+          tipo: 'ingreso',
+          concepto: `Saldo de caja inicial — migración período ${periodo}`,
+          categoria: 'varios',
+          monto: datos.totales.saldo_caja_actual,
+          fecha: hoy,
+          notas: `Migrado desde: ${archivo?.name}`,
+          estado: 'vigente',
+        }])
+      }
+
+      setMsg({
+        tipo: errs.length === 0 ? 'ok' : 'warn',
+        texto: `✓ Migración completada — ${ok} registros importados${errs.length>0 ? ` · ${errs.length} errores` : ''}`
+      })
+      setPaso(4)
+
+    } catch(e) {
+      setMsg({ tipo:'error', texto: 'Error en la importación: ' + e.message })
+    }
+    setImportando(false)
+  }
+
+  const fmt = n => n ? '$' + Number(n).toLocaleString('es-AR', { minimumFractionDigits:2 }) : '—'
+
+  return (
+    <div>
+      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>🤖 Migrar desde liquidación PDF</div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        La IA extrae automáticamente los datos de su última liquidación para armar la base de datos inicial
+      </div>
+      <Msg data={msg} />
+
+      {/* Indicador de pasos */}
+      <div style={{ display:'flex', gap:0, marginBottom:24 }}>
+        {[
+          { n:1, l:'Subir PDF' },
+          { n:2, l:'Revisar datos' },
+          { n:3, l:'Confirmar' },
+          { n:4, l:'Listo' },
+        ].map((p, i) => (
+          <div key={p.n} style={{ display:'flex', alignItems:'center', flex:1 }}>
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', flex:1 }}>
+              <div style={{
+                width:32, height:32, borderRadius:'50%', display:'flex',
+                alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:13,
+                background: paso >= p.n ? AZ : '#f3f4f6',
+                color: paso >= p.n ? '#fff' : GR,
+              }}>{paso > p.n ? '✓' : p.n}</div>
+              <div style={{ fontSize:10, color: paso >= p.n ? AZ : GR,
+                marginTop:4, fontWeight: paso === p.n ? 700 : 400 }}>{p.l}</div>
+            </div>
+            {i < 3 && <div style={{ height:2, flex:1, background: paso > p.n+0.5 ? AZ : '#f3f4f6',
+              marginBottom:18, marginTop:16 }} />}
+          </div>
+        ))}
+      </div>
+
+      {/* PASO 1 — Subir PDF */}
+      {paso === 1 && (
+        <Card>
+          <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:16 }}>
+            Paso 1 — Seleccioná la liquidación en PDF
+          </div>
+
+          <div style={{ background:'#f0f9ff', border:'1px solid #bae6fd', borderRadius:8,
+            padding:'14px 16px', marginBottom:16, fontSize:12, color:'#0369a1' }}>
+            <strong>¿Qué datos extrae la IA?</strong>
+            <div style={{ marginTop:6, display:'grid', gridTemplateColumns:'1fr 1fr', gap:4 }}>
+              {[
+                '✓ Período de la liquidación','✓ Datos del consorcio',
+                '✓ Saldo de caja','✓ Todos los gastos por rubro',
+                '✓ Deuda de cada unidad','✓ Saldo anterior por UF',
+                '✓ Interés por mora','✓ Estado de cada copropietario',
+              ].map((item,i) => <div key={i}>{item}</div>)}
+            </div>
+          </div>
+
+          <div style={{ border:'2px dashed #d1d5db', borderRadius:10, padding:32,
+            textAlign:'center', marginBottom:16,
+            background: archivo ? '#f0fdf4' : '#fafafa' }}>
+            <div style={{ fontSize:32, marginBottom:8 }}>{archivo ? '📄' : '📁'}</div>
+            {archivo ? (
+              <>
+                <div style={{ fontWeight:700, color:VD, marginBottom:4 }}>{archivo.name}</div>
+                <div style={{ fontSize:11, color:GR }}>{(archivo.size/1024/1024).toFixed(2)} MB</div>
+              </>
+            ) : (
+              <div style={{ color:GR, fontSize:13 }}>Arrastrá el PDF aquí o hacé clic para seleccionar</div>
+            )}
+            <input type="file" accept=".pdf" onChange={e => {
+              const f = e.target.files[0]
+              if (f) { setArchivo(f); setMsg(null) }
+            }} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+          </div>
+
+          <div style={{ position:'relative' }}>
+            <input type="file" accept=".pdf" onChange={e => {
+              const f = e.target.files[0]
+              if (f) { setArchivo(f); setMsg(null) }
+            }} style={{ marginBottom:14, fontSize:13 }} />
+          </div>
+
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <Btn onClick={extraerConIA} disabled={!archivo || extrayendo}>
+              {extrayendo ? `⏳ ${progreso}` : '🤖 Extraer con IA'}
+            </Btn>
+            {archivo && <BtnSec onClick={()=>{setArchivo(null);setMsg(null)}}>✕ Quitar</BtnSec>}
+          </div>
+
+          <div style={{ marginTop:16, fontSize:11, color:GR }}>
+            Funciona con liquidaciones de cualquier sistema — Administración Global, Sidelu, Consorcio Abierto, etc.
+            El PDF puede tener varias páginas.
+          </div>
+        </Card>
+      )}
+
+      {/* PASO 2 — Revisión de datos extraídos */}
+      {paso === 2 && datos && (
+        <div>
+          <Card style={{ marginBottom:16 }}>
+            <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:14 }}>
+              Paso 2 — Revisá los datos extraídos
+            </div>
+
+            {/* Datos generales */}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
+              {[
+                { l:'Período detectado', v: (() => {
+                  if (!datos.periodo) return '—'
+                  const [y,m] = datos.periodo.split('-')
+                  const mes = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio',
+                    'Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+                  return m ? `${mes[parseInt(m)-1]} ${y}` : datos.periodo
+                })() },
+                { l:'Unidades detectadas', v: datos.unidades?.length || 0 },
+                { l:'Gastos detectados', v: datos.gastos?.length || 0 },
+              ].map((k,i) => (
+                <div key={i} style={{ background:'#f0f4ff', borderRadius:8, padding:'12px 14px', textAlign:'center' }}>
+                  <div style={{ fontSize:11, color:GR, fontWeight:600, marginBottom:4 }}>{k.l}</div>
+                  <div style={{ fontSize:20, fontWeight:800, color:AZ }}>{k.v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Totales */}
+            {datos.totales && (
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontWeight:600, fontSize:12, color:GR, textTransform:'uppercase',
+                  letterSpacing:'0.05em', marginBottom:8 }}>Totales del período</div>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
+                  {[
+                    { l:'Total expensa', v:fmt(datos.totales.total_expensa) },
+                    { l:'Total cobrado', v:fmt(datos.totales.total_cobrado), c:VD },
+                    { l:'Deuda total',   v:fmt(datos.totales.total_deuda),   c:RJ },
+                    { l:'Saldo caja ant.', v:fmt(datos.totales.saldo_caja_anterior) },
+                    { l:'Saldo caja act.', v:fmt(datos.totales.saldo_caja_actual), c:VD },
+                    { l:'Total gastos',    v:fmt(datos.totales.total_gastos) },
+                  ].map((k,i) => (
+                    <div key={i} style={{ padding:'8px 12px', background:'#f8fafc',
+                      borderRadius:6, fontSize:12 }}>
+                      <div style={{ color:GR, marginBottom:2 }}>{k.l}</div>
+                      <div style={{ fontWeight:700, color:k.c||'#374151' }}>{k.v}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* Gastos */}
+          {datos.gastos?.length > 0 && (
+            <Card style={{ marginBottom:16 }}>
+              <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:10 }}>
+                Gastos detectados ({datos.gastos.length})
+              </div>
+              <div style={{ maxHeight:220, overflowY:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <thead style={{ position:'sticky', top:0, background:'#f3f4f6' }}>
+                    <tr>
+                      {['Concepto','Categoría','Monto'].map((h,i) => (
+                        <th key={i} style={{ padding:'6px 10px', textAlign:i===2?'right':'left',
+                          fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {datos.gastos.map((g,i) => (
+                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                        <td style={{ padding:'6px 10px' }}>{g.concepto}</td>
+                        <td style={{ padding:'6px 10px', color:GR, fontSize:11 }}>{g.categoria}</td>
+                        <td style={{ padding:'6px 10px', textAlign:'right', fontWeight:600 }}>{fmt(g.monto)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          {/* Unidades */}
+          {datos.unidades?.length > 0 && (
+            <Card style={{ marginBottom:16 }}>
+              <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:10 }}>
+                Unidades detectadas ({datos.unidades.length})
+              </div>
+              <div style={{ maxHeight:300, overflowY:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <thead style={{ position:'sticky', top:0, background:'#f3f4f6' }}>
+                    <tr>
+                      {['UF','Propietario','Coef.','Expensa','Sal.Ant.','Mora','Total','Pagado','Estado'].map((h,i) => (
+                        <th key={i} style={{ padding:'6px 8px', textAlign:i<2?'left':'right',
+                          fontSize:10, fontWeight:700, color:GR,
+                          borderBottom:'1px solid #e5e7eb', whiteSpace:'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {datos.unidades.map((u,i) => {
+                      const est = u.estado === 'pagado' ? { c:VD, bg:'#dcfce7', t:'Pagado' }
+                        : u.estado === 'moroso' ? { c:RJ, bg:'#fee2e2', t:'Moroso' }
+                        : { c:AM, bg:'#fef9c3', t:'Pendiente' }
+                      return (
+                        <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                          <td style={{ padding:'5px 8px', fontWeight:700 }}>{u.numero}</td>
+                          <td style={{ padding:'5px 8px', fontSize:11, maxWidth:120 }}>{u.propietario||'—'}</td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', fontSize:10, color:GR }}>{u.coeficiente||'—'}</td>
+                          <td style={{ padding:'5px 8px', textAlign:'right' }}>{u.expensa?fmt(u.expensa):'—'}</td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', color:RJ }}>{u.saldo_anterior?fmt(u.saldo_anterior):'—'}</td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', color:AM }}>{u.mora?fmt(u.mora):'—'}</td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:700 }}>{u.total_deuda?fmt(u.total_deuda):'—'}</td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', color:VD }}>{u.pagado?fmt(u.pagado):'—'}</td>
+                          <td style={{ padding:'5px 8px' }}>
+                            <Badge text={est.t} color={est.c} bg={est.bg} />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn onClick={() => setPaso(3)} style={{ background:VD, color:'#fff' }}>
+              ✓ Datos correctos — Continuar
+            </Btn>
+            <BtnSec onClick={() => { setPaso(1); setDatos(null); setMsg(null) }}>
+              ← Volver a subir
+            </BtnSec>
+          </div>
+        </div>
+      )}
+
+      {/* PASO 3 — Confirmación */}
+      {paso === 3 && datos && (
+        <Card>
+          <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:16 }}>
+            Paso 3 — Confirmar importación
+          </div>
+
+          <div style={{ background:'#fef9c3', border:'1px solid #f59e0b', borderRadius:8,
+            padding:'14px 16px', marginBottom:16, fontSize:12, color:'#92400e' }}>
+            <strong>⚠️ Importante antes de importar:</strong>
+            <ul style={{ margin:'8px 0 0 16px', lineHeight:1.8 }}>
+              <li>Si las unidades ya existen en el sistema, se registrará su saldo pendiente como nota de débito inicial.</li>
+              <li>Si las unidades NO existen, se crearán automáticamente con los datos del propietario detectados.</li>
+              <li>Los gastos se registrarán como período migrado (tipo: migración) para historial.</li>
+              <li>El saldo de caja se registrará como movimiento de ingreso inicial.</li>
+              <li>Puede editar o eliminar cualquier registro importado después.</li>
+            </ul>
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+            <div style={{ padding:'12px 16px', background:'#f0f4ff', borderRadius:8 }}>
+              <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Consorcio destino</div>
+              <div style={{ fontWeight:700, color:AZ }}>{consorcioActivo?.nombre||'—'}</div>
+            </div>
+            <div style={{ padding:'12px 16px', background:'#f0f4ff', borderRadius:8 }}>
+              <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Período a migrar</div>
+              <div style={{ fontWeight:700, color:AZ }}>{datos.periodo||'—'}</div>
+            </div>
+          </div>
+
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn onClick={confirmarImportacion} disabled={importando}
+              style={{ background:VD, color:'#fff' }}>
+              {importando ? '⏳ Importando...' : '✓ Confirmar e importar'}
+            </Btn>
+            <BtnSec onClick={() => setPaso(2)}>← Revisar datos</BtnSec>
+          </div>
+        </Card>
+      )}
+
+      {/* PASO 4 — Listo */}
+      {paso === 4 && (
+        <Card style={{ textAlign:'center', padding:40 }}>
+          <div style={{ fontSize:48, marginBottom:12 }}>✅</div>
+          <div style={{ fontWeight:700, fontSize:18, color:VD, marginBottom:8 }}>
+            Migración completada
+          </div>
+          <div style={{ fontSize:13, color:GR, marginBottom:24 }}>
+            Los datos del período anterior fueron importados exitosamente.
+            Ya puede comenzar a operar con GASP Consorcios.
+          </div>
+          <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
+            <Btn onClick={() => onDone?.()}>Ir al Dashboard</Btn>
+            <BtnSec onClick={() => {
+              setPaso(1); setArchivo(null); setDatos(null); setMsg(null)
+            }}>Importar otro PDF</BtnSec>
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
 function ImportarExcel({ session, consorcioId, onDone }) {
   const [archivo, setArchivo]   = useState(null)
   const [preview, setPreview]   = useState([])
@@ -4872,12 +6427,15 @@ export default function App() {
     // ── Comunicaciones ─────────────────────────────────
     { id:'emails',           label:'Enviar liquidación',   icon:'✉️', sec:'Comunicaciones' },
     { id:'email_tracking',   label:'Seguimiento emails',   icon:'📬', sec:'Comunicaciones' },
+    { id:'cobranzas_auto',   label:'Cobranzas automáticas', icon:'🏦', sec:'Comunicaciones' },
+    { id:'generar_debito',   label:'Generar débito',         icon:'📤', sec:'Comunicaciones' },
 
     // ── Configuración ──────────────────────────────────
     { id:'plan_cuentas',     label:'Plan de cuentas',      icon:'📑', sec:'Configuración' },
     { id:'mora_diferencial', label:'Interés diferencial',  icon:'⚖️', sec:'Configuración' },
     { id:'periodos',         label:'Control períodos',     icon:'🔒', sec:'Configuración' },
-    { id:'importar',         label:'Importar Excel',       icon:'📥', sec:'Configuración' },
+    { id:'importar',         label:'Importar datos',        icon:'📥', sec:'Configuración' },
+    { id:'importar_pdf',     label:'Migrar desde PDF',      icon:'🤖', sec:'Configuración' },
 
     // ── Admin ──────────────────────────────────────────
     { id:'perfil',           label:'Mi perfil',            icon:'⚙️', sec:'Admin' },
@@ -4940,6 +6498,9 @@ export default function App() {
       case 'movimientos':    return <MovimientosUnidad session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
       case 'periodos':       return <ControlPeriodos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} />
       case 'importar':       return <ImportarExcel session={session} consorcioId={cid} onDone={() => { cargar(); setPagina('unidades') }} />
+      case 'importar_pdf':   return <ImportarPDF session={session} consorcioId={cid} consorcioActivo={consorcioActivo} onDone={() => { cargar(); setPagina('dashboard') }} />
+      case 'cobranzas_auto':  return <CobranzasAutomaticas session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
+      case 'generar_debito':  return <GenerarDebito session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
       case 'email_tracking': return <EmailTracking session={session} consorcioId={cid} />
       case 'emails':         return <EnviarEmails session={session} consorcioId={cid} unidades={unidades} adminPerfil={adminPerfil} />
       case 'clientes':       return <Card style={{ textAlign:'center', padding:40, color:GR }}><div style={{fontSize:32,marginBottom:12}}>🚧</div><div style={{fontWeight:600}}>Panel de clientes en desarrollo</div></Card>
