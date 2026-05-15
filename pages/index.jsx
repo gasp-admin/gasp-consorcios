@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260514-fix-pdf-input'
+const BUILD_VERSION = '20260514-ef-pdf-ia'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -3010,40 +3010,27 @@ INSTRUCCIONES IMPORTANTES:
 - Extraé TODAS las unidades que aparezcan en la liquidación.
 - Respondé ÚNICAMENTE con el JSON, sin explicaciones ni markdown.`
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      setProgreso('Enviando a Edge Function...')
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const response = await fetch(`${SUPA_URL}/functions/v1/extraer-pdf-ia`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 8000,
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type: 'document',
-                source: { type: 'base64', media_type: 'application/pdf', data: base64 }
-              },
-              { type: 'text', text: prompt }
-            ]
-          }]
-        })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sess?.access_token}`,
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+        },
+        body: JSON.stringify({ base64, filename: archivo?.name })
       })
 
-      if (!response.ok) throw new Error(`Error API: ${response.status}`)
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        throw new Error(errData.error || `Error servidor: ${response.status}`)
+      }
       const result = await response.json()
-      const texto  = result.content?.[0]?.text || ''
+      if (!result.ok) throw new Error(result.error || 'Error desconocido')
 
       setProgreso('Procesando respuesta...')
-
-      // Parsear JSON — limpiar posibles backticks
-      let json
-      try {
-        const BT = String.fromCharCode(96)
-        const limpio = texto.split(BT+BT+BT+'json').join('').split(BT+BT+BT).join('').trim()
-        json = JSON.parse(limpio)
-      } catch(e) {
-        throw new Error('La IA no devolvió un JSON válido. Intentá con otro PDF o verificá el formato.')
-      }
+      const json = result.datos
 
       setDatos(json)
       setEdits({}) // resetear ediciones
