@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260514-fix-charcode'
+const BUILD_VERSION = '20260514-fix-pdf-input'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -3286,36 +3286,37 @@ Esta acción no se puede deshacer fácilmente.`)) return
             </div>
           </div>
 
-          <div style={{ border:'2px dashed #d1d5db', borderRadius:10, padding:32,
-            textAlign:'center', marginBottom:16,
-            background: archivo ? '#f0fdf4' : '#fafafa' }}>
-            <div style={{ fontSize:32, marginBottom:8 }}>{archivo ? '📄' : '📁'}</div>
-            {archivo ? (
-              <>
-                <div style={{ fontWeight:700, color:VD, marginBottom:4 }}>{archivo.name}</div>
-                <div style={{ fontSize:11, color:GR }}>{(archivo.size/1024/1024).toFixed(2)} MB</div>
-              </>
-            ) : (
-              <div style={{ color:GR, fontSize:13 }}>Arrastrá el PDF aquí o hacé clic para seleccionar</div>
+          {/* Selector de archivo — un solo input, sin overlays */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:12, color:GR, marginBottom:6, fontWeight:500 }}>
+              Seleccionar archivo PDF
+            </div>
+            <input
+              type="file"
+              accept=".pdf"
+              onChange={e => {
+                const f = e.target.files[0]
+                if (f) { setArchivo(f); setMsg(null) }
+              }}
+              style={{ display:'block', fontSize:13, marginBottom:10 }}
+            />
+            {archivo && (
+              <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
+                background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8 }}>
+                <span style={{ fontSize:20 }}>📄</span>
+                <div>
+                  <div style={{ fontWeight:700, color:VD, fontSize:13 }}>{archivo.name}</div>
+                  <div style={{ fontSize:11, color:GR }}>{(archivo.size/1024/1024).toFixed(2)} MB — listo para procesar</div>
+                </div>
+                <BtnSec onClick={()=>{setArchivo(null);setMsg(null)}} style={{ marginLeft:'auto' }}>✕</BtnSec>
+              </div>
             )}
-            <input type="file" accept=".pdf" onChange={e => {
-              const f = e.target.files[0]
-              if (f) { setArchivo(f); setMsg(null) }
-            }} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
-          </div>
-
-          <div style={{ position:'relative' }}>
-            <input type="file" accept=".pdf" onChange={e => {
-              const f = e.target.files[0]
-              if (f) { setArchivo(f); setMsg(null) }
-            }} style={{ marginBottom:14, fontSize:13 }} />
           </div>
 
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
             <Btn onClick={extraerConIA} disabled={!archivo || extrayendo}>
               {extrayendo ? `⏳ ${progreso}` : '🤖 Extraer con IA'}
             </Btn>
-            {archivo && <BtnSec onClick={()=>{setArchivo(null);setMsg(null)}}>✕ Quitar</BtnSec>}
           </div>
 
           <div style={{ marginTop:16, fontSize:11, color:GR }}>
