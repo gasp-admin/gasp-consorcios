@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260514-ef-pdf-ia'
+const BUILD_VERSION = '20260514-fix-migracion'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -3106,8 +3106,12 @@ Esta acción no se puede deshacer fácilmente.`)) return
         else ok++
       }
 
-      // 4. Registrar saldo inicial por unidad como nota de débito/crédito
-      // Buscar las UFs existentes por número
+      // 4. Registrar saldo inicial por unidad
+      // IMPORTANTE: u.pagado = pagos del período ANTERIOR (no de la expensa actual)
+      // El saldo_anterior = lo que debían al inicio del período migrado
+      // Si u.pagado >= u.saldo_anterior → el copropietario pagó el período anterior en término
+      // La deuda real al INICIO de este sistema = u.total_deuda (saldo_anterior + expensa - pagado)
+      //   donde pagado son pagos del período anterior YA acreditados
       const { data: ufsExistentes } = await supabase
         .from('con_unidades').select('id,numero').eq('consorcio_id', consorcioId)
 
@@ -3115,8 +3119,11 @@ Esta acción no se puede deshacer fácilmente.`)) return
         if (!u.numero) continue
 
         const saldoAnterior = parseFloat(u.saldo_anterior) || 0
-        const deudaTotal    = parseFloat(u.total_deuda) || parseFloat(u.expensa) || 0
-        const pagado        = parseFloat(u.pagado) || 0
+        const expensaActual = parseFloat(u.expensa) || 0
+        const pagadoPeriodoAnterior = parseFloat(u.pagado) || 0
+        // deudaTotal = lo que debe en total al cierre del período migrado
+        const deudaTotal = parseFloat(u.total_deuda) || Math.max(0, saldoAnterior - pagadoPeriodoAnterior + expensaActual)
+        const pagado     = 0  // No hay pagos de la expensa actual aún
 
         // Encontrar la UF por número (aproximado)
         const uf = ufsExistentes?.find(x =>
@@ -3149,18 +3156,18 @@ Esta acción no se puede deshacer fácilmente.`)) return
           }])
 
           // Registrar detalle de expensa con saldo
-          if (deudaTotal > 0 || saldoAnterior > 0) {
+          if (deudaTotal > 0 || saldoAnterior > 0 || expensaActual > 0) {
             await supabase.from('con_expensas_detalle').insert([{
               id: `DET-MIG-${Date.now()}-${ok}`,
               admin_id: uid,
               consorcio_id: consorcioId,
               expensa_id: expId,
               unidad_id: ufId,
-              monto: parseFloat(u.expensa) || 0,
-              saldo_anterior: saldoAnterior,
-              pagos_periodo: pagado,
+              monto: expensaActual,
+              saldo_anterior: Math.max(0, saldoAnterior - pagadoPeriodoAnterior), // saldo neto tras pago anterior
+              pagos_periodo: 0,  // nadie pagó la expensa actual todavía
               interes_mora: parseFloat(u.mora) || 0,
-              estado: u.estado === 'pagado' ? 'pagada' : u.estado === 'moroso' ? 'morosa' : 'pendiente',
+              estado: 'pendiente', // siempre pendiente al migrar
             }])
           }
           ok++
