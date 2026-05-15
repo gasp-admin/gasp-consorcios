@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260515-fix-ts2'
+const BUILD_VERSION = '20260515-sprints-abc'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -3420,6 +3420,586 @@ function EmailTracking({ session, consorcioId }) {
   )
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SPRINT A — RECIBOS DE PAGO
+// ══════════════════════════════════════════════════════════════════════════════
+function ReciboPago({ session, consorcioId, unidades, copropietarios, expensas, consorcioActivo }) {
+  const [cobranzas, setCobranzas] = useState([])
+  const [filtroExp, setFiltroExp] = useState('')
+  const [filtroUF, setFiltroUF]   = useState('')
+  const [msg, setMsg]             = useState(null)
+
+  async function cargar() {
+    const q = supabase.from('con_cobranzas').select('*')
+      .eq('consorcio_id', consorcioId).eq('estado','vigente')
+      .order('fecha', { ascending:false }).limit(200)
+    if (filtroExp) q.eq('expensa_id', filtroExp)
+    if (filtroUF)  q.eq('unidad_id', filtroUF)
+    const { data } = await q
+    setCobranzas(data || [])
+  }
+
+  function generarReciboHTML(cob) {
+    const uf   = unidades.find(u => u.id === cob.unidad_id)
+    const cp   = copropietarios.find(c => c.id === uf?.propietario_id)
+    const exp  = expensas.find(e => e.id === cob.expensa_id)
+    const con  = consorcioActivo || {}
+    const adm  = {}
+
+    const fecha = cob.fecha ? new Date(cob.fecha+'T00:00:00').toLocaleDateString('es-AR') : '—'
+    const monto = '$' + Number(cob.monto).toLocaleString('es-AR', { minimumFractionDigits:2 })
+    const periodo = exp?.periodo ? (() => {
+      const [y,m] = exp.periodo.split('-')
+      const mes = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+      return `${mes[parseInt(m)-1]} ${y}`
+    })() : '—'
+    const nroRecibo = cob.nro_recibo || cob.recibo_numero || cob.id.slice(-8).toUpperCase()
+
+    return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; }
+  .recibo { width: 180mm; margin: 8mm auto; padding: 8mm; border: 2px solid #1A3FA0; border-radius: 6px; }
+  .header { background: #1A3FA0; color: white; padding: 10px 14px; border-radius: 4px 4px 0 0; margin: -8mm -8mm 12px -8mm; }
+  .header h1 { font-size: 16px; font-weight: 700; }
+  .header p { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+  .nro { float: right; text-align: right; }
+  .nro span { font-size: 22px; font-weight: 800; display: block; }
+  .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #e5e7eb; }
+  .row:last-child { border-bottom: none; }
+  .label { color: #6B7280; font-size: 11px; }
+  .value { font-weight: 600; }
+  .monto-box { background: #f0fdf4; border: 2px solid #86efac; border-radius: 8px; padding: 14px; text-align: center; margin: 16px 0; }
+  .monto-box .monto { font-size: 28px; font-weight: 800; color: #1B6B35; }
+  .monto-box .label { color: #166534; font-size: 12px; margin-top: 4px; }
+  .firma { margin-top: 24px; border-top: 1px solid #374151; padding-top: 8px; text-align: center; font-size: 11px; color: #374151; }
+  .badge { display: inline-block; background: #dcfce7; color: #166534; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+  @media print { body { -webkit-print-color-adjust: exact; } }
+</style></head><body>
+<div class="recibo">
+  <div class="header">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <h1>RECIBO DE PAGO DE EXPENSAS</h1>
+        <p>Ley Provincial 14.701 — Provincia de Buenos Aires</p>
+      </div>
+      <div class="nro">
+        <span>N° ${nroRecibo}</span>
+        <div style="font-size:11px;opacity:0.8">Comprobante</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <span class="label">Consorcio</span>
+    <span class="value">${con.nombre || '—'}</span>
+  </div>
+  <div class="row">
+    <span class="label">Unidad Funcional</span>
+    <span class="value">UF ${uf?.numero || '?'} — ${uf?.tipo || ''}</span>
+  </div>
+  <div class="row">
+    <span class="label">Copropietario</span>
+    <span class="value">${cp?.apellido_nombre || '—'}</span>
+  </div>
+  <div class="row">
+    <span class="label">Período</span>
+    <span class="value">${periodo}</span>
+  </div>
+  <div class="row">
+    <span class="label">Fecha de pago</span>
+    <span class="value">${fecha}</span>
+  </div>
+  <div class="row">
+    <span class="label">Medio de pago</span>
+    <span class="value">${(cob.medio_pago || 'efectivo').replace(/_/g,' ')}</span>
+  </div>
+  ${cob.canal_cobro ? `<div class="row"><span class="label">Canal</span><span class="value">${cob.canal_cobro}</span></div>` : ''}
+
+  <div class="monto-box">
+    <div class="monto">${monto}</div>
+    <div class="label">Importe recibido — <span class="badge">✓ Pago registrado</span></div>
+  </div>
+
+  <div class="row">
+    <span class="label">Registrado por</span>
+    <span class="value">Administración de Consorcios Pinamar</span>
+  </div>
+
+  <div class="firma">
+    <strong>Javier García Pérez</strong> — Administrador de Consorcios — RPAC Mat. N° 83<br>
+    Pinamar, Provincia de Buenos Aires<br>
+    <span style="font-size:10px;color:#9ca3af">Comprobante emitido por GASP Consorcios — ${new Date().toLocaleString('es-AR')}</span>
+  </div>
+</div>
+</body></html>`
+  }
+
+  function imprimirRecibo(cob) {
+    const html = generarReciboHTML(cob)
+    const win = window.open('', '_blank', 'width=800,height=600')
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    setTimeout(() => win.print(), 500)
+  }
+
+  function descargarRecibo(cob) {
+    const html = generarReciboHTML(cob)
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    const nro = cob.nro_recibo || cob.id.slice(-8).toUpperCase()
+    a.download = `Recibo_${nro}_UF${unidades.find(u=>u.id===cob.unidad_id)?.numero||'?'}.html`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtroExp, filtroUF])
+
+  const fmt = n => '$' + Number(n).toLocaleString('es-AR', { minimumFractionDigits:2 })
+  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
+  const periodoLabel = pid => {
+    const exp = expensas.find(e=>e.id===pid)
+    if (!exp) return '—'
+    const [y,m] = (exp.periodo||'').split('-')
+    const mes = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    return m ? `${mes[parseInt(m)-1]} ${y}` : exp.periodo
+  }
+
+  return (
+    <div>
+      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>🧾 Recibos de pago</div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Genere e imprima recibos individuales de pago para cada copropietario
+      </div>
+      <Msg data={msg} />
+
+      <Card style={{ marginBottom:16, background:'#eff6ff', border:'1px solid #bfdbfe' }}>
+        <div style={{ fontSize:12, color:'#1e40af' }}>
+          ℹ️ Los recibos se generan como página HTML lista para imprimir o guardar como PDF desde el navegador.
+          Incluyen: N° de recibo, consorcio, UF, copropietario, período, fecha de pago, monto y firma del administrador.
+          Cumplen con las exigencias del RPAC Provincia de Buenos Aires (Ley 14.701).
+        </div>
+      </Card>
+
+      {/* Filtros */}
+      <Card style={{ marginBottom:12 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+          <Sel label="Filtrar por período" value={filtroExp} onChange={setFiltroExp}
+            opts={[{v:'',l:'Todos los períodos'},
+              ...expensas.map(e => {
+                const [y,m] = (e.periodo||'').split('-')
+                const mes = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+                return { v:e.id, l:m?`${mes[parseInt(m)-1]} ${y}`:e.periodo }
+              })
+            ]} />
+          <Sel label="Filtrar por unidad" value={filtroUF} onChange={setFiltroUF}
+            opts={[{v:'',l:'Todas las unidades'},
+              ...unidades.map(u => ({ v:u.id, l:`UF ${u.numero}` }))
+            ]} />
+        </div>
+      </Card>
+
+      {/* Tabla de cobranzas */}
+      <Card>
+        <div style={{ fontWeight:600, fontSize:13, marginBottom:12 }}>
+          Cobranzas registradas ({cobranzas.length})
+        </div>
+        {cobranzas.length === 0 ? (
+          <div style={{ textAlign:'center', padding:24, color:GR }}>
+            Sin cobranzas en el filtro seleccionado
+          </div>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead>
+                <tr style={{ background:'#f3f4f6' }}>
+                  {['Fecha','UF','Propietario','Período','Monto','Medio','N° Recibo','Acciones'].map((h,i) => (
+                    <th key={i} style={{ padding:'7px 10px', textAlign:i===4?'right':'left',
+                      fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb',
+                      whiteSpace:'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {cobranzas.map(cob => {
+                  const uf  = unidades.find(u=>u.id===cob.unidad_id)
+                  const cp  = copropietarios.find(c=>c.id===uf?.propietario_id)
+                  const nro = cob.nro_recibo || cob.recibo_numero || cob.id.slice(-8).toUpperCase()
+                  return (
+                    <tr key={cob.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                      <td style={{ padding:'7px 10px', color:GR, fontSize:11 }}>{fmtD(cob.fecha)}</td>
+                      <td style={{ padding:'7px 10px', fontWeight:700 }}>UF {uf?.numero||'?'}</td>
+                      <td style={{ padding:'7px 10px', fontSize:11 }}>{cp?.apellido_nombre||'—'}</td>
+                      <td style={{ padding:'7px 10px', fontSize:11, color:GR }}>{periodoLabel(cob.expensa_id)}</td>
+                      <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:700, color:VD }}>{fmt(cob.monto)}</td>
+                      <td style={{ padding:'7px 10px', fontSize:11, color:GR, textTransform:'capitalize' }}>
+                        {(cob.medio_pago||'efectivo').replace(/_/g,' ')}
+                      </td>
+                      <td style={{ padding:'7px 10px', fontFamily:'monospace', fontSize:11 }}>{nro}</td>
+                      <td style={{ padding:'7px 10px' }}>
+                        <div style={{ display:'flex', gap:4 }}>
+                          <Btn small onClick={() => imprimirRecibo(cob)}
+                            style={{ background:'#eff6ff', color:AZ }}>
+                            🖨️ Imprimir
+                          </Btn>
+                          <Btn small onClick={() => descargarRecibo(cob)}
+                            style={{ background:'#f3f4f6', color:'#374151' }}>
+                            ⬇
+                          </Btn>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SPRINT B — CUENTAS BANCARIAS DEL CONSORCIO
+// ══════════════════════════════════════════════════════════════════════════════
+function CuentasBancarias({ session, consorcioId, consorcioActivo }) {
+  const [cuentas, setCuentas] = useState([])
+  const [form, setForm]       = useState(null)
+  const [msg, setMsg]         = useState(null)
+  const [guardando, setGuardando] = useState(false)
+  const hoy = new Date().toISOString().split('T')[0]
+
+  async function cargar() {
+    const { data } = await supabase.from('con_cuentas_banco').select('*')
+      .eq('consorcio_id', consorcioId).order('created_at')
+    setCuentas(data || [])
+  }
+
+  async function guardar() {
+    if (!form?.nombre?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el nombre de la cuenta' })
+    setGuardando(true)
+    const payload = {
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      nombre: form.nombre.trim(),
+      banco: form.banco || null,
+      tipo: form.tipo || 'corriente',
+      cbu: form.cbu || null,
+      alias: form.alias || null,
+      nro_cuenta: form.nro_cuenta || null,
+      saldo_inicial: parseFloat(form.saldo_inicial || 0),
+      fecha_inicio: form.fecha_inicio || hoy,
+      activa: true,
+    }
+    const { error } = form.id
+      ? await supabase.from('con_cuentas_banco').update(payload).eq('id', form.id)
+      : await supabase.from('con_cuentas_banco').insert([{ id:`CBC-${Date.now()}`, ...payload }])
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else { setMsg({ tipo:'ok', texto:'✓ Cuenta guardada' }); setForm(null); cargar() }
+    setGuardando(false)
+  }
+
+  async function toggleActiva(c) {
+    await supabase.from('con_cuentas_banco').update({ activa: !c.activa }).eq('id', c.id)
+    cargar()
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
+
+  const fmt = n => '$' + Number(n||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
+
+  const TIPOS = [
+    { v:'corriente', l:'Cuenta corriente' },
+    { v:'caja_ahorro', l:'Caja de ahorro' },
+    { v:'virtual', l:'Cuenta virtual (CVU)' },
+  ]
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>🏛️ Cuentas bancarias</div>
+        <Btn onClick={() => setForm({ tipo:'corriente', fecha_inicio: hoy })}>+ Nueva cuenta</Btn>
+      </div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Cuentas bancarias de {consorcioActivo?.nombre} para registro de ingresos y egresos
+      </div>
+      <Msg data={msg} />
+
+      {form && (
+        <Card style={{ marginBottom:16, border:'1.5px solid #bae6fd' }}>
+          <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:14 }}>
+            {form.id ? 'Editar cuenta' : 'Nueva cuenta bancaria'}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:12, marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Nombre / referencia *</div>
+              <input value={form.nombre||''} placeholder="ej: Cuenta Roela Dorado 1056"
+                onChange={e=>setForm(f=>({...f,nombre:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <Sel label="Tipo" value={form.tipo||'corriente'} onChange={v=>setForm(f=>({...f,tipo:v}))} opts={TIPOS} />
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Banco</div>
+              <input value={form.banco||''} placeholder="ej: Banco Roela"
+                onChange={e=>setForm(f=>({...f,banco:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>CBU / CVU</div>
+              <input value={form.cbu||''} placeholder="22 dígitos"
+                onChange={e=>setForm(f=>({...f,cbu:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Alias</div>
+              <input value={form.alias||''} placeholder="CHOZA.TOPO.SASTRE"
+                onChange={e=>setForm(f=>({...f,alias:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:14 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>N° de cuenta</div>
+              <input value={form.nro_cuenta||''} placeholder="12660/0"
+                onChange={e=>setForm(f=>({...f,nro_cuenta:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Saldo inicial</div>
+              <input type="number" min="0" step="0.01" value={form.saldo_inicial||''}
+                onChange={e=>setForm(f=>({...f,saldo_inicial:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Fecha de inicio</div>
+              <input type="date" value={form.fecha_inicio||hoy}
+                onChange={e=>setForm(f=>({...f,fecha_inicio:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn onClick={guardar} disabled={guardando}>{guardando?'⏳':'✓ Guardar'}</Btn>
+            <BtnSec onClick={()=>{setForm(null);setMsg(null)}}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+
+      {cuentas.length === 0 ? (
+        <Card>
+          <div style={{ textAlign:'center', padding:32, color:GR }}>
+            <div style={{ fontSize:28, marginBottom:8 }}>🏛️</div>
+            <div style={{ fontWeight:600, marginBottom:6 }}>Sin cuentas bancarias configuradas</div>
+            <div style={{ fontSize:12, marginBottom:16 }}>
+              Registre las cuentas bancarias del consorcio para vincularlas con cobranzas y pagos
+            </div>
+            <Btn onClick={() => setForm({ tipo:'corriente', fecha_inicio: hoy })}>+ Agregar cuenta</Btn>
+          </div>
+        </Card>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          {cuentas.map(c => (
+            <Card key={c.id} style={{ opacity: c.activa ? 1 : 0.6 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                <div>
+                  <div style={{ fontWeight:700, fontSize:14, color:AZ }}>{c.nombre}</div>
+                  <div style={{ fontSize:12, color:GR, marginTop:2 }}>
+                    {c.banco && <span>{c.banco} · </span>}
+                    <span style={{ textTransform:'capitalize' }}>{c.tipo?.replace('_',' ')}</span>
+                    {c.nro_cuenta && <span> · Cta: {c.nro_cuenta}</span>}
+                  </div>
+                  {c.cbu && (
+                    <div style={{ fontSize:11, color:GR, marginTop:4, fontFamily:'monospace' }}>
+                      CBU: {c.cbu}
+                    </div>
+                  )}
+                  {c.alias && (
+                    <div style={{ fontSize:11, color:'#7c3aed', marginTop:2 }}>
+                      Alias: {c.alias}
+                    </div>
+                  )}
+                </div>
+                <div style={{ textAlign:'right' }}>
+                  <div style={{ fontSize:11, color:GR, marginBottom:4 }}>Saldo inicial</div>
+                  <div style={{ fontWeight:700, fontSize:16, color:VD }}>{fmt(c.saldo_inicial)}</div>
+                  <div style={{ display:'flex', gap:6, marginTop:8, justifyContent:'flex-end' }}>
+                    <Btn small onClick={() => setForm({...c})}
+                      style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
+                    <Btn small onClick={() => toggleActiva(c)}
+                      style={{ background: c.activa?'#fee2e2':'#dcfce7', color: c.activa?RJ:VD }}>
+                      {c.activa ? 'Desactivar' : 'Activar'}
+                    </Btn>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SPRINT B — MOVIMIENTOS ENTRE CUENTAS
+// ══════════════════════════════════════════════════════════════════════════════
+function MovEntrecuentas({ session, consorcioId }) {
+  const [cuentas, setCuentas]   = useState([])
+  const [movs, setMovs]         = useState([])
+  const [form, setForm]         = useState(null)
+  const [msg, setMsg]           = useState(null)
+  const [guardando, setGuardando] = useState(false)
+  const hoy = new Date().toISOString().split('T')[0]
+
+  async function cargar() {
+    const [{ data: c }, { data: m }] = await Promise.all([
+      supabase.from('con_cuentas_banco').select('*').eq('consorcio_id', consorcioId).eq('activa', true),
+      supabase.from('con_mov_entre_cuentas').select('*').eq('consorcio_id', consorcioId)
+        .order('fecha', { ascending: false }).limit(100),
+    ])
+    setCuentas(c || [])
+    setMovs(m || [])
+  }
+
+  async function guardar() {
+    if (!form?.cuenta_origen) return setMsg({ tipo:'warn', texto:'Seleccioná la cuenta de origen' })
+    if (!form?.cuenta_destino) return setMsg({ tipo:'warn', texto:'Seleccioná la cuenta de destino' })
+    if (form.cuenta_origen === form.cuenta_destino) return setMsg({ tipo:'warn', texto:'Las cuentas deben ser diferentes' })
+    if (!form?.monto || parseFloat(form.monto) <= 0) return setMsg({ tipo:'warn', texto:'Ingresá el monto' })
+    if (!form?.fecha) return setMsg({ tipo:'warn', texto:'Ingresá la fecha' })
+    setGuardando(true)
+    const { error } = await supabase.from('con_mov_entre_cuentas').insert([{
+      id: `MEC-${Date.now()}`,
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      fecha: form.fecha,
+      cuenta_origen: form.cuenta_origen,
+      cuenta_destino: form.cuenta_destino,
+      monto: parseFloat(form.monto),
+      concepto: form.concepto || null,
+      referencia: form.referencia || null,
+    }])
+    if (error) setMsg({ tipo:'error', texto: error.message })
+    else { setMsg({ tipo:'ok', texto:'✓ Movimiento registrado' }); setForm(null); cargar() }
+    setGuardando(false)
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
+
+  const fmt = n => '$' + Number(n||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
+  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
+  const nombreCuenta = id => cuentas.find(c=>c.id===id)?.nombre || id
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>↔️ Movimientos entre cuentas</div>
+        <Btn onClick={() => setForm({ fecha: hoy })} disabled={cuentas.length < 2}>
+          + Registrar movimiento
+        </Btn>
+      </div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Transferencias entre cuentas bancarias del consorcio sin afectar el saldo total
+      </div>
+      <Msg data={msg} />
+
+      {cuentas.length < 2 && (
+        <Card style={{ marginBottom:16, background:'#fff8f0', border:'1px solid #fed7aa' }}>
+          <div style={{ fontSize:12, color:'#92400e' }}>
+            ⚠️ Necesitás al menos dos cuentas bancarias activas para registrar movimientos entre cuentas.
+            Configurá las cuentas en <strong>🏛️ Cuentas bancarias</strong>.
+          </div>
+        </Card>
+      )}
+
+      {form && cuentas.length >= 2 && (
+        <Card style={{ marginBottom:16, border:'1.5px solid #bae6fd' }}>
+          <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:14 }}>↔️ Nuevo movimiento entre cuentas</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
+            <Sel label="Cuenta origen (salida)" value={form.cuenta_origen||''} onChange={v=>setForm(f=>({...f,cuenta_origen:v}))}
+              opts={[{v:'',l:'— Seleccione —'},...cuentas.map(c=>({v:c.id,l:c.nombre}))]} />
+            <Sel label="Cuenta destino (entrada)" value={form.cuenta_destino||''} onChange={v=>setForm(f=>({...f,cuenta_destino:v}))}
+              opts={[{v:'',l:'— Seleccione —'},...cuentas.filter(c=>c.id!==form.cuenta_origen).map(c=>({v:c.id,l:c.nombre}))]} />
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Monto *</div>
+              <input type="number" min="0" step="0.01" value={form.monto||''}
+                onChange={e=>setForm(f=>({...f,monto:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontWeight:700, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:14 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Fecha *</div>
+              <input type="date" value={form.fecha||hoy} onChange={e=>setForm(f=>({...f,fecha:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Concepto</div>
+              <input value={form.concepto||''} placeholder="ej: Depósito cobranzas"
+                onChange={e=>setForm(f=>({...f,concepto:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Referencia</div>
+              <input value={form.referencia||''} placeholder="N° operación"
+                onChange={e=>setForm(f=>({...f,referencia:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn onClick={guardar} disabled={guardando}>{guardando?'⏳':'✓ Registrar'}</Btn>
+            <BtnSec onClick={()=>{setForm(null);setMsg(null)}}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <div style={{ fontWeight:600, fontSize:13, marginBottom:12 }}>
+          Historial ({movs.length} movimientos)
+        </div>
+        {movs.length === 0 ? (
+          <div style={{ textAlign:'center', padding:24, color:GR }}>Sin movimientos registrados</div>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead>
+                <tr style={{ background:'#f3f4f6' }}>
+                  {['Fecha','De','A','Concepto','Monto'].map((h,i) => (
+                    <th key={i} style={{ padding:'7px 10px', textAlign:i===4?'right':'left',
+                      fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {movs.map(m => (
+                  <tr key={m.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                    <td style={{ padding:'7px 10px', color:GR, fontSize:11 }}>{fmtD(m.fecha)}</td>
+                    <td style={{ padding:'7px 10px', fontSize:11 }}>
+                      <span style={{ color:RJ }}>↑</span> {nombreCuenta(m.cuenta_origen)}
+                    </td>
+                    <td style={{ padding:'7px 10px', fontSize:11 }}>
+                      <span style={{ color:VD }}>↓</span> {nombreCuenta(m.cuenta_destino)}
+                    </td>
+                    <td style={{ padding:'7px 10px', color:GR }}>{m.concepto || '—'}</td>
+                    <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:700, color:AZ }}>{fmt(m.monto)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
 function EnviarEmails({ session, consorcioId, unidades, adminPerfil }) {
   const [expensas, setExpensas]   = useState([])
   const [expSel, setExpSel]       = useState('')
@@ -5699,7 +6279,84 @@ function Comprobantes({ session, consorcioId, proveedores, expensas }) {
   const [filtro, setFiltro] = useState('')
   const [msg, setMsg]     = useState(null)
   const [guardando, setGuardando] = useState(false)
+  const [extrayendoIA, setExtrayendoIA] = useState(false)
+  const [archivoFactura, setArchivoFactura] = useState(null)
   const hoy = new Date().toISOString().split('T')[0]
+
+  // ── Extraer datos de factura PDF con IA ───────────────────────────────────
+  async function extraerFacturaConIA(file) {
+    if (!file) return
+    setArchivoFactura(file)
+    setExtrayendoIA(true)
+    setMsg({ tipo:'info', texto:'🤖 Analizando factura con IA...' })
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader()
+        r.onload = () => res(r.result.split(',')[1])
+        r.onerror = () => rej(new Error('Error leyendo archivo'))
+        r.readAsDataURL(file)
+      })
+
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const response = await fetch(`${SUPA_URL}/functions/v1/extraer-factura-ia`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sess?.access_token}`,
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+        },
+        body: JSON.stringify({ base64, filename: file.name })
+      })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || `Error ${response.status}`)
+      }
+
+      const result = await response.json()
+      if (!result.ok) throw new Error(result.error || 'Error desconocido')
+
+      const d = result.datos
+
+      // Buscar proveedor por nombre (aproximado)
+      let provId = ''
+      if (d.proveedor_nombre) {
+        const nombreLower = d.proveedor_nombre.toLowerCase()
+        const match = proveedores.find(p =>
+          p.razon_social?.toLowerCase().includes(nombreLower) ||
+          nombreLower.includes(p.razon_social?.toLowerCase())
+        )
+        if (match) provId = match.id
+      }
+
+      // Detectar tipo de comprobante
+      const tipoMap = { 'A':'factura', 'B':'factura', 'C':'factura',
+        'FACTURA':'factura', 'REMITO':'remito', 'TICKET':'ticket',
+        'NOTA DE DEBITO':'nota_debito', 'NOTA DE CREDITO':'nota_credito' }
+      const tipoDetectado = tipoMap[(d.tipo || '').toUpperCase()] || 'factura'
+
+      setForm(f => ({
+        ...(f || {}),
+        proveedor_id:     provId || f?.proveedor_id || '',
+        tipo:             tipoDetectado,
+        numero:           d.numero || f?.numero || '',
+        fecha:            d.fecha || f?.fecha || hoy,
+        fecha_vencimiento: d.fecha_vencimiento || f?.fecha_vencimiento || '',
+        concepto:         d.concepto || f?.concepto || '',
+        monto_neto:       d.monto_neto != null ? String(d.monto_neto) : f?.monto_neto || '',
+        iva:              d.iva != null ? String(d.iva) : f?.iva || '',
+        otros_impuestos:  d.otros_impuestos != null ? String(d.otros_impuestos) : f?.otros_impuestos || '',
+        monto_total:      d.monto_total != null ? String(d.monto_total) : f?.monto_total || '',
+        notas:            d.notas || f?.notas || '',
+      }))
+
+      const avisoProveedor = provId ? '' : (d.proveedor_nombre ? ` — Proveedor "${d.proveedor_nombre}" no encontrado, seleccionarlo manualmente.` : '')
+      setMsg({ tipo:'ok', texto:`✓ Datos extraídos de la factura${avisoProveedor}` })
+    } catch(e) {
+      setMsg({ tipo:'error', texto: 'Error IA: ' + e.message })
+    }
+    setExtrayendoIA(false)
+  }
 
   async function cargar() {
     const q = supabase.from('con_comprobantes_proveedor').select('*')
@@ -5795,7 +6452,31 @@ function Comprobantes({ session, consorcioId, proveedores, expensas }) {
       {/* Formulario */}
       {form && (
         <Card style={{ marginBottom:16, border:'1.5px solid #bae6fd' }}>
-          <div style={{ fontWeight:700, color:AZ, fontSize:13, marginBottom:14 }}>🧾 Nuevo comprobante</div>
+          <div style={{ fontWeight:700, color:AZ, fontSize:13, marginBottom:12 }}>🧾 Nuevo comprobante</div>
+
+          {/* Carga por PDF con IA */}
+          <div style={{ background:'#f0f9ff', border:'1px solid #bae6fd', borderRadius:8,
+            padding:'10px 14px', marginBottom:14 }}>
+            <div style={{ fontSize:12, fontWeight:600, color:'#0369a1', marginBottom:6 }}>
+              🤖 Cargar desde factura PDF (extracción automática con IA)
+            </div>
+            <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+              <input type="file" accept=".pdf"
+                onChange={e => e.target.files[0] && extraerFacturaConIA(e.target.files[0])}
+                style={{ fontSize:12, flex:1 }}
+                disabled={extrayendoIA} />
+              {extrayendoIA && (
+                <span style={{ fontSize:12, color:'#0369a1', whiteSpace:'nowrap' }}>⏳ Analizando...</span>
+              )}
+              {archivoFactura && !extrayendoIA && (
+                <span style={{ fontSize:11, color:VD, whiteSpace:'nowrap' }}>✓ {archivoFactura.name.slice(0,20)}</span>
+              )}
+            </div>
+            <div style={{ fontSize:10, color:'#6b7280', marginTop:4 }}>
+              Suba la factura y la IA completará los campos automáticamente. Puede editarlos antes de guardar.
+            </div>
+          </div>
+
           <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:12, marginBottom:12 }}>
             <Sel label="Proveedor *" value={form.proveedor_id||''} onChange={v=>setForm(f=>({...f,proveedor_id:v}))}
               opts={[{v:'',l:'— Seleccione —'},...proveedores.map(p=>({v:p.id,l:p.razon_social}))]} />
@@ -7135,6 +7816,8 @@ export default function App() {
 
     // ── Movimientos ────────────────────────────────────
     { id:'mov_varios',       label:'Movimientos varios',   icon:'🔄', sec:'Movimientos' },
+    { id:'cuentas_banco',    label:'Cuentas bancarias',    icon:'🏛️', sec:'Movimientos' },
+    { id:'mov_entre_cuentas',label:'Entre cuentas',         icon:'↔️', sec:'Movimientos' },
 
     // ── Reportes ───────────────────────────────────────
     { id:'reporte_movimientos', label:'Movim. por período', icon:'📈', sec:'Reportes' },
@@ -7142,6 +7825,7 @@ export default function App() {
 
     // ── Comunicaciones ─────────────────────────────────
     { id:'emails',           label:'Enviar liquidación',   icon:'✉️', sec:'Comunicaciones' },
+    { id:'recibos',          label:'Recibos de pago',      icon:'🧾', sec:'Comunicaciones' },
     { id:'email_tracking',   label:'Seguimiento emails',   icon:'📬', sec:'Comunicaciones' },
     { id:'cobranzas_auto',   label:'Cobranzas automáticas', icon:'🏦', sec:'Comunicaciones' },
     { id:'generar_debito',   label:'Generar débito',         icon:'📤', sec:'Comunicaciones' },
@@ -7218,6 +7902,9 @@ export default function App() {
       case 'importar_pdf':   return <ImportarPDF session={session} consorcioId={cid} consorcioActivo={consorcioActivo} onDone={() => { cargar(); setPagina('dashboard') }} />
       case 'cobranzas_auto':  return <CobranzasAutomaticas session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
       case 'generar_debito':  return <GenerarDebito session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
+      case 'recibos':          return <ReciboPago session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} expensas={expensas} consorcioActivo={consorcioActivo} />
+      case 'cuentas_banco':    return <CuentasBancarias session={session} consorcioId={cid} consorcioActivo={consorcioActivo} />
+      case 'mov_entre_cuentas': return <MovEntrecuentas session={session} consorcioId={cid} />
       case 'email_tracking': return <EmailTracking session={session} consorcioId={cid} />
       case 'emails':         return <EnviarEmails session={session} consorcioId={cid} unidades={unidades} adminPerfil={adminPerfil} />
       case 'clientes':       return <Card style={{ textAlign:'center', padding:40, color:GR }}><div style={{fontSize:32,marginBottom:12}}>🚧</div><div style={{fontWeight:600}}>Panel de clientes en desarrollo</div></Card>
