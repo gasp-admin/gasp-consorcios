@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260515-fix-importar-pdf'
+const BUILD_VERSION = '20260515-fix-portal-link'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -328,19 +328,26 @@ function Unidades({ session, consorcioId, copropietarios }) {
                     <td style={{ padding:'10px 12px' }}>
                       <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
                         {u.portal_token && (
-                          <Btn small title="Copiar link del portal" onClick={() => {
-                            const url = `${window.location.origin}/portal?token=${u.portal_token}`
-                            navigator.clipboard.writeText(url)
-                              .then(() => setMsg({ tipo:'ok', texto:`✓ Link portal copiado — UF ${u.numero}` }))
-                              .catch(() => { prompt('Copie este link:', url) })
+                          <Btn small title="Abrir y copiar link del portal" onClick={() => {
+                            const url = 'https://consorcios.administracionpinamar.com/portal?token=' + u.portal_token
+                            // Abrir en nueva pestaña
+                            window.open(url, '_blank')
+                            // Intentar copiar al clipboard
+                            if (navigator.clipboard) {
+                              navigator.clipboard.writeText(url)
+                                .then(() => setMsg({ tipo:'ok', texto:'✓ Link copiado y abierto — UF ' + u.numero }))
+                                .catch(() => setMsg({ tipo:'ok', texto:'✓ Portal abierto — UF ' + u.numero }))
+                            } else {
+                              setMsg({ tipo:'ok', texto:'✓ Portal abierto — UF ' + u.numero })
+                            }
                           }} style={{ background:'#dbeafe', color:'#1e40af' }}>🔗</Btn>
                         )}
                         {u.portal_token && (() => {
                           const cp2 = copropietarios.find(c => c.id === u.propietario_id)
                           return cp2?.telefono ? (
                             <Btn small title="Enviar link por WhatsApp" onClick={() => {
-                              const url = `${window.location.origin}/portal?token=${u.portal_token}`
-                              const txt = encodeURIComponent(`Estimado/a ${cp2.apellido_nombre}, le enviamos el link a su portal de expensas donde puede consultar su estado de cuenta:\n${url}`)
+                              const url = 'https://consorcios.administracionpinamar.com/portal?token=' + u.portal_token
+                              const txt = encodeURIComponent('Estimado/a ' + cp2.apellido_nombre + ', le enviamos el link a su portal de expensas donde puede consultar su estado de cuenta:\n' + url)
                               window.open(`https://wa.me/549${cp2.telefono.replace(/\D/g,'')}?text=${txt}`, '_blank')
                             }} style={{ background:'#dcfce7', color:'#166534' }}>📱</Btn>
                           ) : null
@@ -1763,7 +1770,7 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios, adminPerfil
                             {d.estado === 'pagada' && <Badge text="✓ Cobrado" color={VD} bg='#dcfce7' />}
                             {u?.portal_token && (
                               <Btn small title="Enviar link portal por WhatsApp" onClick={() => {
-                                const url = `${window.location.origin}/portal?token=${u.portal_token}`
+                                const url = 'https://consorcios.administracionpinamar.com/portal?token=' + u?.portal_token
                                 const cp2 = copropietarios.find(c => c.id === u.propietario_id)
                                 if (cp2?.telefono) {
                                   const txt = encodeURIComponent(`Estimado/a ${cp2.apellido_nombre}, consulte su estado de cuenta en:\n${url}`)
