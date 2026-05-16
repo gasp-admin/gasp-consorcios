@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260515-fix-portal-link'
+const BUILD_VERSION = '20260516-transferencias-siro'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -2319,6 +2319,30 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
     return { registros, total: registros.reduce((a,r)=>a+r.importe,0) }
   }
 
+  function parsearTransferenciasSIRO(texto) {
+    // TransferenciasSiro: fecha_pago(8)+fecha_acred(8)+importe(10,÷100)+nombre(30)+banco(30)+cuit(11)+ref(libre)
+    // Primera línea puede tener BOM UTF-8 — limpiar
+    const lineas = texto.replace(/^﻿/, '').split(/
+?
+/).filter(l => l.trim() && l.length >= 26)
+    const registros = []
+    for (const line of lineas) {
+      try {
+        const fecha_pago  = line.slice(0,8)
+        const fecha_acred = line.slice(8,16)
+        const importe     = parseInt(line.slice(16,26)) / 100
+        const nombre      = line.slice(26,56).trim()
+        const banco       = line.slice(56,86).trim()
+        const cuit        = line.slice(86,97).trim()
+        const referencia  = line.slice(97).trim()
+        if (isNaN(importe) || importe <= 0 || !nombre) continue
+        const fecha = fecha_pago.slice(0,4)+'-'+fecha_pago.slice(4,6)+'-'+fecha_pago.slice(6,8)
+        registros.push({ fecha, fecha_acred, importe, nombre, banco, cuit, referencia, raw: line })
+      } catch(e) {}
+    }
+    return { registros, total: registros.reduce((a,r) => a + r.importe, 0) }
+  }
+
   function procesarArchivo(file) {
     setArchivo(file); setPreview([]); setMsg(null)
     const reader = new FileReader()
@@ -2329,13 +2353,23 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
         if (sistema === 'expensas_pagas') {
           parsed = parsearRD(texto)
           setPreview(parsed.registros.slice(0,8).map(r => ({
-            referencia: `Conv.${r.convenio} UF#${r.nro_uf}`,
+            referencia: 'Conv.'+r.convenio+' UF#'+r.nro_uf,
             fecha: r.fecha,
             importe: r.neto,
             canal: r.canal,
             _raw: r,
           })))
-          setMsg({ tipo:'info', texto:`✓ ${parsed.registros.length} pagos detectados — Total neto: $${parsed.total.toLocaleString('es-AR')}` })
+          setMsg({ tipo:'info', texto:'✓ '+parsed.registros.length+' pagos detectados — Total neto: $'+parsed.total.toLocaleString('es-AR') })
+        } else if (sistema === 'transferencias_siro') {
+          parsed = parsearTransferenciasSIRO(texto)
+          setPreview(parsed.registros.slice(0,8).map(r => ({
+            referencia: r.nombre,
+            fecha: r.fecha,
+            importe: r.importe,
+            canal: r.banco,
+            _raw: r,
+          })))
+          setMsg({ tipo:'info', texto:'✓ '+parsed.registros.length+' transferencias detectadas — Total: $'+parsed.total.toLocaleString('es-AR') })
         } else {
           parsed = parsearSIRO(texto)
           setPreview(parsed.registros.slice(0,8).map(r => ({
@@ -2345,13 +2379,13 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
             canal: r.canal_name,
             _raw: r,
           })))
-          setMsg({ tipo:'info', texto:`✓ ${parsed.registros.length} pagos detectados — Total: $${parsed.total.toLocaleString('es-AR')}` })
+          setMsg({ tipo:'info', texto:'✓ '+parsed.registros.length+' pagos detectados — Total: $'+parsed.total.toLocaleString('es-AR') })
         }
       } catch(e) {
         setMsg({ tipo:'error', texto: 'Error procesando archivo: ' + e.message })
       }
     }
-    reader.readAsText(file, 'latin-1')
+    reader.readAsText(file, 'utf-8')
   }
 
   async function importarPagos() {
@@ -2366,10 +2400,20 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
       if (sistema === 'expensas_pagas') {
         const parsed = parsearRD(texto)
         registros = parsed.registros
+      } else if (sistema === 'transferencias_siro') {
+        const parsed = parsearTransferenciasSIRO(texto)
+        registros = parsed.registros.map(r => ({
+          nombre_titular: r.nombre,
+          fecha: r.fecha,
+          neto: r.importe,
+          canal: 'Transferencia SIRO (' + r.banco + ')',
+          cuit: r.cuit,
+          referencia: r.referencia,
+          _raw: r,
+        }))
       } else {
         const parsed = parsearSIRO(texto)
         registros = parsed.registros.map(r => ({
-          // Para SIRO: buscar UF por nro_siro o por número de comprobante
           nro_uf_siro: r.nro_uf_siro,
           nro_cbte: r.nro_cbte,
           fecha: r.fecha_pago,
@@ -2382,29 +2426,50 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
       let ok = 0, errores = [], sinMatch = []
       const epConvenio = config?.ep_convenio_id || ''
 
+      // Cargar copropietarios para matching por nombre
+      const { data: coprosMatch } = await supabase.from('con_copropietarios').select('id,apellido_nombre')
+        .eq('consorcio_id', consorcioId)
+
       for (const reg of registros) {
         // Buscar la UF correspondiente
         let uf = null
 
         if (sistema === 'expensas_pagas') {
-          // Buscar por nro_ep (número interno Expensas Pagas)
           const nroStr = String(reg.nro_uf)
           uf = unidades.find(u =>
             u.nro_ep === nroStr ||
             u.nro_ep === nroStr.padStart(2,'0') ||
             u.nro_ep === nroStr.padStart(3,'0') ||
-            // Fallback: número correlativo por posición si la UF tiene ese número
             u.numero === nroStr
           )
+        } else if (sistema === 'transferencias_siro') {
+          // Matching por nombre del titular (fuzzy: apellido principal)
+          const nombreReg = (reg.nombre_titular || '').toLowerCase().trim()
+          // Buscar copropietario cuyo apellido coincida
+          let cpMatch = null
+          for (const cp of (coprosMatch || [])) {
+            const nombreCp = (cp.apellido_nombre || '').toLowerCase().trim()
+            // Comparar primer apellido (primera palabra del registro vs primera del copropietario)
+            const apellidoReg = nombreReg.split(' ')[0]
+            const apellidoCp  = nombreCp.split(',')[0].split(' ')[0]
+            // Match exacto o contenido
+            if (apellidoReg && apellidoCp &&
+               (apellidoCp.includes(apellidoReg) || apellidoReg.includes(apellidoCp) ||
+                nombreReg.includes(apellidoCp) || nombreCp.includes(apellidoReg))) {
+              cpMatch = cp; break
+            }
+          }
+          if (cpMatch) {
+            uf = unidades.find(u => u.propietario_id === cpMatch.id)
+          }
         } else {
-          // SIRO: buscar por nro_siro o por comprobante
           uf = unidades.find(u =>
             u.nro_siro && (u.nro_siro === reg.nro_uf_siro || u.nro_siro === reg.nro_cbte)
           )
         }
 
         if (!uf) {
-          sinMatch.push(`Ref ${reg.nro_uf || reg.nro_cbte}: sin coincidencia`)
+          sinMatch.push('Sin coincidencia: ' + (reg.nombre_titular || reg.nro_uf || reg.nro_cbte || '?'))
           continue
         }
 
@@ -2619,7 +2684,8 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
                 <select value={sistema} onChange={e=>{ setSistema(e.target.value); setArchivo(null); setPreview([]) }}
                   style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
                   <option value="expensas_pagas">Expensas Pagas (archivo RD)</option>
-                  <option value="siro">SIRO Banco Roela (archivo TXT)</option>
+                  <option value="siro">SIRO Banco Roela — Cobranzas (CobranzasSiro...)</option>
+                  <option value="transferencias_siro">SIRO Banco Roela — Transferencias (TransferenciasSiro...)</option>
                 </select>
               </div>
               <Sel label="Período a imputar" value={expSel} onChange={setExpSel}
@@ -2642,17 +2708,13 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
               padding:'10px 14px', fontSize:11, color:'#0369a1' }}>
               {sistema === 'expensas_pagas' ? (
                 <>
-                  <strong>Formato Expensas Pagas RD:</strong> El archivo se llama{' '}
-                  <code>XXXX_RD_AAAAMMDD.txt</code> donde XXXX es el ID del consorcio.
-                  Identifica el pago por <strong>número de UF interno</strong>.
-                  Configurar el nro_ep de cada UF en la pestaña ⚙️ Configuración.
+                  <strong>Formato Expensas Pagas RD:</strong> Archivo <code>XXXX_RD_AAAAMMDD.txt</code>.
+                  Identifica pagos por número de UF interno (nro_ep). Configurar en ⚙️.
                 </>
               ) : (
                 <>
-                  <strong>Formato SIRO Banco Roela:</strong> El archivo se llama{' '}
-                  <code>CobranzasSiro_CUIT_FECHA.txt</code>.
-                  Cada línea tiene 125 caracteres. El importe está en las posiciones 49-61.
-                  Configurar nro_siro de cada UF en ⚙️ Configuración.
+                  <strong>Formato SIRO Cobranzas:</strong> Archivo <code>CobranzasSiro_CUIT_FECHA.txt</code>.
+                  125 caracteres por línea. Matching por nro_siro de la UF.
                 </>
               )}
             </div>
@@ -2683,15 +2745,18 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
                         background: uf ? 'transparent' : '#fff8f0' }}>
                         <td style={{ padding:'6px 10px' }}>
                           <span style={{ fontWeight:600 }}>{r.referencia}</span>
-                          {uf ? (
-                            <span style={{ marginLeft:8, fontSize:10, color:VD }}>
-                              → UF {uf.numero}
-                            </span>
-                          ) : (
-                            <span style={{ marginLeft:8, fontSize:10, color:AM }}>
-                              ⚠ sin coincidencia
-                            </span>
-                          )}
+                          {(() => {
+                            let matchUf = uf
+                            return matchUf ? (
+                              <span style={{ marginLeft:8, fontSize:10, color:VD }}>
+                                → UF {matchUf.numero}
+                              </span>
+                            ) : (
+                              <span style={{ marginLeft:8, fontSize:10, color:AM }}>
+                                ⚠ sin coincidencia
+                              </span>
+                            )
+                          })()}
                         </td>
                         <td style={{ padding:'6px 10px', color:GR, fontSize:11 }}>{r.fecha}</td>
                         <td style={{ padding:'6px 10px', textAlign:'right', fontWeight:700, color:VD }}>{fmt(r.importe)}</td>
