@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260515-sprints-abc'
+const BUILD_VERSION = '20260515-email-tracking-fix'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -3165,7 +3165,8 @@ function EmailTracking({ session, consorcioId }) {
   }
 
   async function verificarEstado(log) {
-    // Consultar a Resend el estado actual del email via Edge Function
+    if (!log.resend_id) return
+    setMsg({ tipo:'info', texto:'⏳ Verificando estado en Resend...' })
     try {
       const { data: { session: sess } } = await supabase.auth.getSession()
       const res = await fetch(`${SUPA_URL}/functions/v1/verificar-email-estado`, {
@@ -3177,18 +3178,47 @@ function EmailTracking({ session, consorcioId }) {
         },
         body: JSON.stringify({ resend_id: log.resend_id, log_id: log.id })
       })
-      if (res.ok) {
-        const data = await res.json()
-        cargar()
-        return data
-      }
-    } catch(e) {}
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
+      const eventos = data.eventos || []
+      const resumen = eventos.length > 0
+        ? eventos.map(e => e.name).join(', ')
+        : 'Sin eventos registrados'
+      setMsg({ tipo:'ok', texto:`✓ ${data.abierto ? '👁 Abierto' : data.entregado ? '✓ Entregado' : '📤 Enviado'} — Eventos: ${resumen}` })
+      cargar()
+    } catch(e) {
+      setMsg({ tipo:'error', texto: 'Error: ' + e.message })
+    }
   }
 
   async function reenviar(log) {
     if (!confirm(`¿Reenviar el email a ${log.destinatario}?`)) return
     // Marcar como pendiente y disparar reenvío
     await supabase.from('con_email_log').update({ estado:'pendiente_reenvio' }).eq('id', log.id)
+    cargar()
+  }
+
+  async function verificarTodos() {
+    const conResendId = logs.filter(l => l.resend_id && !l.abierto)
+    if (conResendId.length === 0) { setMsg({ tipo:'info', texto:'Todos los emails ya están verificados' }); return }
+    setMsg({ tipo:'info', texto:`⏳ Verificando ${conResendId.length} emails...` })
+    let actualizados = 0
+    for (const log of conResendId.slice(0, 20)) {  // máximo 20 a la vez
+      try {
+        const { data: { session: sess } } = await supabase.auth.getSession()
+        const res = await fetch(`${SUPA_URL}/functions/v1/verificar-email-estado`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sess?.access_token}`,
+            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+          },
+          body: JSON.stringify({ resend_id: log.resend_id, log_id: log.id })
+        })
+        if (res.ok) actualizados++
+      } catch(e) {}
+    }
+    setMsg({ tipo:'ok', texto:`✓ ${actualizados} emails verificados` })
     cargar()
   }
 
@@ -3234,7 +3264,10 @@ function EmailTracking({ session, consorcioId }) {
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
         <div style={{ fontWeight:700, fontSize:15 }}>📬 Seguimiento de emails</div>
-        <Btn small onClick={cargar} style={{ background:'#f3f4f6', color:'#374151' }}>⟳ Actualizar</Btn>
+        <div style={{ display:'flex', gap:8 }}>
+          <Btn small onClick={verificarTodos} style={{ background:'#eff6ff', color:AZ }}>⟳ Verificar todos</Btn>
+          <Btn small onClick={cargar} style={{ background:'#f3f4f6', color:'#374151' }}>↺ Recargar</Btn>
+        </div>
       </div>
       <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
         Estado de entrega y apertura de liquidaciones enviadas por email
@@ -3378,8 +3411,18 @@ function EmailTracking({ session, consorcioId }) {
                       </td>
                       <td style={{ padding:'7px 10px', textAlign:'center' }}>
                         {log.abierto
-                          ? <span style={{ color:'#7c3aed', fontWeight:700 }} title={fmtD(log.fecha_apertura)}>👁 {log.fecha_apertura ? new Date(log.fecha_apertura).toLocaleDateString('es-AR') : 'Sí'}</span>
-                          : <span style={{ color:GR }}>—</span>}
+                          ? <div>
+                              <span style={{ color:'#7c3aed', fontWeight:700, fontSize:12 }}>👁 Sí</span>
+                              {log.fecha_apertura && <div style={{ fontSize:10, color:GR }}>
+                                {new Date(log.fecha_apertura).toLocaleDateString('es-AR')}
+                              </div>}
+                            </div>
+                          : log.entregado
+                            ? <span style={{ color:VD, fontSize:11 }}>✓ Entregado</span>
+                            : log.rebotado
+                              ? <span style={{ color:RJ, fontSize:11 }}>↩ Rebotado</span>
+                              : <span style={{ color:GR, fontSize:11 }}>— Pendiente</span>
+                        }
                       </td>
                       <td style={{ padding:'7px 10px', fontSize:10, color:GR, fontFamily:'monospace' }}>
                         {log.resend_id ? log.resend_id.slice(0,20)+'…' : '—'}
@@ -3410,11 +3453,15 @@ function EmailTracking({ session, consorcioId }) {
       </Card>
 
       {/* Nota sobre tracking de aperturas */}
-      <div style={{ marginTop:12, padding:'10px 14px', background:'#f8fafc',
-        borderRadius:8, fontSize:11, color:GR, border:'1px solid #e5e7eb' }}>
-        ℹ️ El tracking de aperturas requiere que el dominio <strong>administracionpinamar.com</strong> esté
-        verificado en Resend y que el copropietario permita la carga de imágenes en su cliente de email.
-        El estado de entrega se actualiza presionando ⟳ en cada registro.
+      <div style={{ marginTop:12, padding:'12px 14px', background:'#eff6ff',
+        borderRadius:8, fontSize:11, color:'#1e40af', border:'1px solid #bfdbfe' }}>
+        <strong>ℹ️ Sobre el tracking de aperturas:</strong>
+        <div style={{ marginTop:4, lineHeight:1.7 }}>
+          • El tracking de entrega funciona automáticamente con Resend.<br/>
+          • El tracking de <strong>apertura</strong> requiere que el copropietario permita la carga de imágenes en su cliente de email (Gmail, Outlook, etc.).<br/>
+          • Para activar el tracking completo, verificar el dominio <strong>administracionpinamar.com</strong> en resend.com → Domains.<br/>
+          • Presionar <strong>"⟳ Verificar todos"</strong> para actualizar el estado de todos los emails desde Resend.
+        </div>
       </div>
     </div>
   )
