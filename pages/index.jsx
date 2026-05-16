@@ -8094,56 +8094,39 @@ export default function App() {
     setFormCon(null); setMsgCon({ tipo:'ok', texto:'✓ Consorcio guardado' }); cargar()
   }
 
-  const NAV=[
-    // ── Principal ──────────────────────────────────────
-    { id:'dashboard',        label:'Dashboard',           icon:'📊', sec:'Principal' },
-
-    // ── Consorcio ──────────────────────────────────────
-    { id:'unidades',         label:'Unidades (UFs)',       icon:'🏢', sec:'Consorcio' },
-    { id:'copropietarios',   label:'Copropietarios',       icon:'👤', sec:'Consorcio' },
-    { id:'proveedores',      label:'Proveedores',          icon:'🔧', sec:'Consorcio' },
-    { id:'actas',            label:'Libro de Actas',       icon:'📖', sec:'Consorcio' },
-
-    // ── Expensas ───────────────────────────────────────
-    { id:'expensas',         label:'Expensas',             icon:'💰', sec:'Expensas' },
-    { id:'liquidacion',      label:'Liquidar período',     icon:'📝', sec:'Expensas' },
-    { id:'cobranzas',        label:'Cobranzas',            icon:'💳', sec:'Expensas' },
-    { id:'morosos',          label:'Morosos',              icon:'⚠️', sec:'Expensas' },
-    { id:'cta_corriente',    label:'Cta. corriente UF',    icon:'📋', sec:'Expensas' },
-    { id:'movimientos',      label:'Notas Déb/Cré',        icon:'↕️', sec:'Expensas' },
-    { id:'anular_cobranza',  label:'Anular cobranzas',     icon:'↩️', sec:'Expensas' },
-
-    // ── Proveedores ────────────────────────────────────
-    { id:'comprobantes',     label:'Comprobantes',         icon:'🧾', sec:'Proveedores' },
-    { id:'pagos_prov',       label:'Pagos proveedores',    icon:'💸', sec:'Proveedores' },
-    { id:'cta_proveedor',    label:'Cta. corriente prov.', icon:'📊', sec:'Proveedores' },
-
-    // ── Movimientos ────────────────────────────────────
-    { id:'mov_varios',       label:'Movimientos varios',   icon:'🔄', sec:'Movimientos' },
-    { id:'cuentas_banco',    label:'Cuentas bancarias',    icon:'🏛️', sec:'Movimientos' },
-    { id:'mov_entre_cuentas',label:'Entre cuentas',         icon:'↔️', sec:'Movimientos' },
-
-    // ── Reportes ───────────────────────────────────────
+ const NAV=[
+    { id:'dashboard',        label:'Dashboard',            icon:'📊', sec:'Inicio' },
+    { id:'unidades',         label:'Unidades (UFs)',        icon:'🏢', sec:'Consorcio' },
+    { id:'copropietarios',   label:'Copropietarios',        icon:'👤', sec:'Consorcio' },
+    { id:'proveedores',      label:'Proveedores',           icon:'🔧', sec:'Consorcio' },
+    { id:'actas',            label:'Libro de Actas',        icon:'📖', sec:'Consorcio' },
+    { id:'liquidacion',      label:'Liquidar período',      icon:'📝', sec:'Expensas' },
+    { id:'expensas',         label:'Períodos',              icon:'📅', sec:'Expensas' },
+    { id:'periodos',         label:'Control períodos',      icon:'🔒', sec:'Expensas' },
+    { id:'cobranzas',        label:'Cobranzas',             icon:'💳', sec:'Cobranzas' },
+    { id:'cobranzas_auto',   label:'Cobranzas automáticas', icon:'🏦', sec:'Cobranzas' },
+    { id:'generar_debito',   label:'Generar débito',        icon:'📤', sec:'Cobranzas' },
+    { id:'anular_cobranza',  label:'Anular cobranzas',      icon:'↩️', sec:'Cobranzas' },
+    { id:'morosos',          label:'Morosos',               icon:'⚠️', sec:'Cobranzas' },
+    { id:'recibos',          label:'Recibos de pago',       icon:'🧾', sec:'Cobranzas' },
+    { id:'comprobantes',     label:'Comprobantes',          icon:'🧾', sec:'Proveedores' },
+    { id:'pagos_prov',       label:'Pagos',                 icon:'💸', sec:'Proveedores' },
+    { id:'cta_proveedor',    label:'Cta. corriente prov.',  icon:'📊', sec:'Proveedores' },
+    { id:'cuentas_banco',    label:'Cuentas bancarias',     icon:'🏛️', sec:'Contabilidad' },
+    { id:'mov_entre_cuentas',label:'Mov. entre cuentas',    icon:'↔️', sec:'Contabilidad' },
+    { id:'mov_varios',       label:'Movimientos varios',    icon:'🔄', sec:'Contabilidad' },
+    { id:'movimientos',      label:'Notas Déb/Cré UF',      icon:'↕️', sec:'Contabilidad' },
+    { id:'cta_corriente',    label:'Cta. corriente UF',     icon:'📋', sec:'Contabilidad' },
     { id:'reporte_movimientos', label:'Movim. por período', icon:'📈', sec:'Reportes' },
     { id:'estado_financiero',   label:'Estado financiero',  icon:'🏦', sec:'Reportes' },
-
-    // ── Comunicaciones ─────────────────────────────────
-    { id:'emails',           label:'Enviar liquidación',   icon:'✉️', sec:'Comunicaciones' },
-    { id:'recibos',          label:'Recibos de pago',      icon:'🧾', sec:'Comunicaciones' },
-    { id:'email_tracking',   label:'Seguimiento emails',   icon:'📬', sec:'Comunicaciones' },
-    { id:'cobranzas_auto',   label:'Cobranzas automáticas', icon:'🏦', sec:'Comunicaciones' },
-    { id:'generar_debito',   label:'Generar débito',         icon:'📤', sec:'Comunicaciones' },
-
-    // ── Configuración ──────────────────────────────────
-    { id:'plan_cuentas',     label:'Plan de cuentas',      icon:'📑', sec:'Configuración' },
-    { id:'mora_diferencial', label:'Interés diferencial',  icon:'⚖️', sec:'Configuración' },
-    { id:'periodos',         label:'Control períodos',     icon:'🔒', sec:'Configuración' },
+    { id:'emails',           label:'Enviar liquidación',    icon:'✉️', sec:'Comunicaciones' },
+    { id:'email_tracking',   label:'Seguimiento emails',    icon:'📬', sec:'Comunicaciones' },
+    { id:'plan_cuentas',     label:'Plan de cuentas',       icon:'📑', sec:'Configuración' },
+    { id:'mora_diferencial', label:'Interés por mora',      icon:'⚖️', sec:'Configuración' },
     { id:'importar',         label:'Importar datos',        icon:'📥', sec:'Configuración' },
-    { id:'importar_pdf',     label:'Migrar desde PDF',      icon:'🤖', sec:'Configuración' },
-
-    // ── Admin ──────────────────────────────────────────
-    { id:'perfil',           label:'Mi perfil',            icon:'⚙️', sec:'Admin' },
-    ...(esSuperAdmin?[{id:'clientes',label:'Clientes GASP',icon:'🏢',sec:'Admin'}]:[]),
+    { id:'importar_pdf',     label:'Migrar desde PDF (IA)', icon:'🤖', sec:'Configuración' },
+    { id:'perfil',           label:'Mi perfil',             icon:'⚙️', sec:'Configuración' },
+    ...(esSuperAdmin?[{id:'clientes',label:'Clientes GASP',icon:'🏢',sec:'Configuración'}]:[]),
   ]
   const secciones=[...new Set(NAV.map(n=>n.sec))]
 
