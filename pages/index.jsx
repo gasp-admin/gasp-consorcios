@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-fix-asignacion'
+const BUILD_VERSION = '20260516-cobranzas-expsel'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -1454,9 +1454,18 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios, adminPerfil
         .order('periodo', { ascending: false }),
       supabase.from('con_consorcios').select('*').eq('id', consorcioId).single()
     ])
-    setExpensas(expRes.data || [])
+    const exps = expRes.data || []
+    setExpensas(exps)
     setConsorcio(conRes.data || null)
-    if (expRes.data?.length > 0) seleccionarExpensa(expRes.data[0])
+    if (exps.length > 0) {
+      // Prioridad: 1) expensa abierta con detalles, 2) cerrada más reciente con detalles, 3) cualquier abierta, 4) la primera
+      // Buscar la expensa más relevante para mostrar
+      // Preferir cerrada con datos sobre abierta sin datos
+      const abConDatos = exps.find(e => e.estado === 'abierta' && e.tipo !== 'migracion' && parseFloat(e.total_expensa) > 0)
+      const cerradaReciente = exps.find(e => e.estado === 'cerrada')
+      const abSinDatos = exps.find(e => e.estado === 'abierta' && e.tipo !== 'migracion')
+      seleccionarExpensa(abConDatos || cerradaReciente || abSinDatos || exps[0])
+    }
   }
 
   async function seleccionarExpensa(exp) {
