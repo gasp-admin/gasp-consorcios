@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-asignacion-manual'
+const BUILD_VERSION = '20260516-fix-asignacion'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -2434,7 +2434,8 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
       const { data: coprosMatch } = await supabase.from('con_copropietarios').select('id,apellido_nombre')
         .eq('consorcio_id', consorcioId)
 
-      for (const reg of registros) {
+      for (let regIdx = 0; regIdx < registros.length; regIdx++) {
+        const reg = registros[regIdx]
         // Buscar la UF correspondiente
         let uf = null
 
@@ -2474,19 +2475,28 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
 
         if (!uf) {
           // Buscar en asignaciones manuales del preview
-          const idxPreview = registros.indexOf(reg)
-          const asig = asignaciones[idxPreview]
+          const asig = asignaciones[regIdx]
           if (asig?.unidad_id && asig?.consorcio_id) {
             // Cargar la UF manualmente asignada
             const { data: ufManual } = await supabase.from('con_unidades')
               .select('*').eq('id', asig.unidad_id).single()
             if (ufManual) {
+              // Buscar la expensa del mismo período en el consorcio asignado
+              const expActual = expensas.find(e => e.id === expSel)
+              const periodoActual = expActual?.periodo || ''
+              let expensaDestId = expSel
+              if (asig.consorcio_id !== consorcioId && periodoActual) {
+                const { data: expDest } = await supabase.from('con_expensas')
+                  .select('id').eq('consorcio_id', asig.consorcio_id)
+                  .eq('periodo', periodoActual).limit(1)
+                if (expDest?.[0]) expensaDestId = expDest[0].id
+              }
               // Registrar con el consorcio y expensa correctos
               const { error: errManual } = await supabase.from('con_cobranzas').insert([{
                 id: 'COB-MAN-' + ufManual.id + '-' + Date.now() + '-' + ok,
                 admin_id: session.user.id,
                 consorcio_id: asig.consorcio_id,
-                expensa_id: expSel,
+                expensa_id: expensaDestId,
                 unidad_id: asig.unidad_id,
                 fecha: reg.fecha,
                 monto: reg.neto,
@@ -2498,13 +2508,13 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
               if (!errManual) {
                 // Actualizar pagos_periodo en el consorcio correcto
                 const { data: det } = await supabase.from('con_expensas_detalle')
-                  .select('pagos_periodo,monto').eq('expensa_id', expSel).eq('unidad_id', asig.unidad_id).single()
+                  .select('pagos_periodo,monto').eq('expensa_id', expensaDestId).eq('unidad_id', asig.unidad_id).single()
                 if (det) {
                   const nuevoPago = (parseFloat(det.pagos_periodo)||0) + reg.neto
                   await supabase.from('con_expensas_detalle').update({
                     pagos_periodo: nuevoPago,
                     estado: nuevoPago >= (det.monto||0) ? 'pagada' : 'pendiente'
-                  }).eq('expensa_id', expSel).eq('unidad_id', asig.unidad_id)
+                  }).eq('expensa_id', expensaDestId).eq('unidad_id', asig.unidad_id)
                 }
                 ok++
                 continue
@@ -4779,6 +4789,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
         }])
       }
 
+      setAsignaciones({})
       setMsg({
         tipo: errs.length === 0 ? 'ok' : 'warn',
         texto: `✓ Migración completada — ${ok} registros importados${errs.length>0 ? ` · ${errs.length} errores` : ''}`
