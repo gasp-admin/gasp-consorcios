@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-selector-final'
+const BUILD_VERSION = '20260516-p1p2p3-full'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -162,7 +162,7 @@ function generarPDFLiquidacion({ consorcioActivo, expensa, gastos, detalles, uni
 
   const css=`*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:8.5pt;color:#111;background:#fff}.page{width:210mm;min-height:297mm;padding:11mm 13mm 9mm;page-break-after:always;position:relative}.page:last-child{page-break-after:auto}@page{size:A4;margin:0}@media print{body{margin:0}.no-print{display:none!important}}.hdr{display:flex;align-items:flex-start;gap:14px;border-bottom:2px solid #1A3FA0;padding-bottom:9px;margin-bottom:8px}.hdr-logo{width:90px;flex-shrink:0;background:#1A3FA0;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:900;height:55px}.hdr-title h1{font-size:13.5pt;color:#1A3FA0;font-weight:800}.hdr-title h2{font-size:10pt;color:#2e4057;margin-top:1px}.datos{display:flex;gap:22px;margin-bottom:9px}.datos-col{flex:1}.datos-col h3{font-size:7.5pt;color:#1A3FA0;text-transform:uppercase;letter-spacing:.5px;font-weight:700;border-bottom:1px solid #1A3FA0;padding-bottom:2px;margin-bottom:3px}.datos-col p{font-size:7pt;color:#222;line-height:1.55}.stitle{background:#1A3FA0;color:#fff;font-size:8pt;font-weight:700;text-transform:uppercase;padding:4px 8px;text-align:center;margin-bottom:0}table{width:100%;border-collapse:collapse;font-size:6.8pt}th{background:#2e4057;color:#fff;padding:4px 5px;text-align:right;font-weight:600;white-space:nowrap}th.L{text-align:left}td{padding:2.5px 5px;text-align:right;border-bottom:1px solid #e8e8e8}td.L{text-align:left}tr:nth-child(even) td{background:#f6f9fc}.rh td{background:#d4e8f6!important;font-weight:700;color:#1A3FA0;font-size:7pt}.rt td{background:#1A3FA0!important;color:#fff!important;font-weight:700;font-size:7pt}.gt td{background:#0d2b3e!important;color:#fff!important;font-weight:700;font-size:7.5pt}.ef-final td{background:#1A3FA0!important;color:#fff!important;font-weight:700}.nota{border:1px solid #ccc;border-radius:4px;padding:9px 11px;margin-top:9px;font-size:7pt;line-height:1.6;color:#333}.nota h4{font-size:7.5pt;color:#1A3FA0;font-weight:700;margin-bottom:5px}.fpago{border:1.5px solid #1A3FA0;border-radius:6px;padding:13px 17px;margin-top:18px;max-width:390px}.fpago h3{color:#1A3FA0;font-size:10pt;font-weight:700;margin-bottom:7px}.fpago p{font-size:7.5pt;line-height:1.8}.footer-p{position:absolute;bottom:7mm;left:13mm;right:13mm;display:flex;justify-content:space-between;border-top:1px solid #ddd;padding-top:3px;font-size:6pt;color:#888}.btn-print{display:block;margin:18px auto;padding:11px 30px;background:#1A3FA0;color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer}`
 
-  const hdr=()=>`<div class="hdr"><div class="hdr-logo">GASP</div><div class="hdr-title"><h1>Administración de Consorcios Pinamar</h1><h2>MIS EXPENSAS — Liquidación de mes: ${expensa.periodo||''}</h2></div></div><div class="datos"><div class="datos-col"><h3>Administración</h3><p><b>Nombre:</b> ${adm.nombre||'Javier Garcia Perez'}<br/>${adm.direccion||'Lenguado 1313 - Loc 3'}<br/>${adm.email||'administracion@administracionpinamar.com'}<br/><b>CUIT:</b> ${adm.cuit||'20186006802'} &nbsp; <b>R.P.A:</b> ${adm.matricula_rpac||'83'}<br/><b>Tel:</b> ${adm.telefono||'02267 444034'}<br/><b>Situación fiscal:</b> ${adm.situacion_fiscal||'Monotributo'}</p></div><div class="datos-col"><h3>Consorcio</h3><p><b>${consorcioActivo.nombre||''}</b><br/><b>CUIT:</b> ${consorcioActivo.cuit||'—'}<br/><b>Clave SUTERH:</b> ${consorcioActivo.clave_suterh||''}</p></div></div>`
+  const hdr=()=>`<div class="hdr"><div class="hdr-logo">${adm.sello_url?`<img src="${adm.sello_url}" style="max-height:50px;max-width:85px;object-fit:contain" onerror="this.parentNode.innerHTML='GASP'">`:' GASP'}</div><div class="hdr-title"><h1>Administración de Consorcios Pinamar</h1><h2>MIS EXPENSAS — Liquidación de mes: ${expensa.periodo||''}${expensa.numero_liquidacion_display?' &nbsp;|&nbsp; Liq. N° '+expensa.numero_liquidacion_display:''}</h2>${adm.texto_encabezado_liquidacion?`<p style="font-size:7pt;color:#555;margin-top:3px">${adm.texto_encabezado_liquidacion}</p>`:''}</div></div><div class="datos"><div class="datos-col"><h3>Administración</h3><p><b>Nombre:</b> ${adm.nombre||'Javier Garcia Perez'}<br/>${adm.direccion||'Lenguado 1313 - Loc 3'}<br/>${adm.email||'administracion@administracionpinamar.com'}<br/><b>CUIT:</b> ${adm.cuit||'20186006802'} &nbsp; <b>R.P.A:</b> ${adm.matricula_rpac||'83'}<br/><b>Tel:</b> ${adm.telefono||'02267 444034'}<br/><b>Situación fiscal:</b> ${adm.situacion_fiscal||'Monotributo'}</p></div><div class="datos-col"><h3>Consorcio</h3><p><b>${consorcioActivo.nombre||''}</b><br/><b>CUIT:</b> ${consorcioActivo.cuit||'—'}<br/><b>Clave SUTERH:</b> ${consorcioActivo.clave_suterh||''}</p></div></div>`
   const footer=n=>`<div class="footer-p"><span>${consorcioActivo.nombre} — Liquidación ${per}</span><span>R.P.A: ${adm.matricula_rpac||'83'} | CUIT: ${consorcioActivo.cuit||''} | Vto: ${expensa.fecha_vencimiento||''}</span><span>${n}</span></div>`
 
   let rows1=''
@@ -177,7 +177,9 @@ function generarPDFLiquidacion({ consorcioActivo, expensa, gastos, detalles, uni
   rows1+=`<tr class="gt"><td class="L" colspan="2">TOTAL &nbsp; 100,00%</td>${totGen.map(v=>`<td>${fmtN(v)}</td>`).join('')}<td>${fmtN(totGlobal)}</td></tr>`
 
   const pag1=`<div class="page">${hdr()}<div class="stitle">PAGOS DEL PERÍODO POR SUMINISTROS, SERVICIOS, ABONOS Y SEGUROS</div><table><thead><tr><th class="L" colspan="2">Concepto</th><th>Grupo A</th><th>FDO OBRAS</th><th>GTOS GRALES</th><th>COCHERA</th><th>DPTOS</th><th>Total</th></tr></thead><tbody>${rows1}</tbody></table>${footer(1)}</div>`
-  const pag2=`<div class="page">${hdr()}<div class="stitle">ESTADO FINANCIERO</div><table><thead><tr><th class="L">CONCEPTO</th><th>Grupo A</th><th>FDO OBRAS</th><th>GTOS GRALES</th><th>COCHERA</th><th>DPTOS</th><th>Total</th></tr></thead><tbody><tr><td class="L">Saldo anterior</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>${fmtN(ufsTabla.reduce((a,u)=>a+u.salAnt,0))}</td></tr><tr><td class="L" style="padding-left:16px;font-style:italic">Ingresos por pago en término</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>${fmtN(totCobrado)}</td></tr><tr><td class="L" style="padding-left:16px;font-style:italic">Ingresos por expensas adeudadas</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>0,00</td></tr><tr><td class="L" style="padding-left:16px;font-style:italic">Ingresos por intereses</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>${fmtN(ufsTabla.reduce((a,u)=>a+u.interes,0))}</td></tr><tr><td class="L" style="padding-left:16px;font-style:italic">Egresos por pagos</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>${fmtN(-totGlobal)}</td></tr><tr class="ef-final"><td class="L">Saldo final al ${expensa.fecha_vencimiento||'—'}</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>${fmtN(salFinal)}</td></tr></tbody></table><div class="nota"><h4>NOTAS</h4><p>Saldo Liq $ ${fmtN(salFinal)} .-<br/>Pendiente de pagos $ ${fmtN(totPend)} -<br/>SALDO DISPONIBLE $ ${fmtN(salFinal+totPend)} .-</p></div><div class="nota" style="margin-top:9px;font-size:6.8pt"><p>COMUNICAMOS A LOS SRES PROPIETARIOS/INQUILINOS QUE LOS PAGOS QUE NO SE REALICEN ANTES DE LOS DIAS 28 DE CADA MES, NO PODRAN SER ACREDITADOS EN TIEMPO Y FORMA POR CUESTIONES OPERATIVAS.</p><br/><p><b>UBICACIÓN:</b> ${adm.direccion||'LENGUADO N° 1313 LOCAL 3'} &nbsp; <b>TEL:</b> ${adm.telefono||''} &nbsp; <b>HORARIO:</b> ${adm.horario||'LUNES A SABADOS 9:00 A 13:00 HS'}</p></div>${footer(2)}</div>`
+  const firmaHtml=adm.firma_url?`<div style="margin-top:18px;display:flex;gap:40px;align-items:flex-end"><div style="text-align:center"><img src="${adm.firma_url}" style="max-height:55px;max-width:180px;object-fit:contain;display:block;margin:0 auto" onerror="this.style.display='none'"><div style="border-top:1px solid #333;padding-top:5px;font-size:7pt;margin-top:4px">${adm.nombre||'Administrador'}<br/>R.P.A: ${adm.matricula_rpac||'83'} — CUIT: ${adm.cuit||''}</div></div>${adm.sello_url?`<div style="text-align:center"><img src="${adm.sello_url}" style="max-height:55px;max-width:140px;object-fit:contain;display:block;margin:0 auto" onerror="this.style.display='none'"></div>`:''}</div>`:`<div style="margin-top:18px"><div style="display:inline-block;text-align:center;border-top:1px solid #333;padding-top:5px;font-size:7pt;min-width:200px">${adm.nombre||'Javier Garcia Perez'}<br/>R.P.A: ${adm.matricula_rpac||'83'} — CUIT: ${adm.cuit||'20186006802'}</div></div>`
+  const pieTextoHtml=adm.texto_pie_liquidacion?`<div class="nota" style="margin-top:9px;font-size:7pt;border-color:#1A3FA0"><p>${adm.texto_pie_liquidacion}</p></div>`:''
+  const pag2=`<div class="page">${hdr()}<div class="stitle">ESTADO FINANCIERO</div><table><thead><tr><th class="L">CONCEPTO</th><th>Grupo A</th><th>FDO OBRAS</th><th>GTOS GRALES</th><th>COCHERA</th><th>DPTOS</th><th>Total</th></tr></thead><tbody><tr><td class="L">Saldo anterior</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>${fmtN(ufsTabla.reduce((a,u)=>a+u.salAnt,0))}</td></tr><tr><td class="L" style="padding-left:16px;font-style:italic">Ingresos por pago en término</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>${fmtN(totCobrado)}</td></tr><tr><td class="L" style="padding-left:16px;font-style:italic">Ingresos por expensas adeudadas</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>0,00</td></tr><tr><td class="L" style="padding-left:16px;font-style:italic">Ingresos por intereses</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>${fmtN(ufsTabla.reduce((a,u)=>a+u.interes,0))}</td></tr><tr><td class="L" style="padding-left:16px;font-style:italic">Egresos por pagos</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>${fmtN(-totGlobal)}</td></tr><tr class="ef-final"><td class="L">Saldo final al ${expensa.fecha_vencimiento||'—'}</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>${fmtN(salFinal)}</td></tr></tbody></table><div class="nota"><h4>NOTAS</h4><p>Saldo Liq $ ${fmtN(salFinal)} .-<br/>Pendiente de pagos $ ${fmtN(totPend)} -<br/>SALDO DISPONIBLE $ ${fmtN(salFinal+totPend)} .-</p></div><div class="nota" style="margin-top:9px;font-size:6.8pt"><p>COMUNICAMOS A LOS SRES PROPIETARIOS/INQUILINOS QUE LOS PAGOS QUE NO SE REALICEN ANTES DE LOS DIAS 28 DE CADA MES, NO PODRAN SER ACREDITADOS EN TIEMPO Y FORMA POR CUESTIONES OPERATIVAS.</p><br/><p><b>UBICACIÓN:</b> ${adm.direccion||'LENGUADO N° 1313 LOCAL 3'} &nbsp; <b>TEL:</b> ${adm.telefono||''} &nbsp; <b>HORARIO:</b> ${adm.horario||'LUNES A SABADOS 9:00 A 13:00 HS'}</p></div>${pieTextoHtml}${firmaHtml}${footer(2)}</div>`
   const filMor=morosos.map(u=>`<tr><td class="L">${String(u.uf).padStart(2,'0')}</td><td class="L">${u.dpto}</td><td class="L">${u.prop}</td><td>${fmtN(u.deuda)}</td><td style="font-weight:700">${fmtN(u.deuda+u.interes)}</td></tr>`).join('')
   const pag3=`<div class="page">${hdr()}${morosos.length>0?`<div class="stitle">UNIDADES CON DEUDA DE EXPENSAS</div><table><thead><tr><th class="L">U.F.</th><th class="L">Dpto.</th><th class="L">PROPIETARIO</th><th>DEUDA</th><th>TOTAL</th></tr></thead><tbody>${filMor}<tr class="gt"><td colspan="3" style="text-align:right;padding-right:10px">TOTAL</td><td>${fmtN(morosos.reduce((a,u)=>a+u.deuda,0))}</td><td>${fmtN(morosos.reduce((a,u)=>a+u.deuda+u.interes,0))}</td></tr></tbody></table>`:'<p style="text-align:center;color:#1B6B35;font-weight:600;margin-top:20px">✅ Sin unidades con deuda en este período.</p>'}${footer(3)}</div>`
 
@@ -374,6 +376,7 @@ function Copropietarios({ session, consorcioId, onUpdate }) {
   const [lista, setLista] = useState([])
   const [form, setForm] = useState(null)
   const [msg, setMsg] = useState(null)
+  const [tabForm, setTabForm] = useState('principal')
   const F = f => setForm(x => ({ ...x, ...f }))
 
   async function cargar() {
@@ -396,32 +399,82 @@ function Copropietarios({ session, consorcioId, onUpdate }) {
   }
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
 
+  const tabsForm = [
+    { id:'principal', label:'Principal' },
+    { id:'contacto', label:'Contacto adicional' },
+    { id:'ocupante', label:'Ocupante / Inquilino' },
+    { id:'fiscal', label:'Datos fiscales' },
+  ]
+
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
         <div style={{ fontWeight:700, fontSize:15 }}>Copropietarios ({lista.length})</div>
-        <Btn onClick={() => setForm({})}>+ Agregar</Btn>
+        <Btn onClick={() => { setForm({}); setTabForm('principal') }}>+ Agregar</Btn>
       </div>
       <Msg data={msg} />
       {form && (
         <Card style={{ marginBottom:16, border:`1px solid ${AZ}` }}>
-          <div style={{ fontWeight:700, color:AZ, marginBottom:14 }}>{form.id?'Editar copropietario':'Nuevo copropietario'}</div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
-            <Input label="Apellido y nombre" value={form.apellido_nombre} onChange={v=>F({apellido_nombre:v})} required />
-            <Input label="DNI" value={form.dni} onChange={v=>F({dni:v})} />
-            <Input label="Email" value={form.email} onChange={v=>F({email:v})} type="email" />
-            <Input label="Teléfono / WhatsApp" value={form.telefono} onChange={v=>F({telefono:v})} />
-            <div style={{ gridColumn:'span 2' }}>
-              <Input label="Domicilio real (fuera del consorcio)" value={form.domicilio_real} onChange={v=>F({domicilio_real:v})} />
-            </div>
-            <div style={{ gridColumn:'span 2' }}>
-              <Input label="Notas" value={form.notas} onChange={v=>F({notas:v})} />
-            </div>
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <input type="checkbox" checked={!!form.es_consejero} onChange={e=>F({es_consejero:e.target.checked})} id="consejero" />
-              <label htmlFor="consejero" style={{ fontSize:13, cursor:'pointer' }}>Es consejero/a</label>
-            </div>
+          <div style={{ fontWeight:700, color:AZ, marginBottom:12 }}>{form.id?'Editar copropietario':'Nuevo copropietario'}</div>
+          {/* Tabs internos del form */}
+          <div style={{ display:'flex', gap:4, marginBottom:14, borderBottom:'1px solid #e5e7eb' }}>
+            {tabsForm.map(t=>(
+              <button key={t.id} onClick={()=>setTabForm(t.id)}
+                style={{ padding:'6px 14px', border:'none', background:'none', cursor:'pointer', fontSize:12, fontWeight:tabForm===t.id?700:400, color:tabForm===t.id?AZ:GR, borderBottom:tabForm===t.id?`2px solid ${AZ}`:'2px solid transparent', marginBottom:-1 }}>
+                {t.label}
+              </button>
+            ))}
           </div>
+
+          {tabForm==='principal' && (
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+              <div style={{ gridColumn:'span 2' }}><Input label="Apellido y nombre *" value={form.apellido_nombre||''} onChange={v=>F({apellido_nombre:v})} required /></div>
+              <Input label="DNI" value={form.dni||''} onChange={v=>F({dni:v})} />
+              <Input label="Email principal" value={form.email||''} onChange={v=>F({email:v})} type="email" />
+              <Input label="Teléfono / WhatsApp" value={form.telefono||''} onChange={v=>F({telefono:v})} />
+              <div style={{ gridColumn:'span 2' }}>
+                <Input label="Domicilio real (fuera del consorcio)" value={form.domicilio_real||''} onChange={v=>F({domicilio_real:v})} />
+              </div>
+              <div style={{ gridColumn:'span 2' }}>
+                <Input label="Domicilio constituido (notificaciones legales — Art. 2067 CCCN)" value={form.domicilio_constituido||''} onChange={v=>F({domicilio_constituido:v})} />
+              </div>
+              <div style={{ gridColumn:'span 2' }}><Input label="Notas" value={form.notas||''} onChange={v=>F({notas:v})} /></div>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <input type="checkbox" checked={!!form.es_consejero} onChange={e=>F({es_consejero:e.target.checked})} id="consejero" />
+                <label htmlFor="consejero" style={{ fontSize:13, cursor:'pointer' }}>Es consejero/a</label>
+              </div>
+            </div>
+          )}
+
+          {tabForm==='contacto' && (
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+              <Input label="Email secundario" value={form.email_secundario||''} onChange={v=>F({email_secundario:v})} type="email" />
+              <Input label="Teléfono secundario" value={form.telefono_secundario||''} onChange={v=>F({telefono_secundario:v})} />
+              <Input label="Email para notificaciones" value={form.email_notificacion||''} onChange={v=>F({email_notificacion:v})} type="email" placeholder="Si difiere del principal" />
+              <Input label="Teléfono para notificaciones" value={form.telefono_notificacion||''} onChange={v=>F({telefono_notificacion:v})} placeholder="Si difiere del principal" />
+            </div>
+          )}
+
+          {tabForm==='ocupante' && (
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:12, background:'#f0f9ff', padding:'8px 12px', borderRadius:6 }}>
+                Complete estos datos si la unidad está alquilada. El inquilino recibirá notificaciones a su propio email/teléfono.
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+                <div style={{ gridColumn:'span 2' }}><Input label="Nombre del ocupante / inquilino" value={form.nombre_ocupante||''} onChange={v=>F({nombre_ocupante:v})} /></div>
+                <Input label="Email del ocupante" value={form.email_ocupante||''} onChange={v=>F({email_ocupante:v})} type="email" />
+                <Input label="Teléfono del ocupante" value={form.telefono_ocupante||''} onChange={v=>F({telefono_ocupante:v})} />
+              </div>
+            </div>
+          )}
+
+          {tabForm==='fiscal' && (
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+              <Input label="CUIT / CUIL" value={form.cuit_cuil||''} onChange={v=>F({cuit_cuil:v})} placeholder="20-00000000-0" />
+              <Sel label="Tipo de persona" value={form.tipo_persona||'fisica'} onChange={v=>F({tipo_persona:v})} opts={[{v:'fisica',l:'Física'},{v:'juridica',l:'Jurídica'}]} />
+            </div>
+          )}
+
           <div style={{ display:'flex', gap:8 }}>
             <Btn onClick={guardar}>💾 Guardar</Btn>
             <BtnSec onClick={() => setForm(null)}>Cancelar</BtnSec>
@@ -436,15 +489,17 @@ function Copropietarios({ session, consorcioId, onUpdate }) {
                 {cp.apellido_nombre}
                 {cp.es_consejero && <Badge text="Consejero" color={AZ} style={{ marginLeft:8 }} />}
               </div>
-              <div style={{ fontSize:12, color:GR, marginTop:3, display:'flex', gap:14 }}>
+              <div style={{ fontSize:12, color:GR, marginTop:3, display:'flex', gap:14, flexWrap:'wrap' }}>
                 {cp.dni && <span>🪪 {cp.dni}</span>}
                 {cp.telefono && <span>📱 {cp.telefono}</span>}
                 {cp.email && <span>✉ {cp.email}</span>}
+                {cp.nombre_ocupante && <span style={{ color:'#7c3aed' }}>🏠 Ocup: {cp.nombre_ocupante}</span>}
+                {cp.cuit_cuil && <span>🏛 CUIT: {cp.cuit_cuil}</span>}
               </div>
             </div>
             <div style={{ display:'flex', gap:6 }}>
               {cp.telefono && <Btn small color='#25d366' onClick={() => window.open(`https://wa.me/549${cp.telefono.replace(/\D/g,'')}`)}>WhatsApp</Btn>}
-              <Btn small onClick={() => setForm({...cp})} style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
+              <Btn small onClick={() => { setForm({...cp}); setTabForm('principal') }} style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
               <Btn small onClick={() => eliminar(cp.id)} style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
             </div>
           </Card>
@@ -703,6 +758,11 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
 
       const { error } = await supabase.from('con_expensas_detalle').insert(detalles)
       if (error) throw new Error(error.message)
+
+      // P1-B: Asignar número correlativo de liquidación por consorcio
+      try {
+        await supabase.rpc('asignar_numero_liquidacion', { p_consorcio_id: consorcioId, p_expensa_id: expSel.id })
+      } catch(e) { /* no crítico */ }
 
       setMsg({ tipo:'ok', texto:`✓ Período ${expSel.periodo} cerrado — ${distribucion.length} unidades — Total $${totalACobrar.toLocaleString('es-AR')}` })
       setPaso(4)
@@ -1501,6 +1561,17 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios, adminPerfil
     }
     setForm(null)
     setMsg({ tipo:'ok', texto: `✓ Pago de ${fmt(monto)} registrado` })
+    // P2-E: Notificación automática al copropietario
+    try {
+      const cobId = 'COB-' + Date.now()
+      const uf = unidades.find(u => u.id === form.unidad_id)
+      const cp = copropietarios.find(c => c.id === uf?.propietario_id)
+      if (cp?.email) {
+        await supabase.rpc('registrar_notificacion_pago', {
+          p_cobranza_id: cobId, p_admin_id: session.user.id, p_consorcio_id: consorcioId
+        })
+      }
+    } catch(e) { /* no crítico */ }
     seleccionarExpensa(expSel)
   }
 
@@ -1957,6 +2028,7 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios, adminPerfil
 function Morosos({ session, consorcioId, unidades, copropietarios }) {
   const [morosos, setMorosos] = useState([])
   const [loading, setLoading] = useState(true)
+  const [convenioForm, setConvenioForm] = useState(null) // {det, cuotas, monto_total, detalle}
 
   async function cargar() {
     setLoading(true)
@@ -1973,6 +2045,85 @@ function Morosos({ session, consorcioId, unidades, copropietarios }) {
     const msg=encodeURIComponent(`Estimado/a ${cp.apellido_nombre}, le informamos que tiene pendiente el pago de expensas del período ${periodoLabel(det.con_expensas?.periodo)} por ${fmt(det.monto)}. Por favor regularice su situación. Gracias.`)
     window.open(`https://wa.me/549${cp.telefono.replace(/\D/g,'')}?text=${msg}`,'_blank')
   }
+
+  function generarIntimacion(det) {
+    const u=unidades.find(x=>x.id===det.unidad_id)
+    const cp=u?copropietarios.find(c=>c.id===u.propietario_id):null
+    const periodo=periodoLabel(det.con_expensas?.periodo)
+    const vto=det.con_expensas?.fecha_vencimiento?new Date(det.con_expensas.fecha_vencimiento+'T00:00:00').toLocaleDateString('es-AR'):'-'
+    const hoy=new Date().toLocaleDateString('es-AR')
+    const deuda=Number(det.monto||0)+Number(det.interes_mora||0)+Number(det.saldo_anterior||0)
+    const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      body{font-family:Arial,sans-serif;max-width:760px;margin:0 auto;padding:40px;font-size:12pt;line-height:1.7}
+      h1{font-size:15pt;text-align:center;text-transform:uppercase;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:24px}
+      .datos{background:#f5f5f5;padding:14px;border-radius:6px;margin-bottom:20px;font-size:11pt}
+      .cuerpo{text-align:justify;margin-bottom:20px}
+      .monto{font-size:14pt;font-weight:bold;text-align:center;margin:20px 0;padding:12px;border:2px solid #000;border-radius:6px}
+      .firma{margin-top:60px;display:flex;justify-content:space-between}
+      .firma-box{text-align:center;border-top:1px solid #000;padding-top:8px;width:220px;font-size:10pt}
+      .encabezado{display:flex;justify-content:space-between;margin-bottom:30px;font-size:11pt}
+      @media print{body{padding:20px}.no-print{display:none}}
+    </style></head><body>
+      <div class="encabezado">
+        <div><strong>Administración de Consorcios Pinamar</strong><br/>Lenguado 1313, Local 3 — Pinamar, Buenos Aires<br/>Tel: 02267 444034</div>
+        <div style="text-align:right">Pinamar, ${hoy}<br/><strong>Ref.:</strong> ${u?.numero||det.unidad_id} — ${periodoLabel(det.con_expensas?.periodo)}</div>
+      </div>
+      <h1>⚠ Intimación de Pago de Expensas</h1>
+      <div class="datos">
+        <strong>Destinatario/a:</strong> ${cp?.apellido_nombre||'Copropietario/a'}<br/>
+        <strong>Unidad Funcional N°:</strong> ${u?.numero||'—'} ${u?.piso?'— Piso '+u.piso:''}<br/>
+        <strong>Consorcio:</strong> ${consorcioId}<br/>
+        <strong>Período adeudado:</strong> ${periodo}<br/>
+        <strong>Fecha de vencimiento:</strong> ${vto}
+      </div>
+      <div class="cuerpo">
+        <p>Por medio de la presente, en mi carácter de <strong>Administrador del Consorcio</strong>, me dirijo a Ud. a fin de <strong>intimarle fehacientemente</strong> el pago de las expensas comunes adeudadas correspondientes al período indicado, en los términos del <strong>artículo 2046 inciso a) del Código Civil y Comercial de la Nación (Ley 26.994)</strong>.</p>
+        <p>El artículo citado establece que el propietario está obligado a <em>"pagar las expensas comunes ordinarias de conservación y de administración del inmueble"</em>, siendo dicha obligación inherente al dominio de la unidad funcional.</p>
+        <p>Se hace saber que la <strong>mora es automática</strong> a partir del día del vencimiento de cada período, devengándose los intereses pactados en el Reglamento de Copropiedad, conforme lo establecido por el art. 2048 del mismo cuerpo normativo.</p>
+      </div>
+      <div class="monto">DEUDA TOTAL: ${fmt(deuda)} (pesos argentinos)</div>
+      <div class="cuerpo">
+        <p>Se le otorga el plazo improrrogable de <strong>cinco (5) días hábiles</strong> contados desde la recepción del presente para que proceda a regularizar la situación descripta, bajo apercibimiento de iniciar las acciones legales pertinentes para el cobro compulsivo de las sumas adeudadas, con más los intereses, costas y costos del proceso.</p>
+        <p>Los pagos deberán realizarse en la Administración sita en Lenguado 1313, Local 3, Pinamar, en días hábiles de 9 a 13 hs, o mediante transferencia bancaria a los datos oportunamente comunicados.</p>
+        <p>Sin otro particular, saludo a Ud. atte.</p>
+      </div>
+      <div class="firma">
+        <div class="firma-box">Javier García Pérez<br/>Administrador de Consorcios<br/>R.P.A.C. Mat. N° 83<br/>CUIT: 20-18600680-2</div>
+        <div class="firma-box">Notificado/a<br/>Aclaración:<br/><br/>Fecha:</div>
+      </div>
+      <div style="margin-top:30px;font-size:9pt;color:#666;text-align:center">
+        Documento generado el ${hoy} — GASP Consorcios — Administración Pinamar
+      </div>
+      <script>setTimeout(()=>window.print(),400)</script>
+    </body></html>`
+    const w=window.open('','_blank'); w.document.write(html); w.document.close()
+  }
+
+  async function guardarConvenio() {
+    if (!convenioForm?.det || !convenioForm.cuotas || !convenioForm.monto_total) return
+    const det=convenioForm.det
+    const cuotas=parseInt(convenioForm.cuotas)
+    const montoTotal=parseFloat(convenioForm.monto_total)
+    const montoCuota=montoTotal/cuotas
+    // Marcar UF con convenio de pago
+    await supabase.from('con_unidades').update({ convenio_pago:true, convenio_detalle: convenioForm.detalle||'' }).eq('id', det.unidad_id)
+    // Registrar en movimientos_unidad
+    for (let i=1;i<=cuotas;i++) {
+      await supabase.from('con_movimientos_unidad').insert([{
+        id:`CONV-${det.id}-${i}-${Date.now()}`,
+        admin_id:session.user.id, consorcio_id:consorcioId,
+        unidad_id:det.unidad_id, expensa_id:det.expensa_id,
+        tipo:'convenio_cuota', concepto:`Convenio de pago — Cuota ${i}/${cuotas}`,
+        monto:montoCuota, es_debito:true,
+        es_convenio_pago:true, cuotas_total:cuotas, cuota_numero:i, monto_cuota:montoCuota,
+        created_at:new Date().toISOString()
+      }])
+    }
+    setConvenioForm(null)
+    alert(`✓ Convenio registrado: ${cuotas} cuotas de ${fmt(montoCuota)}`)
+    cargar()
+  }
+
   useEffect(()=>{ if (consorcioId) cargar() },[consorcioId])
   const totalDeuda=morosos.reduce((a,d)=>a+Number(d.monto||0),0)
 
@@ -1995,12 +2146,48 @@ function Morosos({ session, consorcioId, unidades, copropietarios }) {
           }
         }}>📱 WA masivo ({morosos.filter(d=>{const u=unidades.find(x=>x.id===d.unidad_id);const cp=u?copropietarios.find(c=>c.id===u.propietario_id):null;return !!cp?.telefono}).length})</Btn>
       </div>
+
+      {/* Modal convenio de pago */}
+      {convenioForm && (
+        <Card style={{ marginBottom:16, border:`1.5px solid ${AM}`, background:'#fffbeb' }}>
+          <div style={{ fontWeight:700, color:AM, marginBottom:12 }}>📋 Convenio de pago en cuotas</div>
+          <div style={{ fontSize:12, color:GR, marginBottom:12 }}>
+            UF {unidades.find(x=>x.id===convenioForm.det?.unidad_id)?.numero||'—'} — {copropietarios.find(c=>c.id===unidades.find(x=>x.id===convenioForm.det?.unidad_id)?.propietario_id)?.apellido_nombre||'—'}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Monto total a convenir *</div>
+              <input type="number" min="0" step="0.01" value={convenioForm.monto_total||''} onChange={e=>setConvenioForm(f=>({...f,monto_total:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontWeight:700, boxSizing:'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Número de cuotas *</div>
+              <select value={convenioForm.cuotas||''} onChange={e=>setConvenioForm(f=>({...f,cuotas:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+                <option value="">— Seleccione —</option>
+                {[2,3,4,6,8,10,12,18,24].map(n=><option key={n} value={n}>{n} cuotas de {convenioForm.monto_total?fmt(parseFloat(convenioForm.monto_total)/n):'—'}</option>)}
+              </select>
+            </div>
+            <div style={{ gridColumn:'span 2' }}>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Detalle del acuerdo</div>
+              <textarea value={convenioForm.detalle||''} onChange={e=>setConvenioForm(f=>({...f,detalle:e.target.value}))} rows={2}
+                placeholder="Ej: El copropietario se compromete a abonar en cuotas iguales y consecutivas..."
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontFamily:'inherit', boxSizing:'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn color={AM} onClick={guardarConvenio}>✓ Confirmar convenio</Btn>
+            <BtnSec onClick={()=>setConvenioForm(null)}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+
       {loading ? <div style={{ textAlign:'center', color:GR, padding:40 }}>Cargando...</div> : (
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead>
               <tr style={{ background:'#fef2f2' }}>
-                {['UF','Copropietario','Período','Monto','Estado','Contacto'].map((h,i)=>(
+                {['UF','Copropietario','Período','Deuda','Mora','Estado','Acciones'].map((h,i)=>(
                   <th key={i} style={{ padding:'8px 12px', textAlign:'left', fontSize:11, fontWeight:'bold', color:RJ, textTransform:'uppercase', borderBottom:'1px solid #fecaca' }}>{h}</th>
                 ))}
               </tr>
@@ -2015,18 +2202,20 @@ function Morosos({ session, consorcioId, unidades, copropietarios }) {
                     <td style={{ padding:'10px 12px' }}>{cp?.apellido_nombre||'—'}</td>
                     <td style={{ padding:'10px 12px' }}>{periodoLabel(d.con_expensas?.periodo)}</td>
                     <td style={{ padding:'10px 12px', fontWeight:700, color:RJ }}>{fmt(d.monto)}</td>
+                    <td style={{ padding:'10px 12px', color:Number(d.interes_mora)>0?RJ:GR }}>{Number(d.interes_mora)>0?fmt(d.interes_mora):'—'}</td>
                     <td style={{ padding:'10px 12px' }}><Badge text={d.estado} color={d.estado==='morosa'?RJ:AM} /></td>
                     <td style={{ padding:'10px 12px' }}>
-                      <div style={{ display:'flex', gap:6 }}>
-                        {cp?.telefono && <Btn small color='#25d366' onClick={()=>enviarWA(d)}>📱 WA</Btn>}
-                        {cp?.email && <Btn small color={AZ} onClick={()=>window.open(`mailto:${cp.email}`)}>✉ Email</Btn>}
-                        {!cp?.telefono&&!cp?.email && <span style={{ color:GR, fontSize:11 }}>Sin contacto</span>}
+                      <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
+                        {cp?.telefono && <Btn small color='#25d366' onClick={()=>enviarWA(d)}>📱</Btn>}
+                        {cp?.email && <Btn small color={AZ} onClick={()=>window.open(`mailto:${cp.email}`)}>✉</Btn>}
+                        <Btn small color={RJ} title="Generar intimación formal" onClick={()=>generarIntimacion(d)}>📄 Intimación</Btn>
+                        <Btn small color={AM} title="Convenio de pago en cuotas" onClick={()=>setConvenioForm({det:d,cuotas:'',monto_total:Number(d.monto||0)+Number(d.interes_mora||0)+Number(d.saldo_anterior||0),detalle:''})}>📋 Convenio</Btn>
                       </div>
                     </td>
                   </tr>
                 )
               })}
-              {morosos.length===0 && <tr><td colSpan={6} style={{ padding:32, textAlign:'center', color:VD, fontWeight:600 }}>✅ No hay morosos registrados</td></tr>}
+              {morosos.length===0 && <tr><td colSpan={7} style={{ padding:32, textAlign:'center', color:VD, fontWeight:600 }}>✅ No hay morosos registrados</td></tr>}
             </tbody>
           </table>
         </div>
@@ -3781,6 +3970,10 @@ function ReciboPago({ session, consorcioId, unidades, copropietarios, expensas, 
   <div class="monto-box">
     <div class="monto">${monto}</div>
     <div class="label">Importe recibido — <span class="badge">✓ Pago registrado</span></div>
+    <div style="margin-top:10px;display:flex;align-items:center;justify-content:center;gap:12px">
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=70x70&data=GASP-REC-${nroRecibo}-${con.nombre||''}-${periodo}" alt="QR" style="width:70px;height:70px" />
+      <div style="text-align:left;font-size:9px;color:#374151"><div style="font-weight:600;margin-bottom:2px">Código de verificación</div><div>${nroRecibo}</div></div>
+    </div>
   </div>
 
   <div class="row">
@@ -6018,9 +6211,34 @@ function ReporteMovimientos({ session, consorcioId, consorcioActivo, expensas })
     cargas_sociales:'Cargas sociales', varios:'Varios',
   }
 
+  async function exportarExcel() {
+    if (!datos) return
+    // Cargar XLSX si no está disponible
+    if (!window.XLSX) {
+      await new Promise((res,rej) => {
+        const s=document.createElement('script')
+        s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+        s.onload=res; s.onerror=rej; document.head.appendChild(s)
+      })
+    }
+    const XLSX=window.XLSX
+    const wb=XLSX.utils.book_new()
+    // Hoja 1: Gastos
+    const gastosData=[(datos.gastos||[]).map(g=>g.fecha),(datos.gastos||[]).map(g=>g.concepto),(datos.gastos||[]).map(g=>g.categoria),(datos.gastos||[]).map(g=>g.proveedor_nombre||g.con_proveedores?.razon_social||''),(datos.gastos||[]).map(g=>g.monto)]
+    const gastosRows=[['Fecha','Concepto','Categoría','Proveedor','Monto'],...(datos.gastos||[]).map(g=>[g.fecha,g.concepto,g.categoria,g.proveedor_nombre||g.con_proveedores?.razon_social||'',parseFloat(g.monto)||0])]
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(gastosRows), 'Gastos')
+    // Hoja 2: Cobranzas
+    const cobRows=[['Fecha','UF','Monto','Medio de pago','Recibo'],...(datos.cobranzas||[]).map(c=>[c.fecha,c.unidad_id,parseFloat(c.monto)||0,c.medio_pago,c.recibo_numero||''])]
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cobRows), 'Cobranzas')
+    XLSX.writeFile(wb, `ReporteMovimientos_${datos.exp?.periodo||'periodo'}.xlsx`)
+  }
+
   return (
     <div>
-      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>📈 Movimientos por período</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>📈 Movimientos por período</div>
+        {datos && <Btn small color={VD} onClick={exportarExcel}>📊 Exportar Excel</Btn>}
+      </div>
       <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
         Resumen completo de ingresos, egresos y estado de cobranza por período
       </div>
@@ -6949,6 +7167,11 @@ function PagosProveedor({ session, consorcioId, proveedores }) {
     if (!form?.monto || parseFloat(form.monto)<=0) return setMsg({ tipo:'warn', texto:'Ingresá el monto' })
     if (!form?.fecha) return setMsg({ tipo:'warn', texto:'Ingresá la fecha' })
     setGuardando(true)
+    const monto=parseFloat(form.monto)
+    const retIIBB=parseFloat(form.retencion_iibb)||0
+    const retGan=parseFloat(form.retencion_ganancias)||0
+    const retIVA=parseFloat(form.retencion_iva)||0
+    const neto=monto-retIIBB-retGan-retIVA
     const { error } = await supabase.from('con_pagos_proveedor').insert([{
       id: `PAG-${Date.now()}`,
       admin_id: session.user.id,
@@ -6956,7 +7179,12 @@ function PagosProveedor({ session, consorcioId, proveedores }) {
       proveedor_id: form.proveedor_id,
       comprobante_id: form.comprobante_id || null,
       fecha: form.fecha,
-      monto: parseFloat(form.monto),
+      monto,
+      retencion_iibb: retIIBB||null,
+      retencion_ganancias: retGan||null,
+      retencion_iva: retIVA||null,
+      monto_neto_pagado: neto,
+      nro_orden_pago: form.nro_orden_pago||null,
       medio_pago: form.medio_pago || 'transferencia',
       numero_cheque: form.numero_cheque || null,
       banco: form.banco || null,
@@ -7048,7 +7276,7 @@ function PagosProveedor({ session, consorcioId, proveedores }) {
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
             <div>
-              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Monto *</div>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Monto bruto *</div>
               <input type="number" min="0" step="0.01" value={form.monto||''}
                 onChange={e=>setForm(f=>({...f,monto:e.target.value}))}
                 style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontWeight:700, boxSizing:'border-box' }} />
@@ -7064,6 +7292,37 @@ function PagosProveedor({ session, consorcioId, proveedores }) {
                 onChange={e=>setForm(f=>({...f,referencia:e.target.value}))}
                 style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
             </div>
+          </div>
+          {/* Retenciones */}
+          <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8, padding:'12px 14px', marginBottom:12 }}>
+            <div style={{ fontSize:12, fontWeight:600, color:VD, marginBottom:10 }}>Retenciones impositivas (opcional)</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10 }}>
+              <div>
+                <div style={{ fontSize:11, color:GR, marginBottom:3 }}>Ret. IIBB $</div>
+                <input type="number" min="0" step="0.01" value={form.retencion_iibb||''} onChange={e=>setForm(f=>({...f,retencion_iibb:e.target.value}))}
+                  style={{ width:'100%', padding:'7px 9px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, boxSizing:'border-box' }} />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:GR, marginBottom:3 }}>Ret. Ganancias $</div>
+                <input type="number" min="0" step="0.01" value={form.retencion_ganancias||''} onChange={e=>setForm(f=>({...f,retencion_ganancias:e.target.value}))}
+                  style={{ width:'100%', padding:'7px 9px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, boxSizing:'border-box' }} />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:GR, marginBottom:3 }}>Ret. IVA $</div>
+                <input type="number" min="0" step="0.01" value={form.retencion_iva||''} onChange={e=>setForm(f=>({...f,retencion_iva:e.target.value}))}
+                  style={{ width:'100%', padding:'7px 9px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, boxSizing:'border-box' }} />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:GR, marginBottom:3 }}>N° Orden de pago</div>
+                <input value={form.nro_orden_pago||''} onChange={e=>setForm(f=>({...f,nro_orden_pago:e.target.value}))}
+                  style={{ width:'100%', padding:'7px 9px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, boxSizing:'border-box' }} />
+              </div>
+            </div>
+            {(form.monto && (form.retencion_iibb||form.retencion_ganancias||form.retencion_iva)) && (
+              <div style={{ marginTop:10, fontSize:13, fontWeight:700, color:VD }}>
+                Neto a pagar: {fmt((parseFloat(form.monto)||0)-(parseFloat(form.retencion_iibb)||0)-(parseFloat(form.retencion_ganancias)||0)-(parseFloat(form.retencion_iva)||0))}
+              </div>
+            )}
           </div>
           <div style={{ display:'flex', gap:8 }}>
             <Btn onClick={guardar} disabled={guardando} style={{ background:VD, color:'#fff' }}>{guardando?'⏳':'✓ Registrar pago'}</Btn>
@@ -7856,10 +8115,11 @@ function ControlPeriodos({ session, consorcioId, consorcioActivo, expensas }) {
 }
 
 function PerfilAdmin({ session }) {
-  const [perfil, setPerfil] = useState({ nombre:'', telefono:'', matricula_rpac:'', email:'', direccion:'', horario:'', cuit:'', situacion_fiscal:'Monotributo' })
+  const [perfil, setPerfil] = useState({ nombre:'', telefono:'', matricula_rpac:'', email:'', direccion:'', horario:'', cuit:'', situacion_fiscal:'Monotributo', firma_url:'', sello_url:'', texto_encabezado_liquidacion:'', texto_pie_liquidacion:'' })
   const [guardando, setGuardando] = useState(false)
   const [cargando, setCargando]   = useState(true)
   const [msg, setMsg]             = useState(null)
+  const [tabActiva, setTabActiva] = useState('datos')
 
   useEffect(() => {
     async function cargar() {
@@ -7881,24 +8141,82 @@ function PerfilAdmin({ session }) {
   const P = f => setPerfil(p=>({...p,...f}))
   if (cargando) return <div style={{ textAlign:'center', color:GR, padding:40 }}>Cargando...</div>
 
+  const tabs = [
+    { id:'datos', label:'Datos personales' },
+    { id:'pdf', label:'PDF de liquidación' },
+  ]
+
   return (
-    <div style={{ maxWidth:560 }}>
-      <div style={{ fontWeight:700, fontSize:16, color:'#111827', marginBottom:20 }}>⚙️ Mi perfil de administrador</div>
+    <div style={{ maxWidth:640 }}>
+      <div style={{ fontWeight:700, fontSize:16, color:'#111827', marginBottom:16 }}>⚙️ Mi perfil de administrador</div>
       <Msg data={msg} />
-      <Card style={{ marginBottom:16 }}>
-        <div style={{ fontWeight:600, color:AZ, marginBottom:14, fontSize:13 }}>Datos personales y profesionales</div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:16 }}>
-          <Input label="Nombre completo" value={perfil.nombre} onChange={v=>P({nombre:v})} placeholder="Javier García Pérez" />
-          <Input label="Email" value={perfil.email} onChange={v=>P({email:v})} />
-          <Input label="Teléfono" value={perfil.telefono} onChange={v=>P({telefono:v})} placeholder="02267 444034" />
-          <Input label="Matrícula RPAC" value={perfil.matricula_rpac} onChange={v=>P({matricula_rpac:v})} placeholder="83" />
-          <Input label="CUIT" value={perfil.cuit} onChange={v=>P({cuit:v})} placeholder="20186006802" />
-          <Sel label="Situación fiscal" value={perfil.situacion_fiscal} onChange={v=>P({situacion_fiscal:v})} opts={['Monotributo','Responsable Inscripto','Exento']} />
-          <div style={{ gridColumn:'span 2' }}><Input label="Dirección de oficina" value={perfil.direccion} onChange={v=>P({direccion:v})} placeholder="Lenguado 1313 - Local 3" /></div>
-          <div style={{ gridColumn:'span 2' }}><Input label="Horario de atención" value={perfil.horario} onChange={v=>P({horario:v})} placeholder="Lunes a Sábados 9:00 a 13:00 hs" /></div>
+
+      {/* Alerta si el perfil está vacío */}
+      {!perfil.nombre && (
+        <div style={{ background:'#fff3cd', border:'1px solid #ffc107', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#856404' }}>
+          ⚠️ <strong>Perfil incompleto.</strong> El nombre y los datos del administrador aparecerán en el PDF de liquidación. Completá el perfil antes de generar liquidaciones.
         </div>
-        <Btn onClick={guardar} disabled={guardando}>{guardando?'Guardando...':'💾 Guardar perfil'}</Btn>
-      </Card>
+      )}
+
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:4, marginBottom:16, borderBottom:'2px solid #e5e7eb' }}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setTabActiva(t.id)}
+            style={{ padding:'8px 18px', border:'none', background:'none', cursor:'pointer', fontSize:13, fontWeight:tabActiva===t.id?700:400, color:tabActiva===t.id?AZ:GR, borderBottom:tabActiva===t.id?`2px solid ${AZ}`:'2px solid transparent', marginBottom:-2 }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tabActiva === 'datos' && (
+        <Card style={{ marginBottom:16 }}>
+          <div style={{ fontWeight:600, color:AZ, marginBottom:14, fontSize:13 }}>Datos personales y profesionales</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:16 }}>
+            <Input label="Nombre completo" value={perfil.nombre||''} onChange={v=>P({nombre:v})} placeholder="Javier García Pérez" />
+            <Input label="Email" value={perfil.email||''} onChange={v=>P({email:v})} />
+            <Input label="Teléfono" value={perfil.telefono||''} onChange={v=>P({telefono:v})} placeholder="02267 444034" />
+            <Input label="Matrícula RPAC" value={perfil.matricula_rpac||''} onChange={v=>P({matricula_rpac:v})} placeholder="83" />
+            <Input label="CUIT" value={perfil.cuit||''} onChange={v=>P({cuit:v})} placeholder="20186006802" />
+            <Sel label="Situación fiscal" value={perfil.situacion_fiscal||'Monotributo'} onChange={v=>P({situacion_fiscal:v})} opts={['Monotributo','Responsable Inscripto','Exento']} />
+            <div style={{ gridColumn:'span 2' }}><Input label="Dirección de oficina" value={perfil.direccion||''} onChange={v=>P({direccion:v})} placeholder="Lenguado 1313 - Local 3" /></div>
+            <div style={{ gridColumn:'span 2' }}><Input label="Horario de atención" value={perfil.horario||''} onChange={v=>P({horario:v})} placeholder="Lunes a Sábados 9:00 a 13:00 hs" /></div>
+          </div>
+          <Btn onClick={guardar} disabled={guardando}>{guardando?'Guardando...':'💾 Guardar perfil'}</Btn>
+        </Card>
+      )}
+
+      {tabActiva === 'pdf' && (
+        <Card style={{ marginBottom:16 }}>
+          <div style={{ fontWeight:600, color:AZ, marginBottom:14, fontSize:13 }}>Configuración del PDF de liquidación</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
+            <div style={{ gridColumn:'span 2' }}>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Texto de encabezado (aparece arriba, debajo del logo)</div>
+              <textarea value={perfil.texto_encabezado_liquidacion||''} onChange={e=>P({texto_encabezado_liquidacion:e.target.value})}
+                rows={3} placeholder="Ej: Período de liquidación correspondiente al mes de..."
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontFamily:'inherit', resize:'vertical', boxSizing:'border-box' }} />
+            </div>
+            <div style={{ gridColumn:'span 2' }}>
+              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Texto de pie de página (aparece al final del PDF)</div>
+              <textarea value={perfil.texto_pie_liquidacion||''} onChange={e=>P({texto_pie_liquidacion:e.target.value})}
+                rows={3} placeholder="Ej: Atención: Los pagos realizados fuera de término..."
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontFamily:'inherit', resize:'vertical', boxSizing:'border-box' }} />
+            </div>
+            <div style={{ gridColumn:'span 2' }}>
+              <Input label="URL de firma digital (imagen PNG/JPG, fondo transparente)" value={perfil.firma_url||''} onChange={v=>P({firma_url:v})} placeholder="https://..." />
+              {perfil.firma_url && <img src={perfil.firma_url} alt="Firma" style={{ marginTop:8, maxHeight:60, maxWidth:200, border:'1px solid #e5e7eb', borderRadius:6 }} onError={e=>e.target.style.display='none'} />}
+            </div>
+            <div style={{ gridColumn:'span 2' }}>
+              <Input label="URL de sello (imagen PNG/JPG, fondo transparente)" value={perfil.sello_url||''} onChange={v=>P({sello_url:v})} placeholder="https://..." />
+              {perfil.sello_url && <img src={perfil.sello_url} alt="Sello" style={{ marginTop:8, maxHeight:60, maxWidth:200, border:'1px solid #e5e7eb', borderRadius:6 }} onError={e=>e.target.style.display='none'} />}
+            </div>
+          </div>
+          <div style={{ fontSize:11, color:GR, marginBottom:12, background:'#f9fafb', padding:'8px 12px', borderRadius:6 }}>
+            💡 Para subir imágenes de firma/sello puede usar servicios como <a href="https://imgbb.com" target="_blank" rel="noreferrer" style={{ color:AZ }}>ImgBB</a> o Google Drive (compartir como pública) y pegar la URL aquí.
+          </div>
+          <Btn onClick={guardar} disabled={guardando}>{guardando?'Guardando...':'💾 Guardar configuración PDF'}</Btn>
+        </Card>
+      )}
+
       <Card>
         <div style={{ fontSize:13, color:'#6b7280', marginBottom:8, fontWeight:600 }}>Sesión activa</div>
         <div style={{ fontSize:13, color:'#374151', marginBottom:10 }}>{session?.user?.email}</div>
@@ -8063,11 +8381,11 @@ export default function App() {
     } catch(e) { console.error(e) } finally { if (inicial) setCargando(false) }
   }
   async function cargarConsorcio(cid,uid) {
-    const [u,cp,exp]=await Promise.all([
+    const [u,cp,exp,prov]=await Promise.all([
       supabase.from('con_unidades').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('numero'),
       supabase.from('con_copropietarios').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('apellido_nombre'),
       supabase.from('con_expensas').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('periodo',{ascending:false}),
-      supabase.from('con_proveedores').select('*').eq('admin_id',uid||session?.user?.id).order('razon_social')
+      supabase.from('con_proveedores').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('razon_social')
     ])
     setUnidades(u.data||[]); setCopropietarios(cp.data||[]); setExpensas(exp.data||[]); setProveedores(prov.data||[])
   }
