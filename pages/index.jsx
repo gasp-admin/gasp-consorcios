@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-fix-bom2'
+const BUILD_VERSION = '20260516-fix-bom3'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -2325,8 +2325,6 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
     const BOM = String.fromCharCode(65279)
     const textoLimpio = texto.charAt(0) === BOM ? texto.slice(1) : texto
     const lineas = textoLimpio.split('\r\n').join('\n').split('\n').filter(function(l){ return l.trim() && l.length >= 26 })
-?
-/).filter(l => l.trim() && l.length >= 26)
     const registros = []
     for (const line of lineas) {
       try {
