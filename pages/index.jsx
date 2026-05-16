@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-cobranzas-expsel'
+const BUILD_VERSION = '20260516-selector-final'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -8231,7 +8231,41 @@ export default function App() {
               <div style={{ fontSize:9, color:'#4a6a8a', letterSpacing:'0.1em' }}>CONSORCIOS</div>
             </div>
           </div>
-          {consorcioActivo && <div style={{ fontSize:11, color:'#7ab4ff', marginTop:6, fontWeight:600, lineHeight:1.3 }}>{consorcioActivo.nombre}</div>}
+          {/* Selector de consorcio en sidebar */}
+          <div style={{ marginTop:8 }}>
+            <select
+              value={consorcioActivo?.id || ''}
+              onChange={e => {
+                const c = consorcios.find(x => x.id === e.target.value)
+                if (c) {
+                  setConsorcioActivo(c)
+                  cargarConsorcio(c.id, session?.user?.id)
+                }
+              }}
+              style={{
+                width:'100%', padding:'6px 8px',
+                background:'rgba(26,63,160,0.3)',
+                border:'1px solid rgba(122,172,255,0.3)',
+                borderRadius:6, color:'#7ab4ff',
+                fontSize:11, fontWeight:700,
+                cursor:'pointer', outline:'none',
+              }}>
+              {consorcios.length === 0 && (
+                <option value="">Sin consorcios</option>
+              )}
+              {consorcios.map(c => (
+                <option key={c.id} value={c.id}
+                  style={{ background:'#0f1f3d', color:'#fff' }}>
+                  {c.nombre}
+                </option>
+              ))}
+            </select>
+            {consorcioActivo && (
+              <div style={{ fontSize:9, color:'#4a6a8a', marginTop:3, textAlign:'center' }}>
+                {unidades.length} UFs · {consorcioActivo.banco || 'Sin banco'}
+              </div>
+            )}
+          </div>
         </div>
         <nav style={{ flex:1, padding:'10px 8px' }}>
           {secciones.map(sec=>(
@@ -8260,7 +8294,23 @@ export default function App() {
           <div style={{ flex:1, fontWeight:700, color:'#111', fontSize:15 }}>
             {NAV.find(n=>n.id===pagina)?.icon} {NAV.find(n=>n.id===pagina)?.label||'Dashboard'}
           </div>
-          {consorcioActivo && <div style={{ fontSize:12, color:GR, background:'#f3f4f6', padding:'4px 12px', borderRadius:20 }}>{consorcioActivo.nombre}</div>}
+          {consorcioActivo && (
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <select
+                value={consorcioActivo?.id || ''}
+                onChange={e => {
+                  const c = consorcios.find(x => x.id === e.target.value)
+                  if (c) { setConsorcioActivo(c); cargarConsorcio(c.id, session?.user?.id) }
+                }}
+                style={{ padding:'4px 10px', borderRadius:20, border:'1px solid #e5e7eb',
+                  background:'#f3f4f6', fontSize:12, color:'#374151',
+                  fontWeight:600, cursor:'pointer', outline:'none', maxWidth:220 }}>
+                {consorcios.map(c => (
+                  <option key={c.id} value={c.id}>{c.nombre}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <div style={{ padding:isMobile?14:24, maxWidth:1100, margin:'0 auto' }}>
           {renderPagina()}
