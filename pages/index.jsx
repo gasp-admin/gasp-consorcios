@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-transferencias-siro'
+const BUILD_VERSION = '20260516-fix-bom2'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -2322,7 +2322,9 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
   function parsearTransferenciasSIRO(texto) {
     // TransferenciasSiro: fecha_pago(8)+fecha_acred(8)+importe(10,÷100)+nombre(30)+banco(30)+cuit(11)+ref(libre)
     // Primera línea puede tener BOM UTF-8 — limpiar
-    const lineas = texto.replace(/^﻿/, '').split(/
+    const BOM = String.fromCharCode(65279)
+    const textoLimpio = texto.charAt(0) === BOM ? texto.slice(1) : texto
+    const lineas = textoLimpio.split('\r\n').join('\n').split('\n').filter(function(l){ return l.trim() && l.length >= 26 })
 ?
 /).filter(l => l.trim() && l.length >= 26)
     const registros = []
