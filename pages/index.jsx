@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-fix-bom3'
+const BUILD_VERSION = '20260516-asignacion-manual'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -2240,6 +2240,10 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
   const [historial, setHistorial] = useState([])
   const [siroConectado, setSiroConectado] = useState(false)
   const [cargandoSiro, setCargandoSiro]   = useState(false)
+  // Asignaciones manuales para registros sin coincidencia: { idx: { consorcio_id, unidad_id } }
+  const [asignaciones, setAsignaciones]   = useState({})
+  const [todosConsorcios, setTodosConsorcios] = useState([])
+  const [ufsPorConsorcio, setUfsPorConsorcio] = useState({})
 
   const hoy = new Date().toISOString().split('T')[0]
 
@@ -2469,6 +2473,44 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
         }
 
         if (!uf) {
+          // Buscar en asignaciones manuales del preview
+          const idxPreview = registros.indexOf(reg)
+          const asig = asignaciones[idxPreview]
+          if (asig?.unidad_id && asig?.consorcio_id) {
+            // Cargar la UF manualmente asignada
+            const { data: ufManual } = await supabase.from('con_unidades')
+              .select('*').eq('id', asig.unidad_id).single()
+            if (ufManual) {
+              // Registrar con el consorcio y expensa correctos
+              const { error: errManual } = await supabase.from('con_cobranzas').insert([{
+                id: 'COB-MAN-' + ufManual.id + '-' + Date.now() + '-' + ok,
+                admin_id: session.user.id,
+                consorcio_id: asig.consorcio_id,
+                expensa_id: expSel,
+                unidad_id: asig.unidad_id,
+                fecha: reg.fecha,
+                monto: reg.neto,
+                medio_pago: 'transferencia',
+                canal_cobro: reg.canal || 'Transferencia SIRO',
+                estado: 'vigente',
+                notas: 'Asignación manual — ' + (reg.nombre_titular || reg.referencia || '') + ' — ' + (archivo?.name || ''),
+              }])
+              if (!errManual) {
+                // Actualizar pagos_periodo en el consorcio correcto
+                const { data: det } = await supabase.from('con_expensas_detalle')
+                  .select('pagos_periodo,monto').eq('expensa_id', expSel).eq('unidad_id', asig.unidad_id).single()
+                if (det) {
+                  const nuevoPago = (parseFloat(det.pagos_periodo)||0) + reg.neto
+                  await supabase.from('con_expensas_detalle').update({
+                    pagos_periodo: nuevoPago,
+                    estado: nuevoPago >= (det.monto||0) ? 'pagada' : 'pendiente'
+                  }).eq('expensa_id', expSel).eq('unidad_id', asig.unidad_id)
+                }
+                ok++
+                continue
+              }
+            }
+          }
           sinMatch.push('Sin coincidencia: ' + (reg.nombre_titular || reg.nro_uf || reg.nro_cbte || '?'))
           continue
         }
@@ -2637,6 +2679,26 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
 
   useEffect(() => { if (consorcioId) { cargarConfig(); cargarHistorial() } }, [consorcioId])
 
+  useEffect(() => {
+    // Cargar todos los consorcios del admin para asignación manual
+    supabase.from('con_consorcios').select('id,nombre')
+      .eq('admin_id', session.user.id).order('nombre')
+      .then(({ data }) => setTodosConsorcios(data || []))
+  }, [])
+
+  async function cargarUFsConsorcio(cid) {
+    if (ufsPorConsorcio[cid]) return // ya cargado
+    const { data } = await supabase.from('con_unidades').select('id,numero,propietario_id')
+      .eq('consorcio_id', cid).order('numero')
+    const { data: cps } = await supabase.from('con_copropietarios').select('id,apellido_nombre')
+      .eq('consorcio_id', cid)
+    const ufsConNombre = (data||[]).map(u => {
+      const cp = (cps||[]).find(c => c.id === u.propietario_id)
+      return { ...u, label: 'UF ' + u.numero + (cp ? ' — ' + cp.apellido_nombre : '') }
+    })
+    setUfsPorConsorcio(prev => ({ ...prev, [cid]: ufsConNombre }))
+  }
+
   const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
   const periodoLabel = p => {
     if (!p) return '—'
@@ -2723,54 +2785,114 @@ function CobranzasAutomaticas({ session, consorcioId, consorcioActivo, unidades,
           {/* Preview */}
           {preview.length > 0 && (
             <Card style={{ marginBottom:16 }}>
-              <div style={{ fontWeight:600, fontSize:13, marginBottom:10 }}>
-                Vista previa — primeros {preview.length} registros
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                <div style={{ fontWeight:600, fontSize:13 }}>
+                  Vista previa — {preview.length} registros
+                </div>
+                <div style={{ fontSize:11, color:GR }}>
+                  {preview.filter((_,i) => {
+                    const uf = sistema==='expensas_pagas'
+                      ? unidades.find(u=>u.nro_ep===String(preview[i]._raw?.nro_uf))
+                      : null
+                    return uf || asignaciones[i]
+                  }).length} / {preview.length} asignados
+                </div>
               </div>
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-                <thead>
-                  <tr style={{ background:'#f3f4f6' }}>
-                    {['Referencia UF','Fecha','Importe neto','Canal'].map((h,i) => (
-                      <th key={i} style={{ padding:'6px 10px', textAlign:i===2?'right':'left',
-                        fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.map((r,i) => {
-                    const uf = sistema === 'expensas_pagas'
-                      ? unidades.find(u => u.nro_ep === String(r._raw?.nro_uf))
-                      : unidades.find(u => u.nro_siro === r._raw?.nro_uf_siro)
-                    return (
-                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6',
-                        background: uf ? 'transparent' : '#fff8f0' }}>
-                        <td style={{ padding:'6px 10px' }}>
-                          <span style={{ fontWeight:600 }}>{r.referencia}</span>
-                          {(() => {
-                            let matchUf = uf
-                            return matchUf ? (
-                              <span style={{ marginLeft:8, fontSize:10, color:VD }}>
-                                → UF {matchUf.numero}
-                              </span>
-                            ) : (
-                              <span style={{ marginLeft:8, fontSize:10, color:AM }}>
-                                ⚠ sin coincidencia
-                              </span>
-                            )
-                          })()}
-                        </td>
-                        <td style={{ padding:'6px 10px', color:GR, fontSize:11 }}>{r.fecha}</td>
-                        <td style={{ padding:'6px 10px', textAlign:'right', fontWeight:700, color:VD }}>{fmt(r.importe)}</td>
-                        <td style={{ padding:'6px 10px', color:GR, fontSize:11 }}>{r.canal}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-              <div style={{ marginTop:12, display:'flex', gap:8 }}>
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {preview.map((r,i) => {
+                  const ufAuto = sistema === 'expensas_pagas'
+                    ? unidades.find(u => u.nro_ep === String(r._raw?.nro_uf))
+                    : null
+                  const asig = asignaciones[i]
+                  const resuelto = ufAuto || asig?.unidad_id
+
+                  return (
+                    <div key={i} style={{
+                      padding:'10px 12px',
+                      background: resuelto ? '#f0fdf4' : '#fff8f0',
+                      borderRadius:8,
+                      border: resuelto ? '1px solid #86efac' : '1px solid #fcd34d'
+                    }}>
+                      {/* Fila principal */}
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom: resuelto ? 0 : 8 }}>
+                        <div>
+                          <span style={{ fontWeight:700, fontSize:13 }}>{r.referencia}</span>
+                          <span style={{ marginLeft:10, fontSize:11, color:GR }}>{r.canal}</span>
+                        </div>
+                        <div style={{ textAlign:'right' }}>
+                          <div style={{ fontWeight:800, fontSize:14, color:VD }}>{fmt(r.importe)}</div>
+                          <div style={{ fontSize:10, color:GR }}>{r.fecha}</div>
+                        </div>
+                      </div>
+
+                      {/* Estado de asignación */}
+                      {ufAuto ? (
+                        <div style={{ fontSize:11, color:VD, fontWeight:600 }}>
+                          ✓ UF {ufAuto.numero} — {consorcioActivo?.nombre}
+                        </div>
+                      ) : asig?.unidad_id ? (
+                        <div style={{ fontSize:11, color:VD, fontWeight:600 }}>
+                          ✓ Asignado manualmente — {asig.label}
+                        </div>
+                      ) : (
+                        /* Sin coincidencia — mostrar selectores */
+                        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:8, marginTop:6 }}>
+                          <div>
+                            <div style={{ fontSize:10, color:GR, marginBottom:3 }}>Consorcio</div>
+                            <select
+                              value={asig?.consorcio_id || ''}
+                              onChange={e => {
+                                const cid = e.target.value
+                                setAsignaciones(prev => ({ ...prev, [i]: { consorcio_id: cid, unidad_id: '', label: '' } }))
+                                if (cid) cargarUFsConsorcio(cid)
+                              }}
+                              style={{ width:'100%', padding:'5px 8px', border:'1px solid #fbbf24',
+                                borderRadius:6, fontSize:12, background:'#fff' }}>
+                              <option value="">— Seleccione consorcio —</option>
+                              {todosConsorcios.map(c => (
+                                <option key={c.id} value={c.id}>{c.nombre}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <div style={{ fontSize:10, color:GR, marginBottom:3 }}>Unidad funcional</div>
+                            <select
+                              value={asig?.unidad_id || ''}
+                              onChange={e => {
+                                const uid = e.target.value
+                                const ufs = ufsPorConsorcio[asig?.consorcio_id] || []
+                                const ufSel = ufs.find(u => u.id === uid)
+                                setAsignaciones(prev => ({
+                                  ...prev,
+                                  [i]: { ...prev[i], unidad_id: uid, label: ufSel?.label || '' }
+                                }))
+                              }}
+                              disabled={!asig?.consorcio_id}
+                              style={{ width:'100%', padding:'5px 8px', border:'1px solid #fbbf24',
+                                borderRadius:6, fontSize:12, background:'#fff',
+                                opacity: asig?.consorcio_id ? 1 : 0.5 }}>
+                              <option value="">— Seleccione UF —</option>
+                              {(ufsPorConsorcio[asig?.consorcio_id] || []).map(u => (
+                                <option key={u.id} value={u.id}>{u.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div style={{ display:'flex', alignItems:'flex-end' }}>
+                            <Btn small
+                              onClick={() => setAsignaciones(prev => { const n={...prev}; delete n[i]; return n })}
+                              style={{ background:'#f3f4f6', color:GR }}>✕</Btn>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              <div style={{ marginTop:14, display:'flex', gap:8 }}>
                 <Btn onClick={importarPagos} disabled={procesando || !expSel}>
                   {procesando ? '⏳ Importando...' : '✓ Importar y registrar pagos'}
                 </Btn>
-                <BtnSec onClick={()=>{setArchivo(null);setPreview([]);setMsg(null)}}>
+                <BtnSec onClick={()=>{setArchivo(null);setPreview([]);setMsg(null);setAsignaciones({})}}>
                   Cancelar
                 </BtnSec>
               </div>
