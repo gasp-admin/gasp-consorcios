@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260515-email-tracking-fix'
+const BUILD_VERSION = '20260515-fix-importar-pdf'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -4282,9 +4282,20 @@ function ImportarPDF({ session, consorcioId, consorcioActivo, onDone }) {
   const [extrayendo, setExtrayendo] = useState(false)
   const [importando, setImportando] = useState(false)
   const [msg, setMsg]               = useState(null)
-  const [datos, setDatos]           = useState(null)     // datos extraídos por IA
-  const [edits, setEdits]           = useState({})       // ediciones manuales del usuario
+  const [datos, setDatos]           = useState(null)
+  const [edits, setEdits]           = useState({})
   const [progreso, setProgreso]     = useState('')
+  // Consorcio destino — puede ser diferente al activo
+  const [consorcios, setConsorcios] = useState([])
+  const [conIdDestino, setConIdDestino]   = useState(consorcioId)
+  const [conNomDestino, setConNomDestino] = useState(consorcioActivo?.nombre || '')
+
+  // Cargar lista de consorcios al montar
+  useEffect(() => {
+    supabase.from('con_consorcios').select('id,nombre')
+      .eq('admin_id', session.user.id).order('nombre')
+      .then(({ data }) => setConsorcios(data || []))
+  }, [])
 
   // Convertir PDF a base64 para enviarlo a Claude
   function pdfABase64(file) {
@@ -4381,7 +4392,19 @@ INSTRUCCIONES IMPORTANTES:
       const json = result.datos
 
       setDatos(json)
-      setEdits({}) // resetear ediciones
+      setEdits({})
+      // Intentar matchear el consorcio detectado por la IA con la lista
+      if (json.consorcio?.nombre) {
+        const nombreIA = json.consorcio.nombre.toLowerCase().trim()
+        const match = consorcios.find(c =>
+          c.nombre.toLowerCase().includes(nombreIA) ||
+          nombreIA.includes(c.nombre.toLowerCase().split(' ')[0])
+        )
+        if (match) {
+          setConIdDestino(match.id)
+          setConNomDestino(match.nombre)
+        }
+      }
       setPaso(2)
       setProgreso('')
       setMsg({ tipo:'ok', texto:`✓ Extracción completada — ${json.unidades?.length||0} unidades detectadas` })
@@ -4409,6 +4432,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
     const uid = session.user.id
     const hoy = new Date().toISOString().split('T')[0]
     const periodo = datos.periodo || new Date().toISOString().slice(0,7)
+    const cid = conIdDestino || consorcioId  // usar el consorcio seleccionado en paso 3
     let ok = 0, errs = []
 
     try {
@@ -4427,7 +4451,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
       await supabase.from('con_expensas').insert([{
         id: expId,
         admin_id: uid,
-        consorcio_id: consorcioId,
+        consorcio_id: cid,
         periodo,
         tipo: 'migracion',
         estado: 'cerrada',
@@ -4442,7 +4466,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
         const { error } = await supabase.from('con_gastos').insert([{
           id: `GAS-MIG-${Date.now()}-${ok}`,
           admin_id: uid,
-          consorcio_id: consorcioId,
+          consorcio_id: cid,
           expensa_id: expId,
           fecha: hoy,
           concepto: g.concepto,
@@ -4461,7 +4485,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
       // La deuda real al INICIO de este sistema = u.total_deuda (saldo_anterior + expensa - pagado)
       //   donde pagado son pagos del período anterior YA acreditados
       const { data: ufsExistentes } = await supabase
-        .from('con_unidades').select('id,numero').eq('consorcio_id', consorcioId)
+        .from('con_unidades').select('id,numero').eq('consorcio_id', cid)
 
       for (const u of (datos.unidades||[])) {
         if (!u.numero) continue
@@ -4484,7 +4508,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
           await supabase.from('con_copropietarios').insert([{
             id: cpId,
             admin_id: uid,
-            consorcio_id: consorcioId,
+            consorcio_id: cid,
             apellido_nombre: u.propietario || `Propietario UF ${u.numero}`,
           }])
 
@@ -4492,7 +4516,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
           await supabase.from('con_unidades').insert([{
             id: ufId,
             admin_id: uid,
-            consorcio_id: consorcioId,
+            consorcio_id: cid,
             numero: u.numero,
             tipo: 'departamento',
             porcentaje_fiscal: parseFloat(u.coeficiente) || null,
@@ -4508,7 +4532,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
             await supabase.from('con_expensas_detalle').insert([{
               id: `DET-MIG-${Date.now()}-${ok}`,
               admin_id: uid,
-              consorcio_id: consorcioId,
+              consorcio_id: cid,
               expensa_id: expId,
               unidad_id: ufId,
               monto: expensaActual,
@@ -4527,7 +4551,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
               await supabase.from('con_movimientos_unidad').insert([{
                 id: `MOV-MIG-${Date.now()}-${ok}`,
                 admin_id: uid,
-                consorcio_id: consorcioId,
+                consorcio_id: cid,
                 unidad_id: uf.id,
                 expensa_id: expId,
                 tipo: 'debito',
@@ -4549,7 +4573,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
         await supabase.from('con_movimientos_varios').insert([{
           id: `MV-MIG-${Date.now()}`,
           admin_id: uid,
-          consorcio_id: consorcioId,
+          consorcio_id: cid,
           expensa_id: expId,
           tipo: 'ingreso',
           concepto: `Saldo de caja inicial — migración período ${periodo}`,
@@ -4827,8 +4851,27 @@ Esta acción no se puede deshacer fácilmente.`)) return
 
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
             <div style={{ padding:'12px 16px', background:'#f0f4ff', borderRadius:8 }}>
-              <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Consorcio destino</div>
-              <div style={{ fontWeight:700, color:AZ }}>{consorcioActivo?.nombre||'—'}</div>
+              <div style={{ fontSize:12, color:GR, marginBottom:6, fontWeight:500 }}>
+                Consorcio destino
+              </div>
+              <select
+                value={conIdDestino}
+                onChange={e => {
+                  const c = consorcios.find(x => x.id === e.target.value)
+                  setConIdDestino(e.target.value)
+                  setConNomDestino(c?.nombre || '')
+                }}
+                style={{ width:'100%', padding:'8px 10px', border:'2px solid #1A3FA0',
+                  borderRadius:7, fontSize:13, fontWeight:700, color:AZ, background:'#fff' }}>
+                {consorcios.map(c => (
+                  <option key={c.id} value={c.id}>{c.nombre}</option>
+                ))}
+              </select>
+              {conNomDestino && conIdDestino !== consorcioId && (
+                <div style={{ fontSize:11, color:AM, marginTop:4 }}>
+                  ⚠️ Importando a un consorcio diferente al activo en el Dashboard
+                </div>
+              )}
             </div>
             <div style={{ padding:'12px 16px', background:'#f0f4ff', borderRadius:8 }}>
               <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Período a migrar</div>
