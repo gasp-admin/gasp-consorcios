@@ -5378,6 +5378,10 @@ function MovEntrecuentas({ session, consorcioId }) {
               </thead>
               <tbody>
                 {movsFiltr.map(m => (
+                  <tr key={m.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                    <td style={{ padding:'7px 10px', color:GR, fontSize:11 }}>{fmtD(m.fecha)}</td>
+                    <td style={{ padding:'7px 10px', fontSize:11 }}>
+                      <span style={{ color:RJ }}>↑</span> {nombreCuenta(m.cuenta_origen)}
                     </td>
                     <td style={{ padding:'7px 10px', fontSize:11 }}>
                       <span style={{ color:VD }}>↓</span> {nombreCuenta(m.cuenta_destino)}
