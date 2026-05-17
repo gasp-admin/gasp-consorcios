@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260517-import-fix-auditoria'
+const BUILD_VERSION = '20260517-liq-redondeo-uf-preview'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -742,7 +742,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   const totalGastos = gastos.reduce((a,g) => a + (parseFloat(g.monto)||0), 0)
 
   // ── PASO 3: Distribución ───────────────────────────────────────────────────
-  function calcularDistribucion() {
+  async function calcularDistribucion() {
     const totalACobrar = config.usar_total_gastos
       ? totalGastos
       : parseFloat(config.total_a_cobrar) || totalGastos
@@ -750,59 +750,298 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     if (totalACobrar <= 0) return setMsg({ tipo:'warn', texto:'El total a cobrar debe ser mayor a cero' })
     if (unidades.length === 0) return setMsg({ tipo:'warn', texto:'No hay unidades cargadas en este consorcio' })
 
-    // Calcular suma de coeficientes
     const coefTotal = unidades.reduce((a,u) => a + (parseFloat(u.porcentaje_fiscal)||0), 0)
     if (coefTotal === 0) return setMsg({ tipo:'warn', texto:'Las unidades no tienen coeficientes cargados' })
 
-    // Distribuir por coeficiente
-    let acumulado = 0
-    const items = unidades.map((u, idx) => {
-      const cp       = copropietarios.find(c => c.id === u.propietario_id)
-      const coef     = parseFloat(u.porcentaje_fiscal) || 0
-      const pct      = coefTotal > 0 ? coef / coefTotal * 100 : 0
-
-      // Calcular monto: redondear a 2 decimales
-      let monto = Math.round(totalACobrar * (coef / coefTotal) * 100) / 100
-      acumulado += monto
-
-      // Ajuste de centavos en último elemento
-      if (idx === unidades.length - 1 && config.ajuste_centavos) {
-        const diferencia = Math.round((totalACobrar - acumulado + monto) * 100) / 100
-        monto = Math.round(diferencia * 100) / 100
+    // Cargar saldos anteriores de la última expensa cerrada
+    let saldosAnt = {}
+    const { data: expAnterior } = await supabase.from('con_expensas')
+      .select('id').eq('consorcio_id', consorcioId)
+      .neq('id', expSel?.id || '').eq('estado','cerrada')
+      .order('periodo', { ascending: false }).limit(1)
+    if (expAnterior?.[0]) {
+      const { data: detsAnt } = await supabase.from('con_expensas_detalle')
+        .select('unidad_id, monto, saldo_anterior, pagos_periodo, interes_mora')
+        .eq('expensa_id', expAnterior[0].id)
+      for (const d of (detsAnt||[])) {
+        saldosAnt[d.unidad_id] = {
+          saldo: Math.max(0, (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)),
+          pagos: parseFloat(d.pagos_periodo)||0,
+        }
       }
+    }
 
-      // Segundo vencimiento con mora
+    // Calcular fechas de vencimiento
+    const exp_periodo = expSel?.periodo || ''
+    const [y, m] = exp_periodo.split('-')
+    const mesNum  = parseInt(m) || new Date().getMonth() + 1
+    const anioNum = parseInt(y) || new Date().getFullYear()
+    const mesVto  = mesNum === 12 ? 1 : mesNum + 1
+    const anioVto = mesNum === 12 ? anioNum + 1 : anioNum
+    const vto1 = `${anioVto}-${String(mesVto).padStart(2,'0')}-${String(config.vto1_dia||10).padStart(2,'0')}`
+    const vto2 = `${anioVto}-${String(mesVto).padStart(2,'0')}-${String(config.vto2_dia||20).padStart(2,'0')}`
+
+    // Distribuir por coeficiente
+    // Lógica de redondeo con identificación de UF en centavos:
+    // El importe base se redondea al peso (sin decimales)
+    // Los centavos son el número de UF (UF 1 → ,01 — UF 25 → ,25)
+    const items = unidades.map((u, idx) => {
+      const ufNum = idx + 1 // número de orden de la UF (1-based)
+      const cp    = copropietarios.find(c => c.id === u.propietario_id)
+      const coef  = parseFloat(u.porcentaje_fiscal) || 0
+      const pct   = coefTotal > 0 ? coef / coefTotal * 100 : 0
+
+      // Calcular expensa base = parte proporcional, redondeada al peso entero
+      const expensaBase = Math.round(totalACobrar * (coef / coefTotal))
+
+      // Redondeo: agregar el número de UF como centavos
+      // Ejemplo: UF 3, base $72.000 → $72.000,03
+      const centavosUF = ufNum / 100
+      const monto = expensaBase + centavosUF
+      const redondeo = centavosUF // diferencia que va a la cuenta de la UF
+
+      // Segundo vencimiento
       const monto_vto2 = Math.round(monto * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100
 
-      // Calcular fechas de vencimiento
-      const exp_periodo = expSel?.periodo || ''
-      const [y, m]      = exp_periodo.split('-')
-      const mesNum      = parseInt(m) || new Date().getMonth() + 1
-      const anioNum     = parseInt(y) || new Date().getFullYear()
-      // Vencimiento en el mes siguiente
-      const mesVto      = mesNum === 12 ? 1 : mesNum + 1
-      const anioVto     = mesNum === 12 ? anioNum + 1 : anioNum
-      const vto1        = `${anioVto}-${String(mesVto).padStart(2,'0')}-${String(config.vto1_dia||10).padStart(2,'0')}`
-      const vto2        = `${anioVto}-${String(mesVto).padStart(2,'0')}-${String(config.vto2_dia||20).padStart(2,'0')}`
+      // Datos de la liq anterior para esta UF
+      const antUF = saldosAnt[u.id] || { saldo: 0, pagos: 0 }
+      const saldo_anterior = antUF.saldo
+      const pagos_anterior = antUF.pagos
 
       return {
         unidad_id: u.id,
-        numero: u.numero,
+        numero: u.numero_interno || u.numero,
+        numero_uf: ufNum,
         tipo: u.tipo,
         propietario: cp?.apellido_nombre || '—',
-        coef,
-        pct: pct.toFixed(4),
-        monto,
+        coef, pct: pct.toFixed(4),
+        expensa_base: expensaBase,
+        redondeo,
+        monto,       // = expensaBase + redondeo (con centavos UF)
         monto_vto2,
-        vto1,
-        vto2,
-        saldo_anterior: 0, // se actualiza al revisar deuda anterior
+        vto1, vto2,
+        saldo_anterior,
+        pagos_anterior,
+        deuda: Math.max(0, saldo_anterior), // deuda de período anterior
       }
     })
 
+    // Verificar que la suma total es correcta (informativo)
+    const sumaTotal = items.reduce((a,d) => a + d.expensa_base, 0)
+
     setDistribucion(items)
-    setMsg({ tipo:'ok', texto:`✓ Distribución calculada — ${items.length} UFs — Total: $${totalACobrar.toLocaleString('es-AR')}` })
+    setMsg({ tipo:'ok', texto:`✓ Distribución calculada — ${items.length} UFs — Total expensas: $${totalACobrar.toLocaleString('es-AR')}` })
     setPaso(3)
+  }
+
+  // ── Vista previa imprimible de la liquidación ─────────────────────────────
+  function vistaPrevia() {
+    const totalACobrar = distribucion.reduce((a,d) => a + d.expensa_base, 0)
+    const adm = {} // se podría cargar adminPerfil acá si se pasa como prop
+    const per = periodoLabel(expSel?.periodo)
+
+    // Agrupar gastos por rubro para la tabla de gastos
+    const porRubro = {}
+    for (const g of gastos) {
+      const cat = g.categoria || 'varios'
+      if (!porRubro[cat]) porRubro[cat] = { gastos:[], total:0 }
+      porRubro[cat].gastos.push(g)
+      porRubro[cat].total += parseFloat(g.monto)||0
+    }
+    const totalGastosTotal = gastos.reduce((a,g)=>a+parseFloat(g.monto||0),0)
+
+    const fmtN = n => (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
+    const fmtDLocal = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
+
+    const rubrosHTML = Object.entries(porRubro).map(([cat, data]) => {
+      const pct = totalGastosTotal > 0 ? (data.total/totalGastosTotal*100).toFixed(2) : '0.00'
+      const filas = data.gastos.map(g =>
+        `<tr><td style="padding:3px 8px;font-size:8.5pt">${g.concepto||''}${g.proveedor_nombre?', '+g.proveedor_nombre:''}</td><td style="text-align:right;padding:3px 8px;font-size:8.5pt">${fmtN(g.monto)}</td><td style="text-align:right;padding:3px 8px;font-size:8.5pt">${fmtN(g.monto)}</td></tr>`
+      ).join('')
+      return `<tr style="background:#e8f4f8"><td colspan="1" style="padding:4px 8px;font-weight:700;font-size:8.5pt;text-transform:uppercase">${cat.replace(/_/g,' ')}</td><td style="text-align:right;padding:4px 8px;font-weight:700;font-size:8.5pt">EXPENSAS A</td><td style="text-align:right;padding:4px 8px;font-weight:700;font-size:8.5pt">Total</td></tr>${filas}<tr style="background:#1A3FA0;color:#fff"><td style="padding:4px 8px;font-weight:700;font-size:8.5pt">TOTAL ${pct}%</td><td style="text-align:right;padding:4px 8px;font-weight:700">${fmtN(data.total)}</td><td style="text-align:right;padding:4px 8px;font-weight:700">${fmtN(data.total)}</td></tr>`
+    }).join('')
+
+    // Calcular estado financiero
+    const saldoAnterior = distribucion.reduce((a,d)=>a+d.saldo_anterior,0)
+    const cobradoAnt = distribucion.reduce((a,d)=>a+d.pagos_anterior,0)
+    const [yy,mm] = (expSel?.periodo||'').split('-')
+    const mesVtoNum = parseInt(mm)===12?1:parseInt(mm)+1
+    const anioVtoNum = parseInt(mm)===12?parseInt(yy)+1:parseInt(yy)
+    const fechaVto = `${String(config.vto1_dia||10).padStart(2,'0')}/${String(mesVtoNum).padStart(2,'0')}/${anioVtoNum}`
+    const saldoFinal = saldoAnterior + cobradoAnt - totalGastosTotal
+
+    const filasProrrateoPrev = distribucion.map(d =>
+      `<tr style="border-bottom:1px solid #e8e8e8"><td style="padding:3px 8px;font-weight:600;font-size:8pt;text-align:center">${d.numero_uf}</td><td style="padding:3px 8px;font-size:8pt">${d.propietario}</td><td style="padding:3px 8px;font-size:8pt;text-align:right">${fmtN(d.saldo_anterior)}</td><td style="padding:3px 8px;font-size:8pt;text-align:right">${fmtN(d.pagos_anterior)}</td><td style="padding:3px 8px;font-size:8pt;text-align:right">${fmtN(d.deuda)}</td><td style="padding:3px 8px;font-size:8pt;text-align:right">0,00</td><td style="padding:3px 8px;font-size:8pt;text-align:center">${d.pct}%</td><td style="padding:3px 8px;font-size:8.5pt;text-align:right;font-weight:700">${fmtN(d.expensa_base)}</td><td style="padding:3px 8px;font-size:8pt;text-align:right;color:#999">${fmtN(d.redondeo)}</td><td style="padding:3px 8px;font-size:8.5pt;text-align:right;font-weight:800;color:#1A3FA0">${fmtN(d.monto)}</td></tr>`
+    ).join('')
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;font-size:9pt;color:#111;background:#fff}
+.page{width:210mm;min-height:297mm;padding:10mm 12mm 8mm;page-break-after:always}
+.page:last-child{page-break-after:auto}
+@page{size:A4;margin:0}
+@media print{body{margin:0}.no-print{display:none!important}}
+.hdr{display:flex;align-items:flex-start;gap:12px;border-bottom:3px solid #1A3FA0;padding-bottom:8px;margin-bottom:8px}
+.logo-box{background:#1A3FA0;color:#fff;font-size:9pt;font-weight:700;border-radius:4px;padding:8px 10px;min-width:120px;text-align:center;line-height:1.4}
+.hdr-right{flex:1}
+.titulo-liq{background:#1A3FA0;color:#fff;font-weight:700;font-size:10pt;text-align:center;padding:5px;margin-bottom:6px}
+.datos-row{display:flex;gap:16px;margin-bottom:8px;font-size:8pt}
+.datos-col{flex:1;border:1px solid #ccc;padding:6px 8px;border-radius:4px}
+.datos-col h4{color:#1A3FA0;font-size:8pt;text-transform:uppercase;border-bottom:1px solid #1A3FA0;margin-bottom:4px;padding-bottom:2px}
+table{width:100%;border-collapse:collapse}
+th{background:#2e4057;color:#fff;padding:4px 8px;font-size:8pt;text-align:left}
+th.r{text-align:right}
+.sec-title{background:#1A3FA0;color:#fff;font-weight:700;font-size:8.5pt;padding:5px 8px;text-transform:uppercase;margin:8px 0 0}
+.ef-final{background:#1A3FA0;color:#fff;font-weight:700;font-size:9pt}
+.ef-final td{padding:5px 8px}
+.footer{border-top:1px solid #ccc;margin-top:8px;padding-top:4px;font-size:7pt;color:#666;display:flex;justify-content:space-between}
+.btn-imp{display:block;margin:16px auto;padding:10px 28px;background:#1A3FA0;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer}
+.nota-box{border:1px solid #ccc;border-radius:4px;padding:8px 10px;margin-top:8px;font-size:7.5pt;line-height:1.7}
+</style></head><body>
+
+<button class="btn-imp no-print" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+
+<!-- PÁGINA 1: Gastos y Estado Financiero -->
+<div class="page">
+  <div class="hdr">
+    <div class="logo-box">
+      <div style="font-size:11pt;font-weight:900">GASP</div>
+      <div>Administración</div>
+      <div>de Consorcios</div>
+    </div>
+    <div class="hdr-right">
+      <div class="titulo-liq">EXPENSAS PROVINCIA DE BUENOS AIRES Ley 14.701 — LIQUIDACIÓN DE MES: ${expSel?.periodo||''}</div>
+      <div class="datos-row">
+        <div class="datos-col">
+          <h4>Administración</h4>
+          <div>Javier Garcia Perez</div>
+          <div>Domicilio: Lenguado 1313 - Loc 3</div>
+          <div>administracion@administracionpinamar.com</div>
+          <div>CUIT: 20186006802 &nbsp; R.P.A.C. N° 83</div>
+          <div>Tel: 02267 444034</div>
+        </div>
+        <div class="datos-col">
+          <h4>Consorcio</h4>
+          <div style="font-weight:700">${consorcioActivo?.nombre||''}</div>
+          <div>CUIT: ${consorcioActivo?.cuit||'—'}</div>
+          <div>Clave SUTERH: ${consorcioActivo?.clave_suterh||'—'}</div>
+          <div style="margin-top:4px"><strong>Javier Garcia Perez</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-title">PAGOS DEL PERÍODO POR SUMINISTROS, SERVICIOS, ABONOS Y SEGUROS</div>
+  <table>
+    <thead><tr><th>Concepto</th><th class="r">EXPENSAS A</th><th class="r">Total</th></tr></thead>
+    <tbody>${rubrosHTML}</tbody>
+    <tfoot><tr style="background:#0d2b3e;color:#fff;font-weight:700"><td style="padding:5px 8px">TOTAL 100,00%</td><td style="text-align:right;padding:5px 8px">${fmtN(totalGastosTotal)}</td><td style="text-align:right;padding:5px 8px">${fmtN(totalGastosTotal)}</td></tr></tfoot>
+  </table>
+
+  <div class="sec-title">ESTADO FINANCIERO</div>
+  <table>
+    <thead><tr><th>CONCEPTO</th><th class="r">EXPENSAS A</th><th class="r">Total</th></tr></thead>
+    <tbody>
+      <tr><td style="padding:3px 8px">Saldo anterior al 01/${String(mesVtoNum-1||12).padStart(2,'0')}/${anioVtoNum}</td><td style="text-align:right;padding:3px 8px">${fmtN(saldoAnterior)}</td><td style="text-align:right;padding:3px 8px">${fmtN(saldoAnterior)}</td></tr>
+      <tr><td style="padding:3px 8px;padding-left:16px;font-style:italic">Ingresos por pago de expensas en término</td><td style="text-align:right;padding:3px 8px">${fmtN(cobradoAnt)}</td><td style="text-align:right;padding:3px 8px">${fmtN(cobradoAnt)}</td></tr>
+      <tr><td style="padding:3px 8px;padding-left:16px;font-style:italic">Ingresos por pago de expensas adeudadas</td><td style="text-align:right;padding:3px 8px">0,00</td><td style="text-align:right;padding:3px 8px">0,00</td></tr>
+      <tr><td style="padding:3px 8px;padding-left:16px;font-style:italic">Ingresos por pago de intereses</td><td style="text-align:right;padding:3px 8px">0,00</td><td style="text-align:right;padding:3px 8px">0,00</td></tr>
+      <tr><td style="padding:3px 8px;padding-left:16px;font-style:italic">Egresos por pagos</td><td style="text-align:right;padding:3px 8px">-${fmtN(totalGastosTotal)}</td><td style="text-align:right;padding:3px 8px">-${fmtN(totalGastosTotal)}</td></tr>
+    </tbody>
+    <tfoot><tr class="ef-final"><td>Saldo final al ${fechaVto}</td><td style="text-align:right">${fmtN(saldoFinal)}</td><td style="text-align:right">${fmtN(saldoFinal)}</td></tr></tfoot>
+  </table>
+  <div class="footer"><span>${consorcioActivo?.nombre||''} — Liquidación ${per}</span><span>R.P.A.C. N°83 | CUIT: ${consorcioActivo?.cuit||''} | Vto: ${fechaVto}</span><span>Pág. 1</span></div>
+</div>
+
+<!-- PÁGINA 2: NOTAS -->
+<div class="page">
+  <div class="hdr">
+    <div class="logo-box"><div style="font-size:11pt;font-weight:900">GASP</div><div>Administración</div></div>
+    <div class="hdr-right"><div class="titulo-liq">NOTAS — LIQUIDACIÓN: ${per}</div></div>
+  </div>
+  <div class="nota-box">
+    <p style="font-weight:700;margin-bottom:6px">INFORMACIÓN IMPORTANTE</p>
+    <p>COMUNICAMOS A LOS SRES PROPIETARIOS/INQUILINOS QUE LOS PAGOS QUE NO SE REALICEN ANTES DE LOS DÍAS 28 DE CADA MES, NO PODRÁN SER ACREDITADOS EN TIEMPO Y FORMA POR CUESTIONES OPERATIVAS.</p>
+    <p style="margin-top:5px">SOLICITAMOS CANCELAR LAS EXPENSAS ANTES DE LA MENCIONADA FECHA, EVITANDO RECARGOS O INCONVENIENTES FUTUROS.</p>
+    <hr style="margin:8px 0;border:none;border-top:1px solid #ccc"/>
+    <p style="font-weight:700">ATENCIÓN OFICINA</p>
+    <p>UBICACIÓN: LENGUADO N° 1313 LOCAL 3 (ENTRE SHAW Y ENEAS) &nbsp; HORARIO: LUNES A SÁBADOS DE 9:00 A 13:00 HORAS &nbsp; TELÉFONOS: 02267-516386 / 2267444034</p>
+    <hr style="margin:8px 0;border:none;border-top:1px solid #ccc"/>
+    <p>RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS EN LAS CUENTAS CORRIENTES INFORMADAS RESPETANDO LOS IMPORTES CON CENTAVOS, PARA UNA CORRECTA IDENTIFICACIÓN Y EVITAR ERRORES EN LAS IMPUTACIONES.</p>
+  </div>
+  ${consorcioActivo?.cbu ? `<div class="nota-box" style="margin-top:8px"><p style="font-weight:700;color:#1A3FA0">FORMAS DE PAGO</p><p>DEPÓSITO O TRANSFERENCIA</p><p><strong>Titular:</strong> ${consorcioActivo.nombre}</p><p><strong>CBU:</strong> ${consorcioActivo.cbu}</p><p><strong>Alias:</strong> ${consorcioActivo.alias_cbu||'—'}</p><p><strong>Banco:</strong> ${consorcioActivo.banco||'—'}</p></div>`:''}
+
+  <div class="sec-title" style="margin-top:10px">UNIDADES CON DEUDA DE EXPENSAS</div>
+  <table>
+    <thead><tr><th>U.F.</th><th>Dpto.</th><th>PROPIETARIO</th><th class="r">DEUDA</th><th class="r">TOTAL</th></tr></thead>
+    <tbody>
+      ${distribucion.filter(d=>d.deuda>0).map(d=>`<tr><td style="padding:3px 8px">${d.numero_uf}</td><td style="padding:3px 8px">${d.numero}</td><td style="padding:3px 8px">${d.propietario}</td><td style="text-align:right;padding:3px 8px">${fmtN(d.deuda)}</td><td style="text-align:right;padding:3px 8px">${fmtN(d.deuda)}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;padding:6px;color:#999">Sin unidades con deuda</td></tr>'}
+    </tbody>
+    <tfoot><tr style="background:#1A3FA0;color:#fff;font-weight:700"><td colspan="3" style="padding:4px 8px;text-align:right">TOTAL</td><td style="text-align:right;padding:4px 8px">${fmtN(distribucion.reduce((a,d)=>a+d.deuda,0))}</td><td style="text-align:right;padding:4px 8px">${fmtN(distribucion.reduce((a,d)=>a+d.deuda,0))}</td></tr></tfoot>
+  </table>
+  <div class="footer"><span>${consorcioActivo?.nombre||''} — Liquidación ${per}</span><span>R.P.A.C. N°83</span><span>Pág. 2</span></div>
+</div>
+
+<!-- PÁGINA 3: Estado de cuentas y prorrateo -->
+<div class="page">
+  <div style="display:flex;justify-content:space-between;font-size:8pt;margin-bottom:6px">
+    <div><strong>Administración:</strong> Javier Garcia Perez &nbsp; <strong>Consorcio:</strong> ${consorcioActivo?.nombre||''} &nbsp; <strong>Período:</strong> ${expSel?.periodo||''}</div>
+    <div style="text-align:right"><strong>N° RPA:</strong> 83 &nbsp; <strong>Vencimiento:</strong> ${fechaVto}</div>
+  </div>
+
+  <div class="sec-title">ESTADO DE CUENTAS Y PRORRATEO</div>
+  <div style="overflow-x:auto">
+  <table>
+    <thead>
+      <tr>
+        <th style="text-align:center">U.F.</th>
+        <th>Dpto.</th>
+        <th>PROPIETARIO</th>
+        <th class="r">SALDO ANTERIOR</th>
+        <th class="r">PAGOS</th>
+        <th class="r">DEUDA</th>
+        <th class="r">INTERÉS</th>
+        <th class="r">%</th>
+        <th class="r">EXPENSAS A</th>
+        <th class="r">RED./AJUSTES</th>
+        <th class="r">TOTAL</th>
+        <th style="text-align:center">U.F.</th>
+      </tr>
+    </thead>
+    <tbody>${filasProrrateoPrev}</tbody>
+    <tfoot>
+      <tr style="background:#0d2b3e;color:#fff;font-weight:700">
+        <td colspan="3" style="padding:5px 8px;text-align:right">TOTAL</td>
+        <td style="text-align:right;padding:5px 8px">${fmtN(distribucion.reduce((a,d)=>a+d.saldo_anterior,0))}</td>
+        <td style="text-align:right;padding:5px 8px">${fmtN(distribucion.reduce((a,d)=>a+d.pagos_anterior,0))}</td>
+        <td style="text-align:right;padding:5px 8px">${fmtN(distribucion.reduce((a,d)=>a+d.deuda,0))}</td>
+        <td style="text-align:right;padding:5px 8px">0,00</td>
+        <td style="text-align:right;padding:5px 8px">100%</td>
+        <td style="text-align:right;padding:5px 8px">${fmtN(distribucion.reduce((a,d)=>a+d.expensa_base,0))}</td>
+        <td style="text-align:right;padding:5px 8px">${fmtN(distribucion.reduce((a,d)=>a+d.redondeo,0))}</td>
+        <td style="text-align:right;padding:5px 8px">${fmtN(distribucion.reduce((a,d)=>a+d.monto,0))}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+  </div>
+
+  ${consorcioActivo?.cbu ? `
+  <div style="margin-top:12px;border:1.5px solid #1A3FA0;border-radius:6px;padding:10px 14px">
+    <p style="color:#1A3FA0;font-weight:700;font-size:9pt;margin-bottom:6px">FORMAS DE PAGO</p>
+    <p style="font-size:8pt"><strong>DEPÓSITO O TRANSFERENCIA</strong></p>
+    <p style="font-size:8pt"><strong>Titular:</strong> ${consorcioActivo.nombre} &nbsp;&nbsp; <strong>CBU:</strong> ${consorcioActivo.cbu} &nbsp;&nbsp; <strong>Alias:</strong> ${consorcioActivo.alias_cbu||'—'} &nbsp;&nbsp; <strong>Banco:</strong> ${consorcioActivo.banco||'—'}</p>
+  </div>`:'' }
+
+  <div class="footer"><span>${consorcioActivo?.nombre||''} — Liquidación ${per}</span><span>R.P.A.C. N°83 | CUIT: ${consorcioActivo?.cuit||''}</span><span>Pág. 3</span></div>
+</div>
+
+</body></html>`
+
+    const w = window.open('', '_blank', 'width=900,height=700')
+    w.document.write(html)
+    w.document.close()
   }
 
   // ── PASO 4: Confirmar y cerrar ─────────────────────────────────────────────
@@ -854,11 +1093,12 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         consorcio_id: consorcioId,
         expensa_id: expSel.id,
         unidad_id: d.unidad_id,
-        monto: d.monto,
-        saldo_anterior: saldosAnt[d.unidad_id] || 0,
+        monto: d.monto,              // monto CON centavos de identificación de UF
+        redondeo: d.redondeo,        // centavos del número de UF (ej: 0.03 para UF 3)
+        saldo_anterior: d.saldo_anterior || saldosAnt[d.unidad_id] || 0,
         pagos_periodo: 0,
         interes_mora: 0,
-        estado: saldosAnt[d.unidad_id] > 0 ? 'morosa' : 'pendiente',
+        estado: (d.saldo_anterior || saldosAnt[d.unidad_id] || 0) > 0 ? 'morosa' : 'pendiente',
       }))
 
       const { error } = await supabase.from('con_expensas_detalle').insert(detalles)
@@ -1349,77 +1589,96 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
               </div>
             </div>
 
-            <div style={{ marginBottom:14 }}>
-              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13 }}>
-                <input type="checkbox" checked={config.ajuste_centavos}
-                  onChange={e=>setConfig(c=>({...c,ajuste_centavos:e.target.checked}))} />
-                Ajustar diferencia de centavos en la última UF
-              </label>
+            <div style={{ marginBottom:14, background:'#f0f9ff', border:'1px solid #bae6fd', borderRadius:7, padding:'8px 12px', fontSize:12, color:'#0369a1' }}>
+              💡 <strong>Redondeo automático:</strong> Cada UF lleva en los centavos su número de identificación (UF 1 → ,01 — UF 25 → ,25). Esto permite identificar automáticamente los pagos bancarios. La diferencia se registra como redondeo en la cuenta corriente de cada UF.
             </div>
 
             <Btn onClick={calcularDistribucion}>⚡ Calcular distribución</Btn>
           </Card>
 
-          {/* Tabla de distribución */}
+          {/* Tabla de distribución — columnas completas igual al PDF */}
           {distribucion.length > 0 && (
             <>
               <Card style={{ marginBottom:12 }}>
-                <div style={{ fontWeight:600, fontSize:13, marginBottom:12 }}>
-                  Distribución por unidad — {distribucion.length} UFs
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                  <div style={{ fontWeight:600, fontSize:13 }}>
+                    Estado de cuentas y prorrateo — {distribucion.length} UFs
+                  </div>
+                  <div style={{ display:'flex', gap:8 }}>
+                    <Btn small color='#6b7280' onClick={vistaPrevia}>🖨️ Vista previa</Btn>
+                  </div>
                 </div>
                 <div style={{ overflowX:'auto' }}>
-                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
                     <thead>
-                      <tr style={{ background:'#f3f4f6' }}>
-                        {['UF','Propietario','Coef.','%','1er Vto','Expensa','2do Vto','Con recargo'].map((h,i) => (
-                          <th key={i} style={{ padding:'6px 10px', textAlign:i>=4?'right':'left',
-                            fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb',
-                            whiteSpace:'nowrap' }}>{h}</th>
+                      <tr style={{ background:'#2e4057' }}>
+                        {['UF','Propietario','Sal. Ant.','Pagos Ant.','Deuda','Interés','%','1er Vto','Expensa','Redondeo','Total','2do Vto','Con Recargo'].map((h,i) => (
+                          <th key={i} style={{ padding:'5px 8px', textAlign:i>=2&&i!==7&&i!==11?'right':'left',
+                            fontSize:10, fontWeight:700, color:'#fff', whiteSpace:'nowrap' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {distribucion.map((d,i) => (
-                        <tr key={d.unidad_id} style={{ borderBottom:'1px solid #f3f4f6',
-                          background: i%2===0 ? 'transparent' : '#fafafa' }}>
-                          <td style={{ padding:'6px 10px', fontWeight:700 }}>UF {d.numero}</td>
-                          <td style={{ padding:'6px 10px', fontSize:11 }}>{d.propietario}</td>
-                          <td style={{ padding:'6px 10px', color:GR, fontSize:11 }}>{d.coef?.toFixed(4)}</td>
-                          <td style={{ padding:'6px 10px', color:GR, fontSize:11 }}>{d.pct}%</td>
-                          <td style={{ padding:'6px 10px', textAlign:'right', fontSize:11, color:GR }}>
-                            {fmtD(d.vto1)}
+                        <tr key={d.unidad_id} style={{ borderBottom:'1px solid #e5e7eb',
+                          background: i%2===0 ? 'transparent' : '#f8fafc' }}>
+                          <td style={{ padding:'5px 8px', fontWeight:700, color:AZ }}>{d.numero_uf}</td>
+                          <td style={{ padding:'5px 8px', fontSize:11 }}>{d.propietario}</td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', color:d.saldo_anterior>0?RJ:GR, fontSize:10 }}>
+                            {d.saldo_anterior>0 ? fmt(d.saldo_anterior) : '—'}
                           </td>
-                          <td style={{ padding:'6px 10px', textAlign:'right', fontWeight:700, color:AZ }}>
+                          <td style={{ padding:'5px 8px', textAlign:'right', color:GR, fontSize:10 }}>
+                            {d.pagos_anterior>0 ? fmt(d.pagos_anterior) : '—'}
+                          </td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:d.deuda>0?700:400, color:d.deuda>0?RJ:GR, fontSize:10 }}>
+                            {d.deuda>0 ? fmt(d.deuda) : '—'}
+                          </td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', color:GR, fontSize:10 }}>—</td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', color:GR, fontSize:10 }}>{d.pct}%</td>
+                          <td style={{ padding:'5px 8px', fontSize:10, color:GR, whiteSpace:'nowrap' }}>{fmtD(d.vto1)}</td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:700, color:AZ }}>
+                            {fmt(d.expensa_base)}
+                          </td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', fontSize:10, color:'#9ca3af' }}>
+                            {fmt(d.redondeo)}
+                          </td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:800, color:AZ, fontSize:12 }}>
                             {fmt(d.monto)}
                           </td>
-                          <td style={{ padding:'6px 10px', textAlign:'right', fontSize:11, color:GR }}>
-                            {fmtD(d.vto2)}
-                          </td>
-                          <td style={{ padding:'6px 10px', textAlign:'right', color:AM, fontWeight:600 }}>
+                          <td style={{ padding:'5px 8px', fontSize:10, color:GR, whiteSpace:'nowrap' }}>{fmtD(d.vto2)}</td>
+                          <td style={{ padding:'5px 8px', textAlign:'right', color:AM, fontWeight:600 }}>
                             {fmt(d.monto_vto2)}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
-                      <tr style={{ background:'#f0f4ff', borderTop:'2px solid #1A3FA0' }}>
-                        <td colSpan={5} style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>
-                          Total
-                        </td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:800, fontSize:15, color:AZ }}>
-                          {fmt(distribucion.reduce((a,d)=>a+d.monto,0))}
-                        </td>
+                      <tr style={{ background:'#0d2b3e', color:'#fff' }}>
+                        <td colSpan={2} style={{ padding:'6px 8px', fontWeight:700, fontSize:11 }}>TOTAL</td>
+                        <td style={{ padding:'6px 8px', textAlign:'right', fontSize:10 }}>{fmt(distribucion.reduce((a,d)=>a+d.saldo_anterior,0))}</td>
+                        <td style={{ padding:'6px 8px', textAlign:'right', fontSize:10 }}>{fmt(distribucion.reduce((a,d)=>a+d.pagos_anterior,0))}</td>
+                        <td style={{ padding:'6px 8px', textAlign:'right', fontSize:10 }}>{fmt(distribucion.reduce((a,d)=>a+d.deuda,0))}</td>
+                        <td style={{ padding:'6px 8px', textAlign:'right', fontSize:10 }}>0,00</td>
+                        <td style={{ padding:'6px 8px', textAlign:'right', fontSize:10 }}>100%</td>
                         <td />
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:700, color:AM }}>
-                          {fmt(distribucion.reduce((a,d)=>a+d.monto_vto2,0))}
-                        </td>
+                        <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:800, fontSize:13 }}>{fmt(distribucion.reduce((a,d)=>a+d.expensa_base,0))}</td>
+                        <td style={{ padding:'6px 8px', textAlign:'right', fontSize:10 }}>{fmt(distribucion.reduce((a,d)=>a+d.redondeo,0))}</td>
+                        <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:800, fontSize:14 }}>{fmt(distribucion.reduce((a,d)=>a+d.monto,0))}</td>
+                        <td />
+                        <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:700 }}>{fmt(distribucion.reduce((a,d)=>a+d.monto_vto2,0))}</td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
+
+                {/* Nota sobre el redondeo */}
+                <div style={{ marginTop:10, fontSize:11, color:'#6b7280', background:'#f9fafb', padding:'8px 12px', borderRadius:6 }}>
+                  💡 <strong>Redondeo con identificación de UF:</strong> El total incluye centavos que identifican cada unidad (UF 1 → ,01 · UF 2 → ,02 · etc.). Esto facilita la imputación automática de pagos bancarios.
+                </div>
               </Card>
 
               <div style={{ display:'flex', gap:8 }}>
+                <Btn onClick={vistaPrevia} color='#6b7280'>🖨️ Vista previa completa</Btn>
                 <Btn onClick={confirmarYCerrar} disabled={procesando}
                   style={{ background:VD, color:'#fff' }}>
                   {procesando ? '⏳ Cerrando período...' : '🔒 Confirmar y cerrar período'}
