@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-p1p2p3-provglobal'
+const BUILD_VERSION = '20260516-provglobal-fix'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -2239,10 +2239,18 @@ function Proveedores({ session, consorcioId }) {
   }
   async function guardar() {
     if (!form.razon_social) return setMsg({ tipo:'warn', texto:'Razón social obligatoria' })
-    const id=form.id||nextId(lista,'PRV')
-    const { error }=await supabase.from('con_proveedores').upsert({ ...form, id, admin_id:session.user.id, consorcio_id:consorcioId }, { onConflict:'id' })
+    const esNuevo = !form.id
+    const id = form.id || nextId(lista,'PRV')
+    // Nuevo proveedor → global (null). Edición → conserva el consorcio_id que tenía.
+    const consorcio_id_guardar = esNuevo ? null : (form.consorcio_id ?? null)
+    const { error }=await supabase.from('con_proveedores').upsert(
+      { ...form, id, admin_id:session.user.id, consorcio_id: consorcio_id_guardar },
+      { onConflict:'id' }
+    )
     if (error) return setMsg({ tipo:'error', texto:error.message })
-    setForm(null); setMsg({ tipo:'ok', texto:'✓ Guardado' }); cargar()
+    setForm(null)
+    setMsg({ tipo:'ok', texto: esNuevo ? '✓ Proveedor guardado — disponible en todos los consorcios' : '✓ Actualizado' })
+    cargar()
   }
   async function eliminar(id) {
     if (!confirm('¿Eliminar?')) return
@@ -2253,22 +2261,33 @@ function Proveedores({ session, consorcioId }) {
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-        <div style={{ fontWeight:700, fontSize:15 }}>Proveedores ({lista.length})</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+        <div>
+          <div style={{ fontWeight:700, fontSize:15 }}>Proveedores ({lista.length})</div>
+          <div style={{ fontSize:11, color:GR, marginTop:2 }}>Los nuevos proveedores quedan disponibles en todos los consorcios</div>
+        </div>
         <Btn onClick={()=>setForm({activo:true})}>+ Agregar</Btn>
       </div>
       <Msg data={msg} />
       {form && (
         <Card style={{ marginBottom:16, border:`1px solid ${AZ}` }}>
-          <div style={{ fontWeight:700, color:AZ, marginBottom:14 }}>{form.id?'Editar proveedor':'Nuevo proveedor'}</div>
+          <div style={{ fontWeight:700, color:AZ, marginBottom:6 }}>{form.id?'Editar proveedor':'Nuevo proveedor'}</div>
+          {!form.id && (
+            <div style={{ fontSize:11, color:'#6b7280', marginBottom:14, background:'#f0f9ff', padding:'6px 10px', borderRadius:6 }}>
+              🌐 El proveedor quedará disponible en <strong>todos sus consorcios</strong>
+            </div>
+          )}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
-            <Input label="Razón social" value={form.razon_social} onChange={v=>F({razon_social:v})} required />
-            <Input label="CUIT" value={form.cuit} onChange={v=>F({cuit:v})} />
-            <Sel label="Rubro" value={form.rubro} onChange={v=>F({rubro:v})} opts={[{v:'',l:'Seleccionar...'},...RUBROS]} />
-            <Input label="Teléfono" value={form.telefono} onChange={v=>F({telefono:v})} />
-            <Input label="Email" value={form.email} onChange={v=>F({email:v})} />
-            <Input label="Dirección" value={form.direccion} onChange={v=>F({direccion:v})} />
-            <div style={{ gridColumn:'span 3' }}><Input label="Notas" value={form.notas} onChange={v=>F({notas:v})} /></div>
+            <Input label="Razón social" value={form.razon_social||''} onChange={v=>F({razon_social:v})} required />
+            <Input label="CUIT" value={form.cuit||''} onChange={v=>F({cuit:v})} />
+            <Sel label="Rubro" value={form.rubro||''} onChange={v=>F({rubro:v})} opts={[{v:'',l:'Seleccionar...'},...RUBROS]} />
+            <Input label="Teléfono" value={form.telefono||''} onChange={v=>F({telefono:v})} />
+            <Input label="Email" value={form.email||''} onChange={v=>F({email:v})} />
+            <Input label="Dirección" value={form.direccion||''} onChange={v=>F({direccion:v})} />
+            <Input label="CBU" value={form.cbu||''} onChange={v=>F({cbu:v})} />
+            <Input label="Alias CBU" value={form.alias_cbu||''} onChange={v=>F({alias_cbu:v})} />
+            <Sel label="Situación fiscal" value={form.tipo_fiscal||'monotributo'} onChange={v=>F({tipo_fiscal:v})} opts={[{v:'monotributo',l:'Monotributo'},{v:'responsable_inscripto',l:'Resp. Inscripto'},{v:'exento',l:'Exento'},{v:'consumidor_final',l:'Consumidor Final'}]} />
+            <div style={{ gridColumn:'span 3' }}><Input label="Notas" value={form.notas||''} onChange={v=>F({notas:v})} /></div>
           </div>
           <div style={{ display:'flex', gap:8 }}>
             <Btn onClick={guardar}>💾 Guardar</Btn>
@@ -2280,18 +2299,25 @@ function Proveedores({ session, consorcioId }) {
         {lista.map(p=>(
           <Card key={p.id}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-              <div>
-                <div style={{ fontWeight:700, fontSize:14 }}>{p.razon_social}</div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+                  <span style={{ fontWeight:700, fontSize:14 }}>{p.razon_social}</span>
+                  {!p.consorcio_id
+                    ? <span style={{ fontSize:9, background:'#dbeafe', color:'#1e40af', borderRadius:4, padding:'1px 6px', fontWeight:600 }}>🌐 GLOBAL</span>
+                    : <span style={{ fontSize:9, background:'#fef9c3', color:'#854d0e', borderRadius:4, padding:'1px 6px', fontWeight:600 }}>📌 ESTE CONSORCIO</span>
+                  }
+                </div>
                 <div style={{ fontSize:11, color:GR, marginTop:3 }}>
                   {p.rubro && <Badge text={p.rubro} color={AZ} style={{ marginRight:6 }} />}
                   {p.cuit && `CUIT: ${p.cuit}`}
                 </div>
-                <div style={{ fontSize:12, color:GR, marginTop:4, display:'flex', gap:10 }}>
+                <div style={{ fontSize:12, color:GR, marginTop:4, display:'flex', gap:10, flexWrap:'wrap' }}>
                   {p.telefono && <span>📱 {p.telefono}</span>}
                   {p.email && <span>✉ {p.email}</span>}
+                  {p.cbu && <span>🏦 {p.cbu}</span>}
                 </div>
               </div>
-              <div style={{ display:'flex', gap:4 }}>
+              <div style={{ display:'flex', gap:4, flexShrink:0 }}>
                 <Btn small onClick={()=>setForm({...p})} style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
                 <Btn small onClick={()=>eliminar(p.id)} style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
               </div>
