@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-importar-comprobantes-liquidacion'
+const BUILD_VERSION = '20260517-import-fix-auditoria'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -550,62 +550,100 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   // Cargar comprobantes del consorcio que NO están ya importados a esta expensa
   async function cargarComprobantesImportables(eid) {
     setCargandoComps(true)
-    // Obtener IDs de comprobantes ya importados como gastos en esta expensa
-    const { data: gastosExist } = await supabase.from('con_gastos')
-      .select('comprobante_id').eq('expensa_id', eid).not('comprobante_id','is',null)
-    const idsYaImportados = (gastosExist||[]).map(g=>g.comprobante_id)
+    try {
+      // 1. Obtener IDs ya importados como gastos en esta expensa
+      const { data: gastosExist } = await supabase.from('con_gastos')
+        .select('comprobante_id').eq('expensa_id', eid).not('comprobante_id','is',null)
+      const idsYaImportados = new Set((gastosExist||[]).map(g=>g.comprobante_id))
 
-    // Buscar comprobantes pendientes/pagado_parcial del consorcio
-    const { data: comps } = await supabase.from('con_comprobantes_proveedor')
-      .select('*, con_proveedores:proveedor_id(razon_social)')
-      .eq('consorcio_id', consorcioId)
-      .in('estado', ['pendiente','pagado_parcial','pagado'])
-      .order('fecha', { ascending:false })
-      .limit(100)
+      // 2. Traer TODOS los comprobantes del consorcio (sin join para evitar problemas RLS)
+      const { data: comps, error } = await supabase
+        .from('con_comprobantes_proveedor')
+        .select('id, proveedor_id, tipo, numero, concepto, monto_total, saldo_pendiente, estado, fecha, fecha_vencimiento, notas')
+        .eq('consorcio_id', consorcioId)
+        .neq('estado', 'anulado')
+        .order('fecha', { ascending:false })
+        .limit(200)
 
-    const disponibles = (comps||[]).filter(c => !idsYaImportados.includes(c.id))
-    setCompImportables(disponibles)
-    // Pre-seleccionar los pendientes/parciales automáticamente
-    const presel = {}
-    disponibles.forEach(c => {
-      if (c.estado === 'pendiente' || c.estado === 'pagado_parcial') presel[c.id] = true
-    })
-    setCompSeleccionados(presel)
+      if (error) { console.error('Error cargando comprobantes:', error); setCargandoComps(false); return }
+
+      // 3. Filtrar los no importados
+      const disponibles = (comps||[]).filter(c => !idsYaImportados.has(c.id))
+
+      // 4. Resolver nombres de proveedores en batch
+      const provIds = [...new Set(disponibles.map(c=>c.proveedor_id).filter(Boolean))]
+      let provMap = {}
+      if (provIds.length > 0) {
+        const { data: provs } = await supabase.from('con_proveedores')
+          .select('id, razon_social, rubro').in('id', provIds)
+        ;(provs||[]).forEach(p => { provMap[p.id] = p })
+      }
+      const enriquecidos = disponibles.map(c => ({
+        ...c,
+        proveedor_nombre_resuelto: provMap[c.proveedor_id]?.razon_social || null,
+        proveedor_rubro: provMap[c.proveedor_id]?.rubro || null,
+      }))
+      setCompImportables(enriquecidos)
+
+      // 5. Pre-seleccionar pendientes y parciales automáticamente
+      const presel = {}
+      enriquecidos.forEach(c => {
+        if (c.estado === 'pendiente' || c.estado === 'pagado_parcial') presel[c.id] = true
+      })
+      setCompSeleccionados(presel)
+    } catch(e) {
+      console.error('cargarComprobantesImportables:', e)
+    }
     setCargandoComps(false)
   }
 
   // Importar comprobantes seleccionados como gastos del período
   async function importarComprobantes() {
     const seleccionados = compImportables.filter(c => compSeleccionados[c.id])
-    if (seleccionados.length === 0) return setMsg({ tipo:'warn', texto:'Seleccioná al menos un comprobante' })
+    if (seleccionados.length === 0) return setMsg({ tipo:'warn', texto:'Seleccioná al menos un comprobante para importar' })
 
+    // Mapa rubro → categoría del plan de cuentas de GASP
     const CAT_MAP = {
       'limpieza': 'gastos_comunes', 'electricidad': 'electricidad',
       'gas': 'gas', 'ascensores': 'mantenimiento', 'seguros': 'seguros',
       'administración': 'honorarios_admin', 'plomería': 'mantenimiento',
-      'jardinería': 'gastos_comunes', 'otros': 'varios'
+      'jardinería': 'gastos_comunes', 'pintura': 'mantenimiento',
+      'otros': 'varios', 'servicios_publicos': 'servicios_publicos',
     }
 
-    const inserts = seleccionados.map(c => ({
-      id: `GAS-IMP-${c.id}`,
-      admin_id: session.user.id,
-      consorcio_id: consorcioId,
-      expensa_id: expSel.id,
-      comprobante_id: c.id, // referencia al comprobante original
-      fecha: c.fecha || hoy,
-      concepto: c.concepto || `${c.tipo} ${c.numero||''}`.trim(),
-      categoria: CAT_MAP[c.con_proveedores?.rubro] || 'varios',
-      proveedor_nombre: c.con_proveedores?.razon_social || null,
-      proveedor_id: c.proveedor_id || null,
-      monto: parseFloat(c.monto_total) || 0,
-    }))
+    // Resolver nombres de proveedores en batch (sin join para evitar RLS)
+    const provIds = [...new Set(seleccionados.map(c=>c.proveedor_id).filter(Boolean))]
+    let provMap = {}
+    if (provIds.length > 0) {
+      const { data: provs } = await supabase.from('con_proveedores')
+        .select('id, razon_social, rubro').in('id', provIds)
+      ;(provs||[]).forEach(p => { provMap[p.id] = p })
+    }
+
+    const inserts = seleccionados.map(c => {
+      const prov = provMap[c.proveedor_id]
+      return {
+        id: `GAS-IMP-${c.id}`,
+        admin_id: session.user.id,
+        consorcio_id: consorcioId,
+        expensa_id: expSel.id,
+        comprobante_id: c.id,
+        proveedor_id: c.proveedor_id || null,
+        fecha: c.fecha || hoy,
+        concepto: c.concepto || `${c.tipo||''} ${c.numero||''}`.trim() || 'Sin concepto',
+        categoria: CAT_MAP[prov?.rubro || c.proveedor_rubro] || 'varios',
+        proveedor_nombre: prov?.razon_social || c.proveedor_nombre_resuelto || null,
+        monto: parseFloat(c.monto_total) || 0,
+      }
+    })
 
     const { error } = await supabase.from('con_gastos').upsert(inserts, { onConflict:'id' })
-    if (error) return setMsg({ tipo:'error', texto: error.message })
+    if (error) return setMsg({ tipo:'error', texto: 'Error al importar: ' + error.message })
 
     await cargarGastos(expSel.id)
     await cargarComprobantesImportables(expSel.id)
-    setMsg({ tipo:'ok', texto:`✓ ${seleccionados.length} comprobante${seleccionados.length>1?'s':''} importado${seleccionados.length>1?'s':''} como gastos del período` })
+    const tot = seleccionados.reduce((a,c)=>a+parseFloat(c.monto_total||0),0)
+    setMsg({ tipo:'ok', texto:`✓ ${seleccionados.length} comprobante${seleccionados.length>1?'s':''} importado${seleccionados.length>1?'s':''} — Total: ${fmt(tot)}` })
   }
 
   async function cargarPlan() {
@@ -979,7 +1017,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
               <div>
                 <div style={{ fontWeight:700, color:AZ, fontSize:13 }}>📥 Importar desde Comprobantes de proveedores</div>
                 <div style={{ fontSize:11, color:GR, marginTop:2 }}>
-                  Seleccioná los comprobantes cargados en el sistema para incluirlos como gastos del período
+                  Seleccioná los comprobantes del consorcio para incluirlos como gastos de este período
                 </div>
               </div>
               <Btn small color={AZ} onClick={()=>cargarComprobantesImportables(expSel.id)} disabled={cargandoComps}>
@@ -991,65 +1029,89 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
               <div style={{ textAlign:'center', padding:16, color:GR, fontSize:12 }}>Cargando comprobantes...</div>
             ) : compImportables.length === 0 ? (
               <div style={{ padding:'10px 12px', background:'#fff', borderRadius:8, fontSize:12, color:GR, textAlign:'center' }}>
-                ✅ No hay comprobantes pendientes de importar en este consorcio.
-                <span style={{ display:'block', marginTop:4, fontSize:11 }}>
-                  Cargue facturas en <strong>Proveedores → Comprobantes</strong> para verlos aquí.
+                ✅ Todos los comprobantes del consorcio ya fueron importados a este período.
+                <br/><span style={{ fontSize:11, marginTop:4, display:'block' }}>
+                  Para agregar gastos sin comprobante use <strong>+ Gasto manual</strong>.
                 </span>
               </div>
             ) : (
               <>
-                {/* Leyenda */}
-                <div style={{ display:'flex', gap:12, marginBottom:8, fontSize:11, color:GR }}>
-                  <span>
-                    <input type="checkbox" checked={Object.keys(compSeleccionados).length===compImportables.length&&compImportables.length>0}
+                {/* Leyenda estados */}
+                <div style={{ display:'flex', gap:12, marginBottom:8, fontSize:11, flexWrap:'wrap' }}>
+                  <label style={{ display:'flex', alignItems:'center', gap:5, cursor:'pointer' }}>
+                    <input type="checkbox"
+                      checked={compImportables.length > 0 && compImportables.every(c=>compSeleccionados[c.id])}
                       onChange={e=>{
                         if(e.target.checked){const s={};compImportables.forEach(c=>s[c.id]=true);setCompSeleccionados(s)}
                         else setCompSeleccionados({})
-                      }} style={{ marginRight:4 }} />
-                    Seleccionar todos
-                  </span>
-                  <span style={{ color:AM }}>🟡 Los pre-seleccionados son los pendientes de pago</span>
+                      }} />
+                    <span style={{ fontWeight:600 }}>Seleccionar todos</span>
+                  </label>
+                  <span style={{ color:AM }}>🟡 Pre-seleccionados = pendientes de pago</span>
+                  <span style={{ color:VD }}>🟢 Pagados = se incluyen como gasto del período igual</span>
                 </div>
-                <div style={{ maxHeight:240, overflowY:'auto', display:'flex', flexDirection:'column', gap:4, marginBottom:10 }}>
+                <div style={{ maxHeight:260, overflowY:'auto', display:'flex', flexDirection:'column', gap:4, marginBottom:10 }}>
                   {compImportables.map(c=>{
-                    const prov = c.con_proveedores
+                    // Resolver nombre del proveedor desde la prop proveedores que ya tiene el componente
+                    // (proveedores no se pasa como prop acá, usamos consorcioId directamente)
                     const selec = !!compSeleccionados[c.id]
-                    const vencido = c.fecha_vencimiento && c.fecha_vencimiento < hoy
+                    const vencido = c.fecha_vencimiento && c.fecha_vencimiento < hoy && c.estado !== 'pagado'
+                    const estadoColor = {
+                      pendiente: { c:AM, bg:'#fef9c3' },
+                      pagado_parcial: { c:'#7c3aed', bg:'#ede9fe' },
+                      pagado: { c:VD, bg:'#dcfce7' },
+                    }[c.estado] || { c:GR, bg:'#f3f4f6' }
                     return (
                       <div key={c.id} onClick={()=>setCompSeleccionados(s=>({...s,[c.id]:!s[c.id]}))}
-                        style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 10px',
+                        style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px',
                           background: selec?'#dbeafe':'#fff', borderRadius:7, cursor:'pointer',
-                          border: selec?'1px solid #93c5fd':'1px solid #e5e7eb',
-                          transition:'all 0.1s' }}>
-                        <input type="checkbox" checked={selec} readOnly style={{ flexShrink:0 }} />
+                          border: selec?'1.5px solid #93c5fd':'1px solid #e5e7eb',
+                          transition:'background 0.1s, border 0.1s' }}>
+                        <input type="checkbox" checked={selec} readOnly style={{ flexShrink:0, cursor:'pointer' }} />
                         <div style={{ flex:1, minWidth:0 }}>
                           <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
-                            <span style={{ fontWeight:600, fontSize:12 }}>{prov?.razon_social||'—'}</span>
-                            <span style={{ fontSize:11, color:GR, textTransform:'capitalize' }}>{c.tipo} {c.numero||''}</span>
+                            <span style={{ fontWeight:700, fontSize:12 }}>{c.proveedor_nombre_resuelto || c.proveedor_id}</span>
+                            <span style={{ fontSize:10, color:GR, textTransform:'capitalize', background:'#f3f4f6', borderRadius:3, padding:'1px 5px' }}>
+                              {c.tipo} {c.numero||''}
+                            </span>
                             {vencido && <span style={{ fontSize:10, color:RJ, fontWeight:700 }}>⚠ VENCIDO</span>}
                           </div>
-                          <div style={{ fontSize:11, color:'#374151', marginTop:1 }}>{c.concepto}</div>
-                          {c.fecha && <div style={{ fontSize:10, color:GR }}>Fecha: {new Date(c.fecha+'T00:00:00').toLocaleDateString('es-AR')}</div>}
+                          <div style={{ fontSize:12, color:'#374151', marginTop:1 }}>{c.concepto}</div>
+                          {c.fecha && <div style={{ fontSize:10, color:GR }}>
+                            {new Date(c.fecha+'T00:00:00').toLocaleDateString('es-AR')}
+                            {c.fecha_vencimiento ? ` · Vto: ${new Date(c.fecha_vencimiento+'T00:00:00').toLocaleDateString('es-AR')}` : ''}
+                          </div>}
                         </div>
                         <div style={{ textAlign:'right', flexShrink:0 }}>
-                          <div style={{ fontWeight:800, fontSize:13, color:selec?AZ:GR }}>{fmt(c.monto_total)}</div>
-                          <div style={{ fontSize:9, color: c.estado==='pendiente'?AM:c.estado==='pagado'?VD:'#7c3aed',
-                            fontWeight:600, textTransform:'uppercase' }}>{c.estado.replace('_',' ')}</div>
+                          <div style={{ fontWeight:800, fontSize:13, color:selec?AZ:'#374151' }}>
+                            {fmt(c.monto_total)}
+                          </div>
+                          <div style={{ fontSize:9, color:estadoColor.c, fontWeight:700,
+                            background:estadoColor.bg, borderRadius:4, padding:'1px 5px', marginTop:2 }}>
+                            {c.estado==='pagado_parcial'?'PARCIAL':c.estado.toUpperCase()}
+                          </div>
                         </div>
                       </div>
                     )
                   })}
                 </div>
-                <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                  <Btn color={AZ} onClick={importarComprobantes}
-                    disabled={Object.values(compSeleccionados).filter(Boolean).length===0}>
-                    📥 Importar {Object.values(compSeleccionados).filter(Boolean).length} seleccionado{Object.values(compSeleccionados).filter(Boolean).length!==1?'s':''}
-                    {' — '}{fmt(compImportables.filter(c=>compSeleccionados[c.id]).reduce((a,c)=>a+parseFloat(c.monto_total||0),0))}
-                  </Btn>
-                  <span style={{ fontSize:11, color:GR }}>
-                    {Object.values(compSeleccionados).filter(Boolean).length} de {compImportables.length} comprobantes
-                  </span>
-                </div>
+                {/* Botón importar con total */}
+                {Object.values(compSeleccionados).filter(Boolean).length > 0 && (
+                  <div style={{ display:'flex', gap:8, alignItems:'center', padding:'8px 0', borderTop:'1px solid #bae6fd' }}>
+                    <Btn color={AZ} onClick={importarComprobantes}>
+                      📥 Importar {Object.values(compSeleccionados).filter(Boolean).length} comprobante{Object.values(compSeleccionados).filter(Boolean).length!==1?'s':''}
+                      {' · '}{fmt(compImportables.filter(c=>compSeleccionados[c.id]).reduce((a,c)=>a+parseFloat(c.monto_total||0),0))}
+                    </Btn>
+                    <span style={{ fontSize:11, color:GR }}>
+                      {Object.values(compSeleccionados).filter(Boolean).length} de {compImportables.length} seleccionado{Object.values(compSeleccionados).filter(Boolean).length!==1?'s':''}
+                    </span>
+                  </div>
+                )}
+                {Object.values(compSeleccionados).filter(Boolean).length === 0 && (
+                  <div style={{ fontSize:11, color:GR, padding:'6px 0' }}>
+                    Hacé clic en un comprobante para seleccionarlo · {compImportables.length} comprobante{compImportables.length!==1?'s':''} disponible{compImportables.length!==1?'s':''}
+                  </div>
+                )}
               </>
             )}
           </Card>
