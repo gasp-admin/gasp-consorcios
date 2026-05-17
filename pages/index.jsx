@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260517-liq-pdf-v2-notas'
+const BUILD_VERSION = '20260517-liq-pdf-v3-grupos-deuda'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -807,6 +807,13 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       const antUF = saldosAnt[u.id] || { saldo: 0, pagos: 0 }
       const saldo_anterior = antUF.saldo
       const pagos_anterior = antUF.pagos
+      const deuda = Math.max(0, saldo_anterior) // deuda pendiente del período anterior
+      const interes_mora = 0 // por ahora siempre 0 (futuro: calcular si corresponde)
+
+      // TOTAL a pagar = expensa + redondeo + deuda anterior + intereses
+      const monto_total = expensaBase + centavosUF + deuda + interes_mora
+      // 2do vencimiento aplica recargo sobre la expensa del período, no sobre la deuda anterior
+      const monto_vto2 = Math.round((expensaBase + centavosUF) * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100 + deuda + interes_mora
 
       return {
         unidad_id: u.id,
@@ -816,13 +823,14 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         propietario: cp?.apellido_nombre || '—',
         coef, pct: pct.toFixed(4),
         expensa_base: expensaBase,
-        redondeo,
-        monto,       // = expensaBase + redondeo (con centavos UF)
+        redondeo: centavosUF,
+        monto: monto_total,       // TOTAL = expensa + redondeo + deuda + interés
         monto_vto2,
         vto1, vto2,
         saldo_anterior,
         pagos_anterior,
-        deuda: Math.max(0, saldo_anterior), // deuda de período anterior
+        deuda,
+        interes_mora,
       }
     })
 
@@ -860,7 +868,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     const per = periodoLabel(expSel?.periodo)
     const fmtN = n => (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
 
-    // Fechas de vencimiento correctas
+    // Fechas correctas
     const [yy, mm] = (expSel?.periodo || '').split('-')
     const mesActual  = parseInt(mm) || new Date().getMonth() + 1
     const anioActual = parseInt(yy) || new Date().getFullYear()
@@ -869,10 +877,8 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     const mesAnt     = mesActual === 1  ? 12 : mesActual - 1
     const anioAnt    = mesActual === 1  ? anioActual - 1 : anioActual
     const fechaVto1  = `${String(config.vto1_dia||10).padStart(2,'0')}/${String(mesVto).padStart(2,'0')}/${anioVto}`
-    const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
-    // ── Gastos agrupados por rubro (igual al PDF de Adm. Global) ────────────
-    // Usar RUBROS_PDF si existe, sino agrupar por categoría
+    // ── Gastos agrupados por rubro ────────────────────────────────────────────
     const RUBRO_LABELS = {
       sueldos:'1 SUELDOS Y CARGAS SOCIALES', cargas_sociales:'1 SUELDOS Y CARGAS SOCIALES',
       electricidad:'2 SERVICIOS PÚBLICOS', agua:'2 SERVICIOS PÚBLICOS', gas:'2 SERVICIOS PÚBLICOS',
@@ -904,38 +910,48 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
             <td style="text-align:right;padding:2px 6px;font-size:7.5pt;white-space:nowrap">${fmtN(g.monto)}</td>
           </tr>`
         ).join('')
-        return `<tr style="background:#dce8f5"><td style="padding:3px 6px;font-weight:700;font-size:8pt;text-transform:uppercase" colspan="1">${label}</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:8pt">EXPENSAS A</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:8pt">Total</td></tr>${filas}<tr style="background:#1A3FA0;color:#fff"><td style="padding:3px 6px;font-weight:700;font-size:8pt">TOTAL RUBRO ${pct}%</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:7.5pt;white-space:nowrap">${fmtN(data.total)}</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:7.5pt;white-space:nowrap">${fmtN(data.total)}</td></tr>`
+        return `<tr style="background:#dce8f5"><td style="padding:3px 6px;font-weight:700;font-size:8pt;text-transform:uppercase">${label}</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:8pt">EXPENSAS A</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:8pt">Total</td></tr>${filas}<tr style="background:#1A3FA0;color:#fff"><td style="padding:3px 6px;font-weight:700;font-size:8pt">TOTAL RUBRO ${pct}%</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:7.5pt;white-space:nowrap">${fmtN(data.total)}</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:7.5pt;white-space:nowrap">${fmtN(data.total)}</td></tr>`
       }).join('')
 
-    // ── Estado financiero — cálculo correcto ─────────────────────────────────
-    // saldoAnterior = suma de lo que debían (saldo_anterior + monto liq anterior - lo que pagaron)
-    // cobradoAnt = suma de pagos del período anterior
+    // ── Estado financiero ─────────────────────────────────────────────────────
+    // saldoAnterior = suma de lo que debían de período anterior (ya calculado en distribucion)
     const saldoAnterior = distribucion.reduce((a,d)=>a+(parseFloat(d.saldo_anterior)||0),0)
     const cobradoAnt    = distribucion.reduce((a,d)=>a+(parseFloat(d.pagos_anterior)||0),0)
     const saldoFinal    = saldoAnterior + cobradoAnt - totalGastosTotal
 
-    // ── Prorrateo — tabla adaptada a A4 landscape ───────────────────────────
+    // ── Prorrateo — tabla portrait con columnas compactas ────────────────────
+    // TOTAL por UF = EXPENSA + REDONDEO + DEUDA + INTERÉS
     const filasProrrateoPrev = distribucion.map((d,idx) => {
-      const bgRow = idx % 2 === 0 ? '#fff' : '#f4f8fc'
-      return `<tr style="border-bottom:1px solid #e0e8ef;background:${bgRow}">
-        <td style="padding:2px 5px;text-align:center;font-weight:700;font-size:7.5pt">${d.numero_uf}</td>
-        <td style="padding:2px 5px;font-size:7.5pt">${String(d.numero||'').replace(/</g,'&lt;')}</td>
-        <td style="padding:2px 5px;font-size:7.5pt">${String(d.propietario||'').replace(/</g,'&lt;')}</td>
-        <td style="text-align:right;padding:2px 5px;font-size:7.5pt;color:${d.saldo_anterior>0?'#b91c1c':'#6b7280'}">${fmtN(d.saldo_anterior)}</td>
-        <td style="text-align:right;padding:2px 5px;font-size:7.5pt">${fmtN(d.pagos_anterior)}</td>
-        <td style="text-align:right;padding:2px 5px;font-size:7.5pt;font-weight:${d.deuda>0?700:400};color:${d.deuda>0?'#b91c1c':'#374151'}">${fmtN(d.deuda)}</td>
-        <td style="text-align:right;padding:2px 5px;font-size:7.5pt">0,00</td>
-        <td style="text-align:right;padding:2px 5px;font-size:7.5pt">${d.pct}%</td>
-        <td style="text-align:right;padding:2px 5px;font-size:7.5pt;white-space:nowrap">${fmtN(d.expensa_base)}</td>
-        <td style="text-align:right;padding:2px 5px;font-size:7pt;color:#9ca3af">${fmtN(d.redondeo)}</td>
-        <td style="text-align:right;padding:2px 5px;font-size:8pt;font-weight:700;color:#1A3FA0;white-space:nowrap">${fmtN(d.monto)}</td>
-        <td style="text-align:center;padding:2px 5px;font-size:7.5pt">${d.numero_uf}</td>
+      const bgRow = idx % 2 === 0 ? '#fff' : '#f0f6fb'
+      const totalUF = (parseFloat(d.expensa_base)||0) + (parseFloat(d.redondeo)||0) + (parseFloat(d.deuda)||0) + (parseFloat(d.interes_mora)||0)
+      return `<tr style="border-bottom:1px solid #d8e8f0;background:${bgRow}">
+        <td style="padding:2px 4px;text-align:center;font-weight:700;font-size:7pt">${d.numero_uf}</td>
+        <td style="padding:2px 4px;font-size:7pt">${String(d.numero||'').replace(/</g,'&lt;')}</td>
+        <td style="padding:2px 4px;font-size:7pt;max-width:90px;overflow:hidden">${String(d.propietario||'').replace(/</g,'&lt;')}</td>
+        <td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap;color:${d.saldo_anterior>0?'#b91c1c':'#374151'}">${fmtN(d.saldo_anterior)}</td>
+        <td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${fmtN(d.pagos_anterior)}</td>
+        <td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap;font-weight:${d.deuda>0?700:400};color:${d.deuda>0?'#b91c1c':'#374151'}">${fmtN(d.deuda)}</td>
+        <td style="text-align:right;padding:2px 4px;font-size:7pt">${fmtN(d.interes_mora||0)}</td>
+        <td style="text-align:right;padding:2px 4px;font-size:7pt">${d.pct}%</td>
+        <td style="text-align:right;padding:2px 4px;font-size:7.5pt;white-space:nowrap;font-weight:600">${fmtN(d.expensa_base)}</td>
+        <td style="text-align:right;padding:2px 4px;font-size:6.5pt;color:#9ca3af">${fmtN(d.redondeo)}</td>
+        <td style="text-align:right;padding:2px 4px;font-size:8pt;font-weight:800;color:#1A3FA0;white-space:nowrap">${fmtN(totalUF)}</td>
+        <td style="text-align:center;padding:2px 4px;font-size:7pt">${d.numero_uf}</td>
       </tr>`
     }).join('')
 
-    // ── Notas del período (editables) ────────────────────────────────────────
+    // Totales del prorrateo
+    const totSaldoAnt = distribucion.reduce((a,d)=>a+d.saldo_anterior,0)
+    const totPagosAnt = distribucion.reduce((a,d)=>a+d.pagos_anterior,0)
+    const totDeuda    = distribucion.reduce((a,d)=>a+d.deuda,0)
+    const totInteres  = distribucion.reduce((a,d)=>a+(d.interes_mora||0),0)
+    const totExpensa  = distribucion.reduce((a,d)=>a+d.expensa_base,0)
+    const totRedondeo = distribucion.reduce((a,d)=>a+d.redondeo,0)
+    const totTotal    = distribucion.reduce((a,d)=>a+d.expensa_base+d.redondeo+d.deuda+(d.interes_mora||0),0)
+
+    // ── Notas del período ────────────────────────────────────────────────────
     const notasText = (notasPeriodo || '').replace(/</g,'&lt;').replace(/\n/g,'<br/>')
-    const notasDefecto = `COMUNICAMOS A LOS SRES PROPIETARIOS/INQUILINOS QUE LOS PAGOS QUE NO SE REALICEN ANTES DE LOS DIAS 28 DE CADA MES, NO PODRAN SER ACREDITADOS EN TIEMPO Y FORMA POR CUESTIONES OPERATIVAS.<br/><br/>SOLICITAMOS CANCELAR LAS EXPENSAS ANTES DE LA MENCIONADA FECHA, EVITANDO RECARGOS O INCONVENIENTES FUTUROS.<br/><br/><strong>ATENCION OFICINA</strong><br/>UBICACION: LENGUADO N&deg; 1313 LOCAL 3 (ENTRE SHAW Y ENEAS) &nbsp; HORARIO: LUNES A SABADOS DE 9:00 A 13:00 HORAS &nbsp; TELEFONOS: 02267-516386 / 2267444034<br/><br/>RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS EN LAS CUENTAS CORRIENTES INFORMADAS RESPETANDO LOS IMPORTES CON CENTAVOS, PARA UNA CORRECTA IDENTIFICACION Y EVITAR ERRORES EN LAS IMPUTACIONES.<br/><br/>EN CASO DE TRANSFERIR O DEPOSITAR IMPORTES DISTINTOS A LOS INFORMADOS EN LA LIQUIDACION, DEBERAN ENVIAR AVISO CON EL COMPROBANTE PARA UNA CORRECTA IDENTIFICACION Y ACREDITACION A LA UNIDAD CORRESPONDIENTE.<br/><br/>LOS PAGOS QUE SE EFECTUEN UTILIZANDO EL SISTEMA DE LA PLATAFORMA DE PAGOS, SE IMPUTAN AUTOMATICAMENTE EN LA CUENTA CORRIENTE DEL CONSORCIO EN EL BANCO Y A LAS UNIDADES, POR LO QUE NO TIENE QUE COMUNICAR EL PAGO.`
+    const notasDefecto = `COMUNICAMOS A LOS SRES PROPIETARIOS/INQUILINOS QUE LOS PAGOS QUE NO SE REALICEN ANTES DE LOS DIAS 28 DE CADA MES, NO PODRAN SER ACREDITADOS EN TIEMPO Y FORMA POR CUESTIONES OPERATIVAS.<br/><br/>SOLICITAMOS CANCELAR LAS EXPENSAS ANTES DE LA MENCIONADA FECHA, EVITANDO RECARGOS O INCONVENIENTES FUTUROS.<br/><br/><strong>ATENCION OFICINA</strong><br/>UBICACION: LENGUADO N&deg; 1313 LOCAL 3 (ENTRE SHAW Y ENEAS) &nbsp;&nbsp; HORARIO: LUNES A SABADOS DE 9:00 A 13:00 HORAS<br/>TELEFONOS: FIJO 02267-516386 / CELULAR 2267444034<br/><br/>RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS EN LAS CUENTAS CORRIENTES INFORMADAS RESPETANDO LOS IMPORTES CON CENTAVOS, PARA UNA CORRECTA IDENTIFICACION Y EVITAR ERRORES EN LAS IMPUTACIONES.<br/>TAMBIEN PUEDEN REALIZAR DEPOSITOS EN EFECTIVO EN LA CUENTA BANCARIA DEL CONSORCIO.<br/><br/>EN CASO DE TRANSFERIR O DEPOSITAR IMPORTES DISTINTOS A LOS INFORMADOS EN LA LIQUIDACION, DEBERAN ENVIAR AVISO CON EL COMPROBANTE PARA UNA CORRECTA IDENTIFICACION Y ACREDITACION A LA UNIDAD CORRESPONDIENTE.<br/><br/>LOS PAGOS QUE SE EFECTUEN UTILIZANDO EL SISTEMA DE LA PLATAFORMA DE PAGOS, SE IMPUTAN AUTOMATICAMENTE EN LA CUENTA CORRIENTE DEL CONSORCIO EN EL BANCO Y A LAS UNIDADES, POR LO QUE NO TIENE QUE COMUNICAR EL PAGO.`
     const notasContenido = notasText || notasDefecto
 
     // ── CBU datos de pago ────────────────────────────────────────────────────
@@ -957,73 +973,69 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       ? deudaUFs.map(d=>`<tr style="border-bottom:1px solid #fecaca"><td style="padding:3px 8px;text-align:center">${d.numero_uf}</td><td style="padding:3px 8px">${String(d.numero||'').replace(/</g,'&lt;')}</td><td style="padding:3px 8px">${String(d.propietario||'').replace(/</g,'&lt;')}</td><td style="text-align:right;padding:3px 8px;font-weight:700">${fmtN(d.deuda)}</td><td style="text-align:right;padding:3px 8px;font-weight:700">${fmtN(d.deuda)}</td></tr>`).join('')
       : '<tr><td colspan="5" style="text-align:center;padding:6px;color:#6b7280">Sin unidades con deuda</td></tr>'
 
-    // ── HTML COMPLETO ──────────────────────────────────────────────────────────
+    // ── Logo de la administración (URL pública o SVG inline) ─────────────────
+    const logoHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:110px;text-align:center;padding:4px 8px">
+      <svg width="52" height="40" viewBox="0 0 52 40" xmlns="http://www.w3.org/2000/svg">
+        <rect width="52" height="40" rx="3" fill="#1A3FA0"/>
+        <text x="26" y="18" text-anchor="middle" fill="#fff" font-family="Arial" font-weight="900" font-size="11">GASP</text>
+        <text x="26" y="27" text-anchor="middle" fill="#a0c4ff" font-family="Arial" font-size="5.5">Administración</text>
+        <text x="26" y="34" text-anchor="middle" fill="#a0c4ff" font-family="Arial" font-size="5.5">de Consorcios</text>
+      </svg>
+      <div style="font-size:6pt;color:#1A3FA0;font-weight:700;margin-top:2px">Pinamar</div>
+    </div>`
+
+    // ── HTML COMPLETO — todo portrait ─────────────────────────────────────────
     const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Liquidación ${per} — ${(consorcioActivo?.nombre||'').replace(/</g,'&lt;')}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:Arial,Helvetica,sans-serif;font-size:9pt;color:#111;background:#fff}
-  /* Páginas 1 y 2: orientación portrait */
-  .page-portrait{width:210mm;min-height:297mm;padding:10mm 12mm 9mm;page-break-after:always;position:relative}
-  /* Página 3: orientación landscape */
-  .page-landscape{width:297mm;min-height:210mm;padding:7mm 10mm 7mm;page-break-after:always;position:relative}
-  .page-portrait:last-child,.page-landscape:last-child{page-break-after:auto}
-  @page portrait{size:A4 portrait;margin:0}
-  @page landscape{size:A4 landscape;margin:0}
-  @media print{
-    body{margin:0}
-    .no-print{display:none!important}
-    .page-portrait{page:portrait}
-    .page-landscape{page:landscape}
-  }
+  .page{width:210mm;min-height:297mm;padding:10mm 11mm 8mm;page-break-after:always;position:relative}
+  .page:last-child{page-break-after:auto}
+  @page{size:A4 portrait;margin:0}
+  @media print{body{margin:0}.no-print{display:none!important}}
   /* Header */
-  .hdr{display:flex;align-items:flex-start;gap:10px;border-bottom:3px solid #1A3FA0;padding-bottom:7px;margin-bottom:7px}
-  .logo-box{background:#1A3FA0;color:#fff;font-weight:700;border-radius:5px;padding:6px 10px;min-width:110px;text-align:center;line-height:1.5}
+  .hdr{display:flex;align-items:flex-start;gap:10px;border-bottom:3px solid #1A3FA0;padding-bottom:6px;margin-bottom:6px}
   .hdr-right{flex:1}
-  /* Título liquidación */
-  .titulo-liq{background:#1A3FA0;color:#fff;font-weight:700;font-size:9.5pt;text-align:center;padding:4px 8px;margin-bottom:6px}
-  /* Datos adm/consorcio */
-  .datos-row{display:flex;gap:10px;margin-bottom:7px}
-  .datos-col{flex:1;border:1px solid #ccc;border-radius:4px;padding:5px 8px}
-  .datos-col h4{color:#1A3FA0;font-size:7.5pt;text-transform:uppercase;border-bottom:1px solid #1A3FA0;margin-bottom:3px;padding-bottom:2px;font-weight:700}
-  .datos-col p{font-size:8pt;line-height:1.55}
+  /* Título */
+  .titulo-liq{background:#1A3FA0;color:#fff;font-weight:700;font-size:9pt;text-align:center;padding:4px 8px;margin-bottom:5px}
+  .subtitulo-liq{background:#2563eb;color:#fff;font-weight:700;font-size:8pt;text-align:center;padding:2px 8px;margin-bottom:6px}
+  /* Datos col */
+  .datos-row{display:flex;gap:8px;margin-bottom:6px}
+  .datos-col{flex:1;border:1px solid #ccc;border-radius:3px;padding:4px 7px}
+  .datos-col h4{color:#1A3FA0;font-size:7pt;text-transform:uppercase;border-bottom:1px solid #1A3FA0;margin-bottom:3px;padding-bottom:1px;font-weight:700}
+  .datos-col p{font-size:7.5pt;line-height:1.5}
   /* Secciones */
-  .sec-title{background:#1A3FA0;color:#fff;font-weight:700;font-size:8pt;padding:4px 8px;text-transform:uppercase;margin:7px 0 0}
+  .sec-title{background:#1A3FA0;color:#fff;font-weight:700;font-size:7.5pt;padding:3px 7px;text-transform:uppercase;margin:6px 0 0}
   /* Tablas */
   table{width:100%;border-collapse:collapse}
-  th{background:#2e4057;color:#fff;padding:3px 6px;font-size:7.5pt;white-space:nowrap}
+  th{background:#2e4057;color:#fff;padding:3px 5px;font-size:7pt;white-space:nowrap}
   th.r{text-align:right}
-  td{font-size:8pt}
-  /* Footer de página */
-  .footer{border-top:1px solid #ccc;margin-top:8px;padding-top:3px;font-size:6.5pt;color:#666;display:flex;justify-content:space-between}
+  td{font-size:7.5pt}
   /* Estado financiero */
-  .ef-body td{padding:2px 8px;border-bottom:1px solid #eee}
-  .ef-final td{padding:4px 8px;background:#1A3FA0;color:#fff;font-weight:700;font-size:9pt}
-  .indent{padding-left:16px!important;font-style:italic}
+  .ef-body td{padding:2px 7px;border-bottom:1px solid #eee}
+  .ef-final td{padding:4px 7px;background:#1A3FA0;color:#fff;font-weight:700;font-size:8.5pt}
+  .indent{padding-left:14px!important;font-style:italic}
+  /* Footer */
+  .footer{position:absolute;bottom:6mm;left:11mm;right:11mm;border-top:1px solid #ccc;padding-top:2px;font-size:6pt;color:#666;display:flex;justify-content:space-between}
   /* Botón imprimir */
-  .btn-imp{display:block;margin:14px auto;padding:10px 28px;background:#1A3FA0;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-family:Arial,sans-serif}
+  .btn-imp{display:block;margin:12px auto;padding:9px 24px;background:#1A3FA0;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:Arial}
 </style>
 </head>
 <body>
 
 <button class="btn-imp no-print" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
 
-<!-- ══ PÁGINA 1: GASTOS + ESTADO FINANCIERO (portrait) ══ -->
-<div class="page-portrait">
-  <!-- Header -->
+<!-- ══ PÁGINA 1: GASTOS + ESTADO FINANCIERO ══ -->
+<div class="page">
   <div class="hdr">
-    <div class="logo-box">
-      <div style="font-size:12pt;font-weight:900">GASP</div>
-      <div style="font-size:8pt">Administración</div>
-      <div style="font-size:8pt">de Consorcios</div>
-      <div style="font-size:7pt">Pinamar</div>
-    </div>
+    ${logoHTML}
     <div class="hdr-right">
-      <div class="titulo-liq">EXPENSAS PROVINCIA DE BUENOS AIRES Ley 14.701 — LIQUIDACIÓN DE MES: ${expSel?.periodo||''}</div>
+      <div class="titulo-liq">EXPENSAS PROVINCIA DE BUENOS AIRES Ley 14.701</div>
+      <div class="subtitulo-liq">EXPENSAS - Liquidaci&oacute;n de mes: ${expSel?.periodo||''}</div>
       <div class="datos-row">
         <div class="datos-col">
           <h4>Administración</h4>
@@ -1036,8 +1048,8 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         <div class="datos-col">
           <h4>Consorcio</h4>
           <p><strong>${(consorcioActivo?.nombre||'').replace(/</g,'&lt;')}</strong><br/>
-          CUIT: ${consorcioActivo?.cuit||'—'}<br/>
-          Clave SUTERH: ${consorcioActivo?.clave_suterh||'—'}<br/>
+          CUIT: ${consorcioActivo?.cuit||''}<br/>
+          Clave SUTERH: ${consorcioActivo?.clave_suterh||''}<br/>
           <strong>Javier Garcia Perez</strong></p>
         </div>
       </div>
@@ -1049,9 +1061,9 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     <thead><tr><th style="text-align:left">Concepto</th><th class="r">EXPENSAS A</th><th class="r">Total</th></tr></thead>
     <tbody>${rubrosHTML}</tbody>
     <tfoot><tr style="background:#0d2b3e;color:#fff;font-weight:700">
-      <td style="padding:4px 8px;font-size:8.5pt">TOTAL &nbsp; 100,00%</td>
-      <td style="text-align:right;padding:4px 8px;font-size:8.5pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>
-      <td style="text-align:right;padding:4px 8px;font-size:8.5pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>
+      <td style="padding:3px 7px;font-size:8pt">TOTAL &nbsp; 100,00%</td>
+      <td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>
+      <td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>
     </tr></tfoot>
   </table>
 
@@ -1059,15 +1071,14 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   <table>
     <thead><tr><th style="text-align:left">CONCEPTO</th><th class="r">EXPENSAS A</th><th class="r">Total</th></tr></thead>
     <tbody class="ef-body">
-      <tr><td style="padding:2px 8px">Saldo anterior al 01/${String(mesAnt).padStart(2,'0')}/${anioAnt}</td><td style="text-align:right;padding:2px 8px;white-space:nowrap">${fmtN(saldoAnterior)}</td><td style="text-align:right;padding:2px 8px;white-space:nowrap">${fmtN(saldoAnterior)}</td></tr>
-      <tr><td class="indent" style="padding:2px 8px 2px 20px;font-style:italic">Ingresos por pago de expensas en t&eacute;rmino</td><td style="text-align:right;padding:2px 8px;white-space:nowrap">${fmtN(cobradoAnt)}</td><td style="text-align:right;padding:2px 8px;white-space:nowrap">${fmtN(cobradoAnt)}</td></tr>
-      <tr><td class="indent" style="padding:2px 8px 2px 20px;font-style:italic">Ingresos por pago de expensas adeudadas</td><td style="text-align:right;padding:2px 8px">0,00</td><td style="text-align:right;padding:2px 8px">0,00</td></tr>
-      <tr><td class="indent" style="padding:2px 8px 2px 20px;font-style:italic">Ingresos por pago de intereses</td><td style="text-align:right;padding:2px 8px">0,00</td><td style="text-align:right;padding:2px 8px">0,00</td></tr>
-      <tr><td class="indent" style="padding:2px 8px 2px 20px;font-style:italic">Egresos por pagos</td><td style="text-align:right;padding:2px 8px;white-space:nowrap">-${fmtN(totalGastosTotal)}</td><td style="text-align:right;padding:2px 8px;white-space:nowrap">-${fmtN(totalGastosTotal)}</td></tr>
+      <tr><td style="padding:2px 7px">Saldo anterior al 01/${String(mesAnt).padStart(2,'0')}/${anioAnt}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(saldoAnterior)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(saldoAnterior)}</td></tr>
+      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de expensas en t&eacute;rmino</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoAnt)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoAnt)}</td></tr>
+      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de expensas adeudadas</td><td style="text-align:right;padding:2px 7px">0,00</td><td style="text-align:right;padding:2px 7px">0,00</td></tr>
+      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de intereses</td><td style="text-align:right;padding:2px 7px">0,00</td><td style="text-align:right;padding:2px 7px">0,00</td></tr>
+      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Egresos por pagos</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">-${fmtN(totalGastosTotal)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">-${fmtN(totalGastosTotal)}</td></tr>
     </tbody>
     <tfoot><tr class="ef-final"><td>Saldo final al ${fechaVto1}</td><td style="text-align:right;white-space:nowrap">${fmtN(saldoFinal)}</td><td style="text-align:right;white-space:nowrap">${fmtN(saldoFinal)}</td></tr></tfoot>
   </table>
-
   <div class="footer">
     <span>${(consorcioActivo?.nombre||'').replace(/</g,'&lt;')} &mdash; Liquidaci&oacute;n ${per}</span>
     <span>R.P.A.C.: 83 | CUIT: ${consorcioActivo?.cuit||''} | Vto: ${fechaVto1}</span>
@@ -1075,20 +1086,19 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   </div>
 </div>
 
-<!-- ══ PÁGINA 2: NOTAS (portrait) ══ -->
-<div class="page-portrait">
+<!-- ══ PÁGINA 2: NOTAS ══ -->
+<div class="page">
   <div class="hdr">
-    <div class="logo-box">
-      <div style="font-size:12pt;font-weight:900">GASP</div>
-      <div style="font-size:8pt">Administraci&oacute;n</div>
-    </div>
+    ${logoHTML}
     <div class="hdr-right">
-      <div class="titulo-liq">NOTAS &mdash; ${(consorcioActivo?.nombre||'').replace(/</g,'&lt;')} &mdash; Liquidaci&oacute;n: ${per}</div>
+      <div class="titulo-liq">NOTAS</div>
+      <div class="subtitulo-liq">${(consorcioActivo?.nombre||'').replace(/</g,'&lt;')} &mdash; Liquidaci&oacute;n: ${per}</div>
     </div>
   </div>
 
-  <div style="border:1px solid #ccc;border-radius:4px;padding:10px 12px;font-size:8.5pt;line-height:1.9">
-    <p style="font-weight:700;margin-bottom:8px">Nota del per&iacute;odo</p>
+  <div style="background:#00796b;color:#fff;font-weight:700;font-size:8pt;padding:4px 8px;display:inline-block;border-radius:3px;margin-bottom:8px">NOTAS</div>
+  <div style="border:1px solid #ccc;border-radius:4px;padding:10px 12px;font-size:8pt;line-height:1.95">
+    <p style="font-weight:700;text-align:center;margin-bottom:8px;font-size:8.5pt">Nota del per&iacute;odo</p>
     <p style="font-weight:700;font-style:italic;margin-bottom:6px">INFORMACION IMPORTANTE</p>
     <div>${notasContenido}</div>
   </div>
@@ -1098,20 +1108,19 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   <div class="sec-title" style="margin-top:10px">UNIDADES CON DEUDA DE EXPENSAS</div>
   <table>
     <thead><tr>
-      <th style="text-align:center">U.F.</th>
-      <th>Dpto.</th>
+      <th style="text-align:center;width:40px">U.F.</th>
+      <th style="width:60px">Dpto.</th>
       <th>PROPIETARIO</th>
       <th class="r">DEUDA</th>
       <th class="r">TOTAL</th>
     </tr></thead>
     <tbody>${deudaHTML}</tbody>
     <tfoot><tr style="background:#1A3FA0;color:#fff;font-weight:700">
-      <td colspan="3" style="padding:3px 8px;text-align:right">TOTAL</td>
-      <td style="text-align:right;padding:3px 8px;white-space:nowrap">${fmtN(distribucion.reduce((a,d)=>a+d.deuda,0))}</td>
-      <td style="text-align:right;padding:3px 8px;white-space:nowrap">${fmtN(distribucion.reduce((a,d)=>a+d.deuda,0))}</td>
+      <td colspan="3" style="padding:3px 7px;text-align:right">TOTAL</td>
+      <td style="text-align:right;padding:3px 7px;white-space:nowrap">${fmtN(totDeuda)}</td>
+      <td style="text-align:right;padding:3px 7px;white-space:nowrap">${fmtN(totDeuda)}</td>
     </tr></tfoot>
   </table>
-
   <div class="footer">
     <span>${(consorcioActivo?.nombre||'').replace(/</g,'&lt;')} &mdash; Liquidaci&oacute;n ${per}</span>
     <span>R.P.A.C.: 83</span>
@@ -1119,61 +1128,54 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   </div>
 </div>
 
-<!-- ══ PÁGINA 3: PRORRATEO (landscape) ══ -->
-<div class="page-landscape">
-  <div style="display:flex;justify-content:space-between;font-size:7.5pt;margin-bottom:5px">
-    <div><strong>Administraci&oacute;n:</strong> Javier Garcia Perez &nbsp;&nbsp; <strong>Consorcio:</strong> ${(consorcioActivo?.nombre||'').replace(/</g,'&lt;')} &nbsp;&nbsp; <strong>Per&iacute;odo:</strong> ${expSel?.periodo||''}</div>
-    <div style="text-align:right"><strong>N&deg; RPA: 83</strong> &nbsp;&nbsp; <strong>CUIT Consorcio:</strong> ${consorcioActivo?.cuit||''} &nbsp;&nbsp; <strong>Vencimiento:</strong> ${fechaVto1}</div>
+<!-- ══ PÁGINA 3: ESTADO DE CUENTAS Y PRORRATEO (portrait, fuente compacta) ══ -->
+<div class="page">
+  <div style="display:flex;justify-content:space-between;font-size:7pt;margin-bottom:4px">
+    <div><strong>Administraci&oacute;n:</strong> Javier Garcia Perez &nbsp; <strong>Consorcio:</strong> ${(consorcioActivo?.nombre||'').replace(/</g,'&lt;')} &nbsp; <strong>Per&iacute;odo:</strong> ${expSel?.periodo||''}</div>
+    <div style="text-align:right"><strong>N&deg; RPA: 83</strong> &nbsp; <strong>CUIT:</strong> ${consorcioActivo?.cuit||''} &nbsp; <strong>Vencimiento:</strong> ${fechaVto1}</div>
   </div>
 
   <div class="sec-title">ESTADO DE CUENTAS Y PRORRATEO</div>
-  <table>
+  <table style="font-size:7pt">
     <thead>
-      <tr>
-        <th style="text-align:center;width:28px">U.F.</th>
-        <th style="width:40px">Dpto.</th>
-        <th style="min-width:90px">PROPIETARIO</th>
-        <th class="r" style="width:78px">SALDO ANTERIOR</th>
-        <th class="r" style="width:68px">PAGOS</th>
-        <th class="r" style="width:60px">DEUDA</th>
-        <th class="r" style="width:55px">INTERES</th>
-        <th class="r" style="width:40px">%</th>
-        <th class="r" style="width:75px">EXPENSAS A</th>
-        <th class="r" style="width:60px">RED./AJUSTES</th>
-        <th class="r" style="width:80px">TOTAL</th>
-        <th style="text-align:center;width:28px">U.F.</th>
+      <tr style="background:#2e4057;color:#fff">
+        <th style="text-align:center;padding:3px 4px;width:22px">U.F.</th>
+        <th style="padding:3px 4px;width:32px">Dpto.</th>
+        <th style="padding:3px 4px;min-width:80px">PROP.</th>
+        <th style="text-align:right;padding:3px 4px;width:68px">SALDO ANTERIOR</th>
+        <th style="text-align:right;padding:3px 4px;width:60px">PAGOS</th>
+        <th style="text-align:right;padding:3px 4px;width:56px">DEUDA</th>
+        <th style="text-align:right;padding:3px 4px;width:46px">INTERES</th>
+        <th style="text-align:right;padding:3px 4px;width:38px">%</th>
+        <th style="text-align:right;padding:3px 4px;width:66px">EXPENSAS A</th>
+        <th style="text-align:right;padding:3px 4px;width:50px">RED./AJUST.</th>
+        <th style="text-align:right;padding:3px 4px;width:70px;background:#1A3FA0">TOTAL</th>
+        <th style="text-align:center;padding:3px 4px;width:22px">U.F.</th>
       </tr>
     </thead>
     <tbody>${filasProrrateoPrev}</tbody>
     <tfoot>
       <tr style="background:#0d2b3e;color:#fff;font-weight:700">
-        <td colspan="3" style="padding:3px 6px;text-align:right;font-size:8pt">TOTAL</td>
-        <td style="text-align:right;padding:3px 6px;font-size:8pt;white-space:nowrap">${fmtN(distribucion.reduce((a,d)=>a+d.saldo_anterior,0))}</td>
-        <td style="text-align:right;padding:3px 6px;font-size:8pt;white-space:nowrap">${fmtN(distribucion.reduce((a,d)=>a+d.pagos_anterior,0))}</td>
-        <td style="text-align:right;padding:3px 6px;font-size:8pt;white-space:nowrap">${fmtN(distribucion.reduce((a,d)=>a+d.deuda,0))}</td>
-        <td style="text-align:right;padding:3px 6px;font-size:8pt">0,00</td>
-        <td style="text-align:right;padding:3px 6px;font-size:8pt">100%</td>
-        <td style="text-align:right;padding:3px 6px;font-size:8pt;white-space:nowrap">${fmtN(distribucion.reduce((a,d)=>a+d.expensa_base,0))}</td>
-        <td style="text-align:right;padding:3px 6px;font-size:8pt;white-space:nowrap">${fmtN(distribucion.reduce((a,d)=>a+d.redondeo,0))}</td>
-        <td style="text-align:right;padding:3px 6px;font-size:9pt;white-space:nowrap">${fmtN(distribucion.reduce((a,d)=>a+d.monto,0))}</td>
+        <td colspan="3" style="padding:3px 5px;text-align:right;font-size:7.5pt">TOTAL</td>
+        <td style="text-align:right;padding:3px 5px;font-size:7pt;white-space:nowrap">${fmtN(totSaldoAnt)}</td>
+        <td style="text-align:right;padding:3px 5px;font-size:7pt;white-space:nowrap">${fmtN(totPagosAnt)}</td>
+        <td style="text-align:right;padding:3px 5px;font-size:7pt;white-space:nowrap">${fmtN(totDeuda)}</td>
+        <td style="text-align:right;padding:3px 5px;font-size:7pt">${fmtN(totInteres)}</td>
+        <td style="text-align:right;padding:3px 5px;font-size:7pt">100%</td>
+        <td style="text-align:right;padding:3px 5px;font-size:7.5pt;white-space:nowrap">${fmtN(totExpensa)}</td>
+        <td style="text-align:right;padding:3px 5px;font-size:7pt;white-space:nowrap">${fmtN(totRedondeo)}</td>
+        <td style="text-align:right;padding:3px 5px;font-size:8.5pt;white-space:nowrap">${fmtN(totTotal)}</td>
         <td></td>
       </tr>
     </tfoot>
   </table>
 
   ${consorcioActivo?.cbu ? `
-  <div style="margin-top:10px;border:1.5px solid #1A3FA0;border-radius:5px;padding:8px 12px;display:flex;gap:24px;align-items:flex-start">
-    <div>
-      <div style="color:#1A3FA0;font-weight:700;font-size:8.5pt;margin-bottom:4px">FORMAS DE PAGO</div>
-      <div style="font-size:8pt"><strong>DEP&Oacute;SITO O TRANSFERENCIA</strong></div>
-      <div style="font-size:8pt;margin-top:3px"><strong>Titular:</strong> ${(consorcioActivo.nombre||'').replace(/</g,'&lt;')}</div>
-      <div style="font-size:8pt"><strong>CBU:</strong> ${consorcioActivo.cbu}</div>
-      <div style="font-size:8pt"><strong>N&deg; de cuenta:</strong> ${consorcioActivo.nro_cuenta||'—'}</div>
-    </div>
-    <div style="padding-top:20px">
-      <div style="font-size:8pt"><strong>Alias:</strong> ${consorcioActivo.alias_cbu||'—'}</div>
-      <div style="font-size:8pt"><strong>Banco:</strong> ${consorcioActivo.banco||'—'}</div>
-      <div style="font-size:8pt"><strong>Sucursal:</strong> ${consorcioActivo.sucursal||'—'}</div>
+  <div style="margin-top:10px;border:1.5px solid #1A3FA0;border-radius:5px;padding:7px 10px">
+    <div style="color:#1A3FA0;font-weight:700;font-size:8pt;margin-bottom:4px">FORMAS DE PAGO</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:7.5pt">
+      <div><strong>DEP&Oacute;SITO O TRANSFERENCIA</strong><br/><strong>Titular:</strong> ${(consorcioActivo.nombre||'').replace(/</g,'&lt;')}<br/><strong>CBU:</strong> ${consorcioActivo.cbu}<br/><strong>N&deg; de cuenta:</strong> ${consorcioActivo.nro_cuenta||'—'}</div>
+      <div style="padding-top:14px"><strong>Alias:</strong> ${consorcioActivo.alias_cbu||'—'}<br/><strong>Banco:</strong> ${consorcioActivo.banco||'—'}<br/><strong>Sucursal:</strong> ${consorcioActivo.sucursal||'—'}</div>
     </div>
   </div>` : ''}
 
@@ -1187,10 +1189,9 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
 </body>
 </html>`
 
-    // Abrir en ventana nueva con charset correcto
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
     const url  = URL.createObjectURL(blob)
-    const w    = window.open(url, '_blank', 'width=1000,height=750')
+    window.open(url, '_blank', 'width=1000,height=750')
     setTimeout(() => URL.revokeObjectURL(url), 60000)
   }
 
@@ -6272,6 +6273,351 @@ function ImportarExcel({ session, consorcioId, onDone }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // PLAN DE CUENTAS
 // ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+// GRUPOS Y COLUMNAS DE LIQUIDACIÓN — configuración por consorcio
+// ══════════════════════════════════════════════════════════════════════════════
+function GruposLiquidacion({ session, consorcioId, consorcioActivo }) {
+  const [grupos, setGrupos]     = useState([])
+  const [columnas, setColumnas] = useState([])
+  const [tab, setTab]           = useState('grupos') // 'grupos' | 'columnas'
+  const [formGrupo, setFormGrupo]   = useState(null)
+  const [formCol, setFormCol]       = useState(null)
+  const [msg, setMsg]               = useState(null)
+  const [guardando, setGuardando]   = useState(false)
+
+  const CATS_DISPONIBLES = [
+    'sueldos','cargas_sociales','electricidad','agua','gas','servicios_publicos',
+    'honorarios_admin','contratos','seguros','mantenimiento','varios',
+    'gastos_bancarios','impuesto_municipal','impuesto_provincial','reintegros',
+  ]
+
+  const CAMPOS_COEF = [
+    { v:'porcentaje_fiscal',  l:'Coef. Fiscal (predeterminado)' },
+    { v:'pct_gtos_grales',    l:'Gastos Generales' },
+    { v:'pct_fdo_obras',      l:'Fondo de Obras' },
+    { v:'pct_cochera',        l:'Cochera' },
+    { v:'pct_gtos_part',      l:'Gastos Particulares' },
+  ]
+
+  async function cargar() {
+    const [{ data: g }, { data: c }] = await Promise.all([
+      supabase.from('con_grupos_liquidacion').select('*')
+        .eq('consorcio_id', consorcioId).order('numero'),
+      supabase.from('con_columnas_liquidacion').select('*')
+        .eq('consorcio_id', consorcioId).order('orden'),
+    ])
+    setGrupos(g || [])
+    setColumnas(c || [])
+  }
+
+  async function cargarDefaults() {
+    // Carga grupos predeterminados de Administración Global
+    if (!confirm('Esto cargará los 7 rubros estándar (servicios públicos, adm, seguros, mantenimiento, varios, bancarios). ¿Continuar?')) return
+    const defaults = [
+      { numero:1, nombre:'SUELDOS Y CARGAS SOCIALES',    categorias:['sueldos','cargas_sociales'] },
+      { numero:2, nombre:'SERVICIOS PÚBLICOS',            categorias:['electricidad','agua','gas','servicios_publicos'] },
+      { numero:3, nombre:'GASTOS DE ADMINISTRACIÓN',      categorias:['honorarios_admin','contratos'] },
+      { numero:4, nombre:'SEGUROS',                       categorias:['seguros'] },
+      { numero:5, nombre:'MANTENIMIENTO GENERAL',         categorias:['mantenimiento'] },
+      { numero:6, nombre:'VARIOS',                        categorias:['varios'] },
+      { numero:7, nombre:'GASTOS BANCARIOS',              categorias:['gastos_bancarios'] },
+      { numero:8, nombre:'IMPUESTOS Y TASAS',             categorias:['impuesto_municipal','impuesto_provincial'] },
+    ]
+    const inserts = defaults.map(d => ({
+      id: `GRL-${consorcioId}-${d.numero}`,
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      numero: d.numero, nombre: d.nombre, categorias: d.categorias,
+    }))
+    await supabase.from('con_grupos_liquidacion').upsert(inserts, { onConflict:'id' })
+    await cargar()
+    setMsg({ tipo:'ok', texto:'✓ Grupos predeterminados cargados' })
+  }
+
+  async function guardarGrupo() {
+    if (!formGrupo?.nombre?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el nombre del rubro' })
+    if (!formGrupo?.numero) return setMsg({ tipo:'warn', texto:'Ingresá el número del rubro' })
+    setGuardando(true)
+    const payload = {
+      admin_id: session.user.id, consorcio_id: consorcioId,
+      numero: parseInt(formGrupo.numero), nombre: formGrupo.nombre.trim(),
+      categorias: formGrupo.categorias || [], activo: true,
+    }
+    if (formGrupo.id) {
+      await supabase.from('con_grupos_liquidacion').update(payload).eq('id', formGrupo.id)
+    } else {
+      await supabase.from('con_grupos_liquidacion').insert([{ id:`GRL-${consorcioId}-${Date.now()}`, ...payload }])
+    }
+    setFormGrupo(null); await cargar(); setGuardando(false)
+    setMsg({ tipo:'ok', texto:'✓ Grupo guardado' })
+  }
+
+  async function eliminarGrupo(id) {
+    if (!confirm('¿Eliminar este grupo?')) return
+    await supabase.from('con_grupos_liquidacion').delete().eq('id', id)
+    cargar()
+  }
+
+  async function guardarColumna() {
+    if (!formCol?.nombre?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el nombre de la columna' })
+    if (!formCol?.campo_coef) return setMsg({ tipo:'warn', texto:'Seleccioná el campo de coeficiente' })
+    if (!formCol?.codigo?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el código de la columna' })
+    setGuardando(true)
+    const payload = {
+      admin_id: session.user.id, consorcio_id: consorcioId,
+      codigo: formCol.codigo.trim().toLowerCase().replace(/\s/g,'_'),
+      nombre: formCol.nombre.trim().toUpperCase(),
+      campo_coef: formCol.campo_coef,
+      orden: parseInt(formCol.orden||1),
+      activo: true,
+    }
+    if (formCol.id) {
+      await supabase.from('con_columnas_liquidacion').update(payload).eq('id', formCol.id)
+    } else {
+      await supabase.from('con_columnas_liquidacion').insert([{ id:`COL-${consorcioId}-${Date.now()}`, ...payload }])
+    }
+    setFormCol(null); await cargar(); setGuardando(false)
+    setMsg({ tipo:'ok', texto:'✓ Columna guardada' })
+  }
+
+  async function eliminarColumna(id) {
+    if (!confirm('¿Eliminar esta columna?')) return
+    await supabase.from('con_columnas_liquidacion').delete().eq('id', id)
+    cargar()
+  }
+
+  useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>🗂️ Grupos y columnas de liquidación</div>
+      </div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+        Configurá los rubros de gastos y las columnas de coeficientes que usará este consorcio en sus liquidaciones.
+        Cada consorcio puede tener distintos grupos y columnas.
+      </div>
+      <Msg data={msg} />
+
+      {/* Info box */}
+      <Card style={{ marginBottom:16, background:'#eff6ff', border:'1px solid #bfdbfe' }}>
+        <div style={{ fontSize:12, color:'#1e40af', lineHeight:1.7 }}>
+          <strong>¿Cómo funciona?</strong><br/>
+          • <strong>Grupos:</strong> Son los rubros de la tabla de gastos (ej: "2 SERVICIOS PÚBLICOS", "5 MANTENIMIENTO"). Cada grupo contiene una o más categorías de gastos.<br/>
+          • <strong>Columnas:</strong> Son los coeficientes de distribución del prorrateo. El más común es el coeficiente fiscal, pero algunos consorcios tienen columnas separadas (GTOS GRALES, FDO OBRAS, COCHERA, etc.).<br/>
+          • Si no configurás nada, el sistema usa los 7 rubros estándar y el coeficiente fiscal único.
+        </div>
+      </Card>
+
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:0, marginBottom:16, borderBottom:'2px solid #e5e7eb' }}>
+        {[{v:'grupos',l:'📋 Rubros de gastos'},{v:'columnas',l:'📐 Columnas de prorrateo'}].map(t=>(
+          <div key={t.v} onClick={()=>setTab(t.v)} style={{ padding:'8px 18px', fontWeight:tab===t.v?700:400,
+            color:tab===t.v?AZ:GR, borderBottom:tab===t.v?`2px solid ${AZ}`:'2px solid transparent',
+            cursor:'pointer', fontSize:13, marginBottom:-2 }}>{t.l}</div>
+        ))}
+      </div>
+
+      {/* TAB GRUPOS */}
+      {tab === 'grupos' && (
+        <div>
+          <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+            <Btn onClick={()=>setFormGrupo({ numero: grupos.length + 1, categorias:[] })}>+ Nuevo rubro</Btn>
+            {grupos.length === 0 && (
+              <BtnSec onClick={cargarDefaults}>⚡ Cargar rubros estándar</BtnSec>
+            )}
+          </div>
+
+          {formGrupo && (
+            <Card style={{ marginBottom:12, border:'1.5px solid #bae6fd' }}>
+              <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:12 }}>
+                {formGrupo.id ? 'Editar rubro' : 'Nuevo rubro de gastos'}
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'100px 1fr', gap:10, marginBottom:10 }}>
+                <div>
+                  <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>N° rubro *</div>
+                  <input type="number" min="1" max="20" value={formGrupo.numero||''}
+                    onChange={e=>setFormGrupo(f=>({...f,numero:e.target.value}))}
+                    style={{ width:'100%', padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:14, fontWeight:700, boxSizing:'border-box' }} />
+                </div>
+                <div>
+                  <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Nombre del rubro *</div>
+                  <input value={formGrupo.nombre||''} placeholder="ej: MANTENIMIENTO GENERAL"
+                    onChange={e=>setFormGrupo(f=>({...f,nombre:e.target.value.toUpperCase()}))}
+                    style={{ width:'100%', padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+                </div>
+              </div>
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:12, color:GR, marginBottom:6, fontWeight:500 }}>Categorías de gastos incluidas</div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
+                  {CATS_DISPONIBLES.map(cat => (
+                    <label key={cat} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, cursor:'pointer',
+                      padding:'4px 8px', borderRadius:5, background:(formGrupo.categorias||[]).includes(cat)?'#dbeafe':'#f9fafb',
+                      border:(formGrupo.categorias||[]).includes(cat)?'1px solid #93c5fd':'1px solid #e5e7eb' }}>
+                      <input type="checkbox"
+                        checked={(formGrupo.categorias||[]).includes(cat)}
+                        onChange={e=>setFormGrupo(f=>({...f,
+                          categorias: e.target.checked
+                            ? [...(f.categorias||[]), cat]
+                            : (f.categorias||[]).filter(c=>c!==cat)
+                        }))} />
+                      {cat.replace(/_/g,' ')}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display:'flex', gap:8 }}>
+                <Btn onClick={guardarGrupo} disabled={guardando}>{guardando?'⏳':'💾 Guardar'}</Btn>
+                <BtnSec onClick={()=>setFormGrupo(null)}>Cancelar</BtnSec>
+              </div>
+            </Card>
+          )}
+
+          {grupos.length === 0 ? (
+            <Card style={{ textAlign:'center', padding:32, color:GR }}>
+              <div style={{ fontSize:24, marginBottom:8 }}>📋</div>
+              <div style={{ fontWeight:600, marginBottom:8 }}>Sin rubros configurados</div>
+              <div style={{ fontSize:12 }}>El sistema usa los 7 rubros estándar por defecto.<br/>Podés cargarlos y personalizarlos.</div>
+            </Card>
+          ) : (
+            <Card>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                <thead>
+                  <tr style={{ background:'#f3f4f6' }}>
+                    {['N°','Nombre del rubro','Categorías incluidas',''].map((h,i)=>(
+                      <th key={i} style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {grupos.map(g=>(
+                    <tr key={g.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                      <td style={{ padding:'7px 10px', fontWeight:700, color:AZ, fontSize:14, width:40 }}>{g.numero}</td>
+                      <td style={{ padding:'7px 10px', fontWeight:600 }}>{g.nombre}</td>
+                      <td style={{ padding:'7px 10px' }}>
+                        <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                          {(g.categorias||[]).map(c=>(
+                            <span key={c} style={{ fontSize:10, background:'#dbeafe', color:'#1e40af', borderRadius:4, padding:'1px 6px' }}>
+                              {c.replace(/_/g,' ')}
+                            </span>
+                          ))}
+                          {(!g.categorias || g.categorias.length===0) && <span style={{ color:GR, fontSize:11 }}>Sin categorías</span>}
+                        </div>
+                      </td>
+                      <td style={{ padding:'7px 10px' }}>
+                        <div style={{ display:'flex', gap:4 }}>
+                          <Btn small onClick={()=>setFormGrupo({...g, categorias:g.categorias||[]})} style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
+                          <Btn small onClick={()=>eliminarGrupo(g.id)} style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* TAB COLUMNAS */}
+      {tab === 'columnas' && (
+        <div>
+          <div style={{ marginBottom:12 }}>
+            <Btn onClick={()=>setFormCol({ orden: columnas.length + 1, campo_coef:'porcentaje_fiscal' })}>+ Nueva columna</Btn>
+          </div>
+
+          <Card style={{ marginBottom:12, background:'#f8fafc' }}>
+            <div style={{ fontSize:12, color:GR, lineHeight:1.7 }}>
+              <strong>Columnas de coeficiente</strong> = las que aparecen en la tabla de prorrateo de la liquidación.<br/>
+              Ejemplo MAROMAR XI: <strong>GTOS GRALES</strong> (usa pct_gtos_grales) · <strong>FDO OBRAS</strong> (usa pct_fdo_obras) · <strong>COCHERA</strong> (usa pct_cochera)<br/>
+              Ejemplo DORADO 1056: una sola columna <strong>EXPENSAS A</strong> (usa porcentaje_fiscal)<br/>
+              Si no configurás columnas, se usa el coeficiente fiscal con la etiqueta "EXPENSAS A".
+            </div>
+          </Card>
+
+          {formCol && (
+            <Card style={{ marginBottom:12, border:'1.5px solid #bae6fd' }}>
+              <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:12 }}>
+                {formCol.id ? 'Editar columna' : 'Nueva columna de prorrateo'}
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 80px', gap:10, marginBottom:12 }}>
+                <div>
+                  <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Nombre (encabezado en PDF) *</div>
+                  <input value={formCol.nombre||''} placeholder="ej: GTOS GRALES"
+                    onChange={e=>setFormCol(f=>({...f,nombre:e.target.value.toUpperCase()}))}
+                    style={{ width:'100%', padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+                </div>
+                <div>
+                  <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Coeficiente a usar *</div>
+                  <select value={formCol.campo_coef||'porcentaje_fiscal'}
+                    onChange={e=>setFormCol(f=>({...f,campo_coef:e.target.value}))}
+                    style={{ width:'100%', padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+                    {CAMPOS_COEF.map(c=><option key={c.v} value={c.v}>{c.l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Orden</div>
+                  <input type="number" min="1" max="20" value={formCol.orden||1}
+                    onChange={e=>setFormCol(f=>({...f,orden:e.target.value}))}
+                    style={{ width:'100%', padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+                </div>
+              </div>
+              <div style={{ marginBottom:12 }}>
+                <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Código interno (sin espacios)</div>
+                <input value={formCol.codigo||''} placeholder="ej: gtos_grales"
+                  onChange={e=>setFormCol(f=>({...f,codigo:e.target.value.toLowerCase().replace(/\s/g,'_')}))}
+                  style={{ width:200, padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+              </div>
+              <div style={{ display:'flex', gap:8 }}>
+                <Btn onClick={guardarColumna} disabled={guardando}>{guardando?'⏳':'💾 Guardar'}</Btn>
+                <BtnSec onClick={()=>setFormCol(null)}>Cancelar</BtnSec>
+              </div>
+            </Card>
+          )}
+
+          {columnas.length === 0 ? (
+            <Card style={{ textAlign:'center', padding:32, color:GR }}>
+              <div style={{ fontSize:24, marginBottom:8 }}>📐</div>
+              <div style={{ fontWeight:600, marginBottom:8 }}>Sin columnas configuradas</div>
+              <div style={{ fontSize:12 }}>Se usará el coeficiente fiscal con la etiqueta "EXPENSAS A".</div>
+            </Card>
+          ) : (
+            <Card>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                <thead>
+                  <tr style={{ background:'#f3f4f6' }}>
+                    {['Orden','Nombre (PDF)','Código','Coeficiente',''].map((h,i)=>(
+                      <th key={i} style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {columnas.map(c=>(
+                    <tr key={c.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                      <td style={{ padding:'7px 10px', fontWeight:700, color:AZ, width:40 }}>{c.orden}</td>
+                      <td style={{ padding:'7px 10px', fontWeight:600 }}>{c.nombre}</td>
+                      <td style={{ padding:'7px 10px', color:GR, fontSize:11 }}>{c.codigo}</td>
+                      <td style={{ padding:'7px 10px', fontSize:11 }}>
+                        {CAMPOS_COEF.find(f=>f.v===c.campo_coef)?.l || c.campo_coef}
+                      </td>
+                      <td style={{ padding:'7px 10px' }}>
+                        <div style={{ display:'flex', gap:4 }}>
+                          <Btn small onClick={()=>setFormCol({...c})} style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
+                          <Btn small onClick={()=>eliminarColumna(c.id)} style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PlanCuentas({ session, consorcioId }) {
   const [cuentas, setCuentas] = useState([])
   const [form, setForm]       = useState(null)
@@ -9339,6 +9685,7 @@ export default function App() {
     { id:'emails',           label:'Enviar liquidación',    icon:'✉️', sec:'Comunicaciones' },
     { id:'email_tracking',   label:'Seguimiento emails',    icon:'📬', sec:'Comunicaciones' },
     { id:'plan_cuentas',     label:'Plan de cuentas',       icon:'📑', sec:'Configuración' },
+    { id:'grupos_liquidacion', label:'Grupos de liquidación', icon:'🗂️', sec:'Configuración' },
     { id:'mora_diferencial', label:'Interés por mora',      icon:'⚖️', sec:'Configuración' },
     { id:'importar',         label:'Importar datos',        icon:'📥', sec:'Configuración' },
     { id:'importar_pdf',     label:'Migrar desde PDF (IA)', icon:'🤖', sec:'Configuración' },
@@ -9390,6 +9737,7 @@ export default function App() {
       case 'actas':          return <Actas session={session} consorcioId={cid} copropietarios={copropietarios} />
       case 'perfil':         return <PerfilAdmin session={session} />
       case 'plan_cuentas':     return <PlanCuentas session={session} consorcioId={cid} />
+      case 'grupos_liquidacion': return <GruposLiquidacion session={session} consorcioId={cid} consorcioActivo={consorcioActivo} />
       case 'mora_diferencial': return <MoraDiferencial session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} />
       case 'mov_varios':       return <MovimientosVarios session={session} consorcioId={cid} expensas={expensas} />
       case 'reporte_movimientos': return <ReporteMovimientos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} />
