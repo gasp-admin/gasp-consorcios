@@ -797,11 +797,6 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       // Redondeo: agregar el número de UF como centavos
       // Ejemplo: UF 3, base $72.000 → $72.000,03
       const centavosUF = ufNum / 100
-      const monto = expensaBase + centavosUF
-      const redondeo = centavosUF // diferencia que va a la cuenta de la UF
-
-      // Segundo vencimiento
-      const monto_vto2 = Math.round(monto * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100
 
       // Datos de la liq anterior para esta UF
       const antUF = saldosAnt[u.id] || { saldo: 0, pagos: 0 }
@@ -810,9 +805,9 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       const deuda = Math.max(0, saldo_anterior) // deuda pendiente del período anterior
       const interes_mora = 0 // por ahora siempre 0 (futuro: calcular si corresponde)
 
-      // TOTAL a pagar = expensa + redondeo + deuda anterior + intereses
+      // TOTAL a pagar = expensa + redondeo (centavos UF) + deuda anterior + intereses
       const monto_total = expensaBase + centavosUF + deuda + interes_mora
-      // 2do vencimiento aplica recargo sobre la expensa del período, no sobre la deuda anterior
+      // 2do vencimiento: recargo solo sobre la expensa del período, deuda sin recargo
       const monto_vto2 = Math.round((expensaBase + centavosUF) * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100 + deuda + interes_mora
 
       return {
@@ -824,7 +819,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         coef, pct: pct.toFixed(4),
         expensa_base: expensaBase,
         redondeo: centavosUF,
-        monto: monto_total,       // TOTAL = expensa + redondeo + deuda + interés
+        monto: monto_total,
         monto_vto2,
         vto1, vto2,
         saldo_anterior,
