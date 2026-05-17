@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-p1p2p3-full'
+const BUILD_VERSION = '20260516-p1p2p3-provglobal'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -2234,7 +2234,7 @@ function Proveedores({ session, consorcioId }) {
   const F = f => setForm(x=>({...x,...f}))
 
   async function cargar() {
-    const { data } = await supabase.from('con_proveedores').select('*').eq('admin_id',session.user.id).eq('consorcio_id',consorcioId).order('razon_social')
+    const { data } = await supabase.from('con_proveedores').select('*').eq('admin_id',session.user.id).or(`consorcio_id.eq.${consorcioId},consorcio_id.is.null`).order('razon_social')
     setLista(data||[])
   }
   async function guardar() {
@@ -8385,7 +8385,7 @@ export default function App() {
       supabase.from('con_unidades').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('numero'),
       supabase.from('con_copropietarios').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('apellido_nombre'),
       supabase.from('con_expensas').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('periodo',{ascending:false}),
-      supabase.from('con_proveedores').select('*').eq('admin_id',uid||session?.user?.id).eq('consorcio_id',cid).order('razon_social')
+      supabase.from('con_proveedores').select('*').eq('admin_id',uid||session?.user?.id).or(`consorcio_id.eq.${cid},consorcio_id.is.null`).order('razon_social')
     ])
     setUnidades(u.data||[]); setCopropietarios(cp.data||[]); setExpensas(exp.data||[]); setProveedores(prov.data||[])
   }
