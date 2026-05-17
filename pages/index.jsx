@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 
-const BUILD_VERSION = '20260516-editar-borrar-completo'
+const BUILD_VERSION = '20260516-importar-comprobantes-liquidacion'
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://payzqbkydmvovjxlznuq.supabase.co'
 const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const supabase = createClient(SUPA_URL, SUPA_KEY)
@@ -535,6 +535,9 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   const [msg, setMsg]                   = useState(null)
   const [planCuentas, setPlanCuentas]   = useState([])
   const [formGasto, setFormGasto]       = useState(null)
+  const [compImportables, setCompImportables] = useState([]) // comprobantes del período listos a importar
+  const [compSeleccionados, setCompSeleccionados] = useState({}) // {id: true/false}
+  const [cargandoComps, setCargandoComps] = useState(false)
   const hoy = new Date().toISOString().split('T')[0]
 
   // ── Cargar datos ───────────────────────────────────────────────────────────
@@ -542,6 +545,67 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     const { data } = await supabase.from('con_gastos').select('*')
       .eq('expensa_id', eid).order('categoria')
     setGastos(data || [])
+  }
+
+  // Cargar comprobantes del consorcio que NO están ya importados a esta expensa
+  async function cargarComprobantesImportables(eid) {
+    setCargandoComps(true)
+    // Obtener IDs de comprobantes ya importados como gastos en esta expensa
+    const { data: gastosExist } = await supabase.from('con_gastos')
+      .select('comprobante_id').eq('expensa_id', eid).not('comprobante_id','is',null)
+    const idsYaImportados = (gastosExist||[]).map(g=>g.comprobante_id)
+
+    // Buscar comprobantes pendientes/pagado_parcial del consorcio
+    const { data: comps } = await supabase.from('con_comprobantes_proveedor')
+      .select('*, con_proveedores:proveedor_id(razon_social)')
+      .eq('consorcio_id', consorcioId)
+      .in('estado', ['pendiente','pagado_parcial','pagado'])
+      .order('fecha', { ascending:false })
+      .limit(100)
+
+    const disponibles = (comps||[]).filter(c => !idsYaImportados.includes(c.id))
+    setCompImportables(disponibles)
+    // Pre-seleccionar los pendientes/parciales automáticamente
+    const presel = {}
+    disponibles.forEach(c => {
+      if (c.estado === 'pendiente' || c.estado === 'pagado_parcial') presel[c.id] = true
+    })
+    setCompSeleccionados(presel)
+    setCargandoComps(false)
+  }
+
+  // Importar comprobantes seleccionados como gastos del período
+  async function importarComprobantes() {
+    const seleccionados = compImportables.filter(c => compSeleccionados[c.id])
+    if (seleccionados.length === 0) return setMsg({ tipo:'warn', texto:'Seleccioná al menos un comprobante' })
+
+    const CAT_MAP = {
+      'limpieza': 'gastos_comunes', 'electricidad': 'electricidad',
+      'gas': 'gas', 'ascensores': 'mantenimiento', 'seguros': 'seguros',
+      'administración': 'honorarios_admin', 'plomería': 'mantenimiento',
+      'jardinería': 'gastos_comunes', 'otros': 'varios'
+    }
+
+    const inserts = seleccionados.map(c => ({
+      id: `GAS-IMP-${c.id}`,
+      admin_id: session.user.id,
+      consorcio_id: consorcioId,
+      expensa_id: expSel.id,
+      comprobante_id: c.id, // referencia al comprobante original
+      fecha: c.fecha || hoy,
+      concepto: c.concepto || `${c.tipo} ${c.numero||''}`.trim(),
+      categoria: CAT_MAP[c.con_proveedores?.rubro] || 'varios',
+      proveedor_nombre: c.con_proveedores?.razon_social || null,
+      proveedor_id: c.proveedor_id || null,
+      monto: parseFloat(c.monto_total) || 0,
+    }))
+
+    const { error } = await supabase.from('con_gastos').upsert(inserts, { onConflict:'id' })
+    if (error) return setMsg({ tipo:'error', texto: error.message })
+
+    await cargarGastos(expSel.id)
+    await cargarComprobantesImportables(expSel.id)
+    setMsg({ tipo:'ok', texto:`✓ ${seleccionados.length} comprobante${seleccionados.length>1?'s':''} importado${seleccionados.length>1?'s':''} como gastos del período` })
   }
 
   async function cargarPlan() {
@@ -558,6 +622,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   async function seleccionarExpensa(exp) {
     setExpSel(exp)
     await cargarGastos(exp.id)
+    await cargarComprobantesImportables(exp.id)
     setPaso(2)
   }
 
@@ -589,8 +654,10 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
 
     if (error) { setMsg({ tipo:'error', texto: error.message }); setProcesando(false); return }
 
+    const expData = data || { id: expId, periodo, estado:'abierta', tipo:'ordinaria' }
     await cargar()
-    setExpSel(data || { id: expId, periodo, estado:'abierta', tipo:'ordinaria' })
+    setExpSel(expData)
+    await cargarComprobantesImportables(expId)
     setPaso(2)
     setProcesando(false)
     setMsg({ tipo:'ok', texto:`✓ Período ${periodo} creado` })
@@ -899,18 +966,99 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
             <div>
               <span style={{ fontWeight:700, fontSize:14 }}>{periodoLabel(expSel.periodo)}</span>
-              <span style={{ marginLeft:8, fontSize:12, color:GR }}>Carga de gastos del período</span>
+              <span style={{ marginLeft:8, fontSize:12, color:GR }}>Gastos del período</span>
             </div>
             <Btn small onClick={() => setFormGasto({ fecha: hoy, categoria: planCuentas[0]?.categoria || 'varios' })}>
-              + Agregar gasto
+              + Gasto manual
             </Btn>
           </div>
 
-          {/* Formulario gasto */}
+          {/* ═══ PANEL: Importar desde Comprobantes ═══ */}
+          <Card style={{ marginBottom:14, border:'1.5px solid #bae6fd', background:'#f0f9ff' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+              <div>
+                <div style={{ fontWeight:700, color:AZ, fontSize:13 }}>📥 Importar desde Comprobantes de proveedores</div>
+                <div style={{ fontSize:11, color:GR, marginTop:2 }}>
+                  Seleccioná los comprobantes cargados en el sistema para incluirlos como gastos del período
+                </div>
+              </div>
+              <Btn small color={AZ} onClick={()=>cargarComprobantesImportables(expSel.id)} disabled={cargandoComps}>
+                {cargandoComps ? '⏳' : '🔄 Actualizar'}
+              </Btn>
+            </div>
+
+            {cargandoComps ? (
+              <div style={{ textAlign:'center', padding:16, color:GR, fontSize:12 }}>Cargando comprobantes...</div>
+            ) : compImportables.length === 0 ? (
+              <div style={{ padding:'10px 12px', background:'#fff', borderRadius:8, fontSize:12, color:GR, textAlign:'center' }}>
+                ✅ No hay comprobantes pendientes de importar en este consorcio.
+                <span style={{ display:'block', marginTop:4, fontSize:11 }}>
+                  Cargue facturas en <strong>Proveedores → Comprobantes</strong> para verlos aquí.
+                </span>
+              </div>
+            ) : (
+              <>
+                {/* Leyenda */}
+                <div style={{ display:'flex', gap:12, marginBottom:8, fontSize:11, color:GR }}>
+                  <span>
+                    <input type="checkbox" checked={Object.keys(compSeleccionados).length===compImportables.length&&compImportables.length>0}
+                      onChange={e=>{
+                        if(e.target.checked){const s={};compImportables.forEach(c=>s[c.id]=true);setCompSeleccionados(s)}
+                        else setCompSeleccionados({})
+                      }} style={{ marginRight:4 }} />
+                    Seleccionar todos
+                  </span>
+                  <span style={{ color:AM }}>🟡 Los pre-seleccionados son los pendientes de pago</span>
+                </div>
+                <div style={{ maxHeight:240, overflowY:'auto', display:'flex', flexDirection:'column', gap:4, marginBottom:10 }}>
+                  {compImportables.map(c=>{
+                    const prov = c.con_proveedores
+                    const selec = !!compSeleccionados[c.id]
+                    const vencido = c.fecha_vencimiento && c.fecha_vencimiento < hoy
+                    return (
+                      <div key={c.id} onClick={()=>setCompSeleccionados(s=>({...s,[c.id]:!s[c.id]}))}
+                        style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 10px',
+                          background: selec?'#dbeafe':'#fff', borderRadius:7, cursor:'pointer',
+                          border: selec?'1px solid #93c5fd':'1px solid #e5e7eb',
+                          transition:'all 0.1s' }}>
+                        <input type="checkbox" checked={selec} readOnly style={{ flexShrink:0 }} />
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+                            <span style={{ fontWeight:600, fontSize:12 }}>{prov?.razon_social||'—'}</span>
+                            <span style={{ fontSize:11, color:GR, textTransform:'capitalize' }}>{c.tipo} {c.numero||''}</span>
+                            {vencido && <span style={{ fontSize:10, color:RJ, fontWeight:700 }}>⚠ VENCIDO</span>}
+                          </div>
+                          <div style={{ fontSize:11, color:'#374151', marginTop:1 }}>{c.concepto}</div>
+                          {c.fecha && <div style={{ fontSize:10, color:GR }}>Fecha: {new Date(c.fecha+'T00:00:00').toLocaleDateString('es-AR')}</div>}
+                        </div>
+                        <div style={{ textAlign:'right', flexShrink:0 }}>
+                          <div style={{ fontWeight:800, fontSize:13, color:selec?AZ:GR }}>{fmt(c.monto_total)}</div>
+                          <div style={{ fontSize:9, color: c.estado==='pendiente'?AM:c.estado==='pagado'?VD:'#7c3aed',
+                            fontWeight:600, textTransform:'uppercase' }}>{c.estado.replace('_',' ')}</div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                  <Btn color={AZ} onClick={importarComprobantes}
+                    disabled={Object.values(compSeleccionados).filter(Boolean).length===0}>
+                    📥 Importar {Object.values(compSeleccionados).filter(Boolean).length} seleccionado{Object.values(compSeleccionados).filter(Boolean).length!==1?'s':''}
+                    {' — '}{fmt(compImportables.filter(c=>compSeleccionados[c.id]).reduce((a,c)=>a+parseFloat(c.monto_total||0),0))}
+                  </Btn>
+                  <span style={{ fontSize:11, color:GR }}>
+                    {Object.values(compSeleccionados).filter(Boolean).length} de {compImportables.length} comprobantes
+                  </span>
+                </div>
+              </>
+            )}
+          </Card>
+
+          {/* Formulario gasto manual */}
           {formGasto && (
             <Card style={{ marginBottom:12, border:'1.5px solid #bae6fd' }}>
               <div style={{ fontWeight:600, color:AZ, fontSize:13, marginBottom:12 }}>
-                {formGasto.id ? 'Editar gasto' : 'Nuevo gasto'}
+                {formGasto.id ? 'Editar gasto' : '✏ Gasto manual (sin comprobante)'}
               </div>
               <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:10, marginBottom:10 }}>
                 <div>
@@ -943,7 +1091,6 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
                     style={{ width:'100%', padding:'7px 10px', border:'1px solid #d1d5db',
                       borderRadius:7, fontSize:13, background:'#fff' }}>
                     {planCuentas.length > 0 ? (
-                      // Agrupar por categoría única del plan
                       [...new Set(planCuentas.map(c=>c.categoria))].map(cat => (
                         <option key={cat} value={cat}>{cat.replace(/_/g,' ')}</option>
                       ))
@@ -1000,16 +1147,16 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                 <thead>
                   <tr style={{ background:'#f3f4f6' }}>
-                    {['Fecha','Rubro','Concepto','Proveedor','Monto',''].map((h,i) => (
-                      <th key={i} style={{ padding:'6px 10px', textAlign:i===4?'right':'left',
+                    {['Fecha','Rubro','Concepto','Proveedor','Origen','Monto',''].map((h,i) => (
+                      <th key={i} style={{ padding:'6px 10px', textAlign:i===5?'right':'left',
                         fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {gastos.length === 0 ? (
-                    <tr><td colSpan={6} style={{ padding:20, textAlign:'center', color:GR }}>
-                      Sin gastos cargados. Agregue los gastos del período.
+                    <tr><td colSpan={7} style={{ padding:20, textAlign:'center', color:GR }}>
+                      Sin gastos cargados. Importá comprobantes arriba o agregá un gasto manual.
                     </td></tr>
                   ) : gastos.map(g => (
                     <tr key={g.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
@@ -1022,11 +1169,19 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
                       </td>
                       <td style={{ padding:'6px 10px' }}>{g.concepto}</td>
                       <td style={{ padding:'6px 10px', color:GR, fontSize:11 }}>{g.proveedor_nombre||'—'}</td>
+                      <td style={{ padding:'6px 10px' }}>
+                        {g.comprobante_id
+                          ? <span style={{ fontSize:10, background:'#dbeafe', color:'#1e40af', borderRadius:4, padding:'1px 6px', fontWeight:600 }}>📄 Comprobante</span>
+                          : <span style={{ fontSize:10, background:'#f3f4f6', color:GR, borderRadius:4, padding:'1px 6px' }}>✏ Manual</span>
+                        }
+                      </td>
                       <td style={{ padding:'6px 10px', textAlign:'right', fontWeight:700 }}>{fmt(g.monto)}</td>
                       <td style={{ padding:'6px 10px' }}>
                         <div style={{ display:'flex', gap:4 }}>
-                          <Btn small onClick={()=>setFormGasto({...g})}
-                            style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
+                          {!g.comprobante_id && (
+                            <Btn small onClick={()=>setFormGasto({...g})}
+                              style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
+                          )}
                           <Btn small onClick={()=>eliminarGasto(g.id)}
                             style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
                         </div>
@@ -1037,7 +1192,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
                 {gastos.length > 0 && (
                   <tfoot>
                     <tr style={{ background:'#f0f4ff', borderTop:'2px solid #1A3FA0' }}>
-                      <td colSpan={4} style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>
+                      <td colSpan={5} style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>
                         Total gastos del período
                       </td>
                       <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:800, fontSize:15, color:AZ }}>
