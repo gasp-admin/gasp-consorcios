@@ -683,7 +683,24 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   const [saldoCajaAnterior, setSaldoCajaAnterior] = useState(0)
   // Cobranzas del período anterior (pagos recibidos en la liquidación anterior)
   const [cobradoPeriodoAnt, setCobradoPeriodoAnt] = useState(0)
+  // Grupos y columnas de liquidación del consorcio activo
+  const [gruposLiq, setGruposLiq]     = useState([])
+  const [columnasLiq, setColumnasLiq] = useState([])
   const hoy = new Date().toISOString().split('T')[0]
+
+  // Cargar grupos y columnas cuando cambia el consorcio
+  useEffect(() => {
+    if (!consorcioId) return
+    Promise.all([
+      supabase.from('con_grupos_liquidacion').select('*')
+        .eq('consorcio_id', consorcioId).eq('activo', true).order('numero'),
+      supabase.from('con_columnas_liquidacion').select('*')
+        .eq('consorcio_id', consorcioId).eq('activo', true).order('orden'),
+    ]).then(([{ data: grps }, { data: cols }]) => {
+      setGruposLiq(grps || [])
+      setColumnasLiq(cols || [])
+    })
+  }, [consorcioId])
 
   // ── Cargar datos ───────────────────────────────────────────────────────────
   async function cargarGastos(eid) {
@@ -1037,38 +1054,103 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     const fechaVto1  = `${String(config.vto1_dia||10).padStart(2,'0')}/${String(mesVto).padStart(2,'0')}/${anioVto}`
 
     // ── Gastos agrupados por rubro ────────────────────────────────────────────
-    const RUBRO_LABELS = {
+    // Usar grupos dinámicos del consorcio si existen, sino fallback hardcodeado
+    const RUBRO_LABELS_FALLBACK = {
       sueldos:'1 SUELDOS Y CARGAS SOCIALES', cargas_sociales:'1 SUELDOS Y CARGAS SOCIALES',
+      fateryh:'1 SUELDOS Y CARGAS SOCIALES', cargas_sociales_arca:'1 SUELDOS Y CARGAS SOCIALES',
+      vep931:'1 SUELDOS Y CARGAS SOCIALES', sueldos_detalle:'1 SUELDOS Y CARGAS SOCIALES',
       electricidad:'2 SERVICIOS PÚBLICOS', agua:'2 SERVICIOS PÚBLICOS', gas:'2 SERVICIOS PÚBLICOS',
       servicios_publicos:'2 SERVICIOS PÚBLICOS',
-      honorarios_admin:'3 GASTOS DE ADMINISTRACIÓN', contratos:'3 GASTOS DE ADMINISTRACIÓN',
-      seguros:'4 SEGUROS',
-      mantenimiento:'5 MANTENIMIENTO GENERAL',
-      varios:'6 VARIOS',
-      gastos_bancarios:'7 GASTOS BANCARIOS',
-      impuesto_municipal:'8 IMPUESTOS Y TASAS', impuesto_provincial:'8 IMPUESTOS Y TASAS',
-      reintegros:'9 REINTEGROS',
+      contratos_abonos:'3 CONTRATOS Y ABONOS', telefonia:'3 CONTRATOS Y ABONOS',
+      limpieza:'3 CONTRATOS Y ABONOS', piscina:'3 CONTRATOS Y ABONOS',
+      honorarios_admin:'4 GASTOS DE ADMINISTRACIÓN', honorarios_contable:'4 GASTOS DE ADMINISTRACIÓN',
+      contratos:'4 GASTOS DE ADMINISTRACIÓN',
+      seguros:'5 SEGUROS',
+      mantenimiento_general:'6 MANTENIMIENTO GENERAL', mantenimiento_parques:'6 MANTENIMIENTO GENERAL',
+      ascensores:'6 MANTENIMIENTO GENERAL', pintura:'6 MANTENIMIENTO GENERAL',
+      materiales_construccion:'6 MANTENIMIENTO GENERAL', vidrieria:'6 MANTENIMIENTO GENERAL',
+      varios:'7 VARIOS', articulos_limpieza:'7 VARIOS',
+      gastos_bancarios:'8 GASTOS BANCARIOS',
+      impuesto_municipal:'9 IMPUESTOS Y TASAS', impuesto_provincial:'9 IMPUESTOS Y TASAS',
+      arba:'9 IMPUESTOS Y TASAS', viaticos:'9 IMPUESTOS Y TASAS',
+      otros_egresos:'10 OTROS EGRESOS', fondo_inversion:'10 OTROS EGRESOS',
+      reintegros:'11 REINTEGROS',
     }
+
+    // Construir mapa categoria → label desde grupos de BD (si existen)
+    const catToLabel = {}
+    const gruposOrdenados = [...gruposLiq].sort((a,b)=>a.numero-b.numero)
+    if (gruposOrdenados.length > 0) {
+      for (const grp of gruposOrdenados) {
+        const label = `${grp.numero} ${grp.nombre.replace(/^\d+\s+/,'')}`
+        for (const cat of (grp.categorias||[])) catToLabel[cat] = label
+      }
+    }
+    // Si no hay grupos en BD, usar el fallback
+    const resolverLabel = cat =>
+      catToLabel[cat] || RUBRO_LABELS_FALLBACK[cat] || '7 VARIOS'
+
+    // Columnas activas del consorcio (para encabezados del PDF)
+    const colsActivas = columnasLiq.filter(c=>c.activo)
+    const tieneMulticol = colsActivas.length > 1
+
     const rubrosAgrup = {}
     for (const g of gastos) {
-      const label = RUBRO_LABELS[g.categoria||'varios'] || '6 VARIOS'
-      if (!rubrosAgrup[label]) rubrosAgrup[label] = { gastos:[], total:0 }
+      const label = resolverLabel(g.categoria||'varios')
+      if (!rubrosAgrup[label]) rubrosAgrup[label] = { gastos:[], total:0, porCol:{} }
       rubrosAgrup[label].gastos.push(g)
       rubrosAgrup[label].total += parseFloat(g.monto)||0
+      // En multi-columna: asignar gasto a la columna según el grupo
+      if (tieneMulticol) {
+        const grp = gruposOrdenados.find(gr=>{
+          const lbl = `${gr.numero} ${gr.nombre.replace(/^\d+\s+/,'')}`
+          return lbl === label
+        })
+        const colGasto = grp?.columnas_coef?.[0] || colsActivas[0]?.codigo || 'COL1'
+        rubrosAgrup[label].porCol[colGasto] = (rubrosAgrup[label].porCol[colGasto]||0) + (parseFloat(g.monto)||0)
+      }
     }
+
+    // Encabezados de columnas para el PDF de gastos
+    const encabezadosCol = tieneMulticol
+      ? colsActivas.map(c=>`<th class="r">${c.nombre}</th>`).join('') + '<th class="r">Total</th>'
+      : '<th class="r">EXPENSAS A</th><th class="r">Total</th>'
 
     const rubrosHTML = Object.entries(rubrosAgrup)
       .sort((a,b) => a[0].localeCompare(b[0]))
       .map(([label, data]) => {
         const pct = totalGastosTotal > 0 ? (data.total/totalGastosTotal*100).toFixed(2) : '0.00'
-        const filas = data.gastos.map(g =>
-          `<tr style="border-bottom:1px solid #eee">
-            <td style="padding:2px 6px;font-size:7.5pt">${(g.concepto||'').replace(/</g,'&lt;')}${g.proveedor_nombre?', '+g.proveedor_nombre.replace(/</g,'&lt;'):''}${g.comprobante?', '+g.comprobante:''}</td>
-            <td style="text-align:right;padding:2px 6px;font-size:7.5pt;white-space:nowrap">${fmtN(g.monto)}</td>
-            <td style="text-align:right;padding:2px 6px;font-size:7.5pt;white-space:nowrap">${fmtN(g.monto)}</td>
-          </tr>`
-        ).join('')
-        return `<tr style="background:#dce8f5"><td style="padding:3px 6px;font-weight:700;font-size:8pt;text-transform:uppercase">${label}</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:8pt">EXPENSAS A</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:8pt">Total</td></tr>${filas}<tr style="background:#1A3FA0;color:#fff"><td style="padding:3px 6px;font-weight:700;font-size:8pt">TOTAL RUBRO ${pct}%</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:7.5pt;white-space:nowrap">${fmtN(data.total)}</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:7.5pt;white-space:nowrap">${fmtN(data.total)}</td></tr>`
+        const filas = data.gastos.map(g => {
+          const montoG = parseFloat(g.monto)||0
+          if (tieneMulticol) {
+            // Determinar a qué columna va este gasto
+            const grp = gruposOrdenados.find(gr => {
+              const lbl = `${gr.numero} ${gr.nombre.replace(/^\d+\s+/,'')}`
+              return lbl === label
+            })
+            const colCod = grp?.columnas_coef?.[0] || colsActivas[0]?.codigo || ''
+            const celdas = colsActivas.map(c =>
+              `<td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${c.codigo===colCod?fmtN(montoG):'0,00'}</td>`
+            ).join('') + `<td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${fmtN(montoG)}</td>`
+            return `<tr style="border-bottom:1px solid #eee"><td style="padding:2px 5px;font-size:7pt">${(g.concepto||'').replace(/</g,'&lt;')}${g.proveedor_nombre?', '+g.proveedor_nombre.replace(/</g,'&lt;'):''}${g.comprobante?', '+g.comprobante:''}</td>${celdas}</tr>`
+          } else {
+            return `<tr style="border-bottom:1px solid #eee">
+              <td style="padding:2px 6px;font-size:7.5pt">${(g.concepto||'').replace(/</g,'&lt;')}${g.proveedor_nombre?', '+g.proveedor_nombre.replace(/</g,'&lt;'):''}${g.comprobante?', '+g.comprobante:''}</td>
+              <td style="text-align:right;padding:2px 6px;font-size:7.5pt;white-space:nowrap">${fmtN(montoG)}</td>
+              <td style="text-align:right;padding:2px 6px;font-size:7.5pt;white-space:nowrap">${fmtN(montoG)}</td>
+            </tr>`
+          }
+        }).join('')
+
+        if (tieneMulticol) {
+          const totCeldas = colsActivas.map(c =>
+            `<td style="text-align:right;padding:3px 5px;font-weight:700;font-size:7.5pt;white-space:nowrap">${fmtN(data.porCol[c.codigo]||0)}</td>`
+          ).join('') + `<td style="text-align:right;padding:3px 5px;font-weight:700;font-size:7.5pt;white-space:nowrap">${fmtN(data.total)}</td>`
+          const encRubro = colsActivas.map(c=>`<td style="text-align:right;padding:3px 5px;font-weight:700;font-size:7.5pt">${c.nombre}</td>`).join('') + `<td style="text-align:right;padding:3px 5px;font-weight:700;font-size:7.5pt">Total</td>`
+          return `<tr style="background:#dce8f5"><td style="padding:3px 6px;font-weight:700;font-size:7.5pt;text-transform:uppercase">${label}</td>${encRubro}</tr>${filas}<tr style="background:#1A3FA0;color:#fff"><td style="padding:3px 6px;font-weight:700;font-size:7.5pt">TOTAL RUBRO ${pct}%</td>${totCeldas}</tr>`
+        } else {
+          return `<tr style="background:#dce8f5"><td style="padding:3px 6px;font-weight:700;font-size:8pt;text-transform:uppercase">${label}</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:8pt">EXPENSAS A</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:8pt">Total</td></tr>${filas}<tr style="background:#1A3FA0;color:#fff"><td style="padding:3px 6px;font-weight:700;font-size:8pt">TOTAL RUBRO ${pct}%</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:7.5pt;white-space:nowrap">${fmtN(data.total)}</td><td style="text-align:right;padding:3px 6px;font-weight:700;font-size:7.5pt;white-space:nowrap">${fmtN(data.total)}</td></tr>`
+        }
       }).join('')
 
     // ── Estado financiero ─────────────────────────────────────────────────────
@@ -1218,26 +1300,28 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
 
   <div class="sec-title">PAGOS DEL PERÍODO POR SUMINISTROS, SERVICIOS, ABONOS Y SEGUROS</div>
   <table>
-    <thead><tr><th style="text-align:left">Concepto</th><th class="r">EXPENSAS A</th><th class="r">Total</th></tr></thead>
+    <thead><tr><th style="text-align:left">Concepto</th>${encabezadosCol}</tr></thead>
     <tbody>${rubrosHTML}</tbody>
     <tfoot><tr style="background:#0d2b3e;color:#fff;font-weight:700">
       <td style="padding:3px 7px;font-size:8pt">TOTAL &nbsp; 100,00%</td>
-      <td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>
-      <td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>
+      ${tieneMulticol
+        ? colsActivas.map(c=>`<td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(gastos.filter(g=>{const grp=gruposOrdenados.find(gr=>gr.categorias?.includes(g.categoria));return grp?.columnas_coef?.[0]===c.codigo}).reduce((a,g)=>a+(parseFloat(g.monto)||0),0))}</td>`).join('')+'<td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">'+fmtN(totalGastosTotal)+'</td>'
+        : `<td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td><td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>`
+      }
     </tr></tfoot>
   </table>
 
   <div class="sec-title">ESTADO FINANCIERO</div>
   <table>
-    <thead><tr><th style="text-align:left">CONCEPTO</th><th class="r">EXPENSAS A</th><th class="r">Total</th></tr></thead>
+    <thead><tr><th style="text-align:left">CONCEPTO</th>${tieneMulticol ? colsActivas.map(c=>`<th class="r">${c.nombre}</th>`).join('')+'<th class="r">Total</th>' : '<th class="r">EXPENSAS A</th><th class="r">Total</th>'}</tr></thead>
     <tbody class="ef-body">
-      <tr><td style="padding:2px 7px">Saldo anterior al 01/${String(mesAnt).padStart(2,'0')}/${anioAnt}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(saldoAntEF)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(saldoAntEF)}</td></tr>
-      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de expensas en t&eacute;rmino</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoTermEF)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoTermEF)}</td></tr>
-      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de expensas adeudadas</td><td style="text-align:right;padding:2px 7px">0,00</td><td style="text-align:right;padding:2px 7px">0,00</td></tr>
-      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de intereses</td><td style="text-align:right;padding:2px 7px">0,00</td><td style="text-align:right;padding:2px 7px">0,00</td></tr>
-      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Egresos por pagos</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">-${fmtN(totalGastosTotal)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">-${fmtN(totalGastosTotal)}</td></tr>
+      <tr><td style="padding:2px 7px">Saldo anterior al 01/${String(mesAnt).padStart(2,'0')}/${anioAnt}</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">—</td>`).join('')+'<td style="text-align:right;padding:2px 7px;white-space:nowrap">'+fmtN(saldoAntEF)+'</td>' : `<td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(saldoAntEF)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(saldoAntEF)}</td>`}</tr>
+      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de expensas en t&eacute;rmino</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">—</td>`).join('')+'<td style="text-align:right;padding:2px 7px;white-space:nowrap">'+fmtN(cobradoTermEF)+'</td>' : `<td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoTermEF)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoTermEF)}</td>`}</tr>
+      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de expensas adeudadas</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">0,00</td>`).join('')+'<td style="text-align:right;padding:2px 7px">0,00</td>' : '<td style="text-align:right;padding:2px 7px">0,00</td><td style="text-align:right;padding:2px 7px">0,00</td>'}</tr>
+      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de intereses</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">0,00</td>`).join('')+'<td style="text-align:right;padding:2px 7px">0,00</td>' : '<td style="text-align:right;padding:2px 7px">0,00</td><td style="text-align:right;padding:2px 7px">0,00</td>'}</tr>
+      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Egresos por pagos</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">—</td>`).join('')+'<td style="text-align:right;padding:2px 7px;white-space:nowrap">-'+fmtN(totalGastosTotal)+'</td>' : `<td style="text-align:right;padding:2px 7px;white-space:nowrap">-${fmtN(totalGastosTotal)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">-${fmtN(totalGastosTotal)}</td>`}</tr>
     </tbody>
-    <tfoot><tr class="ef-final"><td>Saldo final al ${fechaVto1}</td><td style="text-align:right;white-space:nowrap">${fmtN(saldoFinalEF)}</td><td style="text-align:right;white-space:nowrap">${fmtN(saldoFinalEF)}</td></tr></tfoot>
+    <tfoot><tr class="ef-final"><td>Saldo final al ${fechaVto1}</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;white-space:nowrap">—</td>`).join('')+'<td style="text-align:right;white-space:nowrap">'+fmtN(saldoFinalEF)+'</td>' : `<td style="text-align:right;white-space:nowrap">${fmtN(saldoFinalEF)}</td><td style="text-align:right;white-space:nowrap">${fmtN(saldoFinalEF)}</td>`}</tr></tfoot>
   </table>
   <div class="footer">
     <span>${(consorcioActivo?.nombre||'').replace(/</g,'&lt;')} &mdash; Liquidaci&oacute;n ${per}</span>
@@ -1307,7 +1391,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         <th style="text-align:right;padding:3px 4px;width:56px">DEUDA</th>
         <th style="text-align:right;padding:3px 4px;width:46px">INTERES</th>
         <th style="text-align:right;padding:3px 4px;width:38px">%</th>
-        <th style="text-align:right;padding:3px 4px;width:66px">EXPENSAS A</th>
+        <th style="text-align:right;padding:3px 4px;width:66px">${colsActivas[0]?.nombre || 'EXPENSAS A'}</th>
         <th style="text-align:right;padding:3px 4px;width:50px">RED./AJUST.</th>
         <th style="text-align:right;padding:3px 4px;width:70px;background:#1A3FA0">TOTAL</th>
         <th style="text-align:center;padding:3px 4px;width:22px">U.F.</th>
