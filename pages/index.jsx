@@ -923,11 +923,13 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       .order('periodo', { ascending: false }).limit(1)
 
     // Saldo de caja anterior = saldo_caja_final de la última liquidación cerrada
-    // Si no existe ese campo, calcularlo desde los cobros y gastos
     if (expAnterior?.[0]) {
-      // Intentar usar saldo_caja_final si existe, sino calcular
       const saldoCaja = parseFloat(expAnterior[0].saldo_caja_final) || 0
       setSaldoCajaAnterior(saldoCaja)
+
+      // Cobrado anterior: preferir total_cobrado de la expensa (disponible en liquidaciones migradas)
+      // Si hay detalles cargados manualmente, sumarlos; sino usar total_cobrado directamente
+      const totalCobradoDirecto = parseFloat(expAnterior[0].total_cobrado) || 0
 
       const { data: detsAnt } = await supabase.from('con_expensas_detalle')
         .select('unidad_id, monto, saldo_anterior, pagos_periodo, interes_mora')
@@ -941,7 +943,8 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         }
         totalCobradoAnt += parseFloat(d.pagos_periodo)||0
       }
-      setCobradoPeriodoAnt(totalCobradoAnt)
+      // Usar total de detalles si existen, sino el total_cobrado migrado del PDF
+      setCobradoPeriodoAnt(totalCobradoAnt > 0 ? totalCobradoAnt : totalCobradoDirecto)
     } else {
       setSaldoCajaAnterior(0)
       setCobradoPeriodoAnt(0)
@@ -7893,15 +7896,16 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
       { data: pagosProv },
       { data: movUnidad },
       { data: compPend },
+      { data: expensasCerradas },
     ] = await Promise.all([
       supabase.from('con_expensas_detalle').select('monto,saldo_anterior,interes_mora,pagos_periodo,estado')
         .eq('consorcio_id', consorcioId),
       supabase.from('con_cobranzas').select('monto,fecha,medio_pago')
         .eq('consorcio_id', consorcioId).eq('estado','vigente')
         .gte('fecha', desde).lte('fecha', hasta),
-      supabase.from('con_gastos').select('monto,categoria')
+      supabase.from('con_gastos').select('monto,categoria,fecha')
         .eq('consorcio_id', consorcioId)
-        .gte('fecha', desde).lte('fecha', hasta),
+        .gte('created_at', desde).lte('created_at', hasta),
       supabase.from('con_pagos_proveedor').select('monto,fecha')
         .eq('consorcio_id', consorcioId)
         .gte('fecha', desde).lte('fecha', hasta),
@@ -7909,6 +7913,10 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
         .eq('consorcio_id', consorcioId).eq('estado','vigente'),
       supabase.from('con_comprobantes_proveedor').select('saldo_pendiente')
         .eq('consorcio_id', consorcioId).in('estado',['pendiente','pagado_parcial']),
+      // Últimas expensas cerradas para mostrar saldos reales migrados
+      supabase.from('con_expensas').select('periodo,saldo_caja_final,total_cobrado,total_gastos,total_expensa')
+        .eq('consorcio_id', consorcioId).eq('estado','cerrada')
+        .order('periodo', { ascending: false }).limit(6),
     ])
 
     // Deudores (saldo pendiente de cobrar a propietarios)
@@ -7921,7 +7929,7 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
     // Acreedores (facturas pendientes de pagar a proveedores)
     const acreedores = (compPend||[]).reduce((a,c) => a + (parseFloat(c.saldo_pendiente)||0), 0)
 
-    // Ingresos del período
+    // Ingresos del período (cobranzas operativas registradas)
     const ingresos = (cobranzas||[]).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
 
     // Egresos del período
@@ -7939,8 +7947,16 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
       porMedio[m] = (porMedio[m]||0) + (parseFloat(c.monto)||0)
     }
 
+    // Última expensa cerrada con saldo real (datos migrados del PDF)
+    const ultimaExpensa = (expensasCerradas||[])[0] || null
+    const saldoCajaUltimo = ultimaExpensa ? parseFloat(ultimaExpensa.saldo_caja_final)||0 : null
+    const cobradoUltimo   = ultimaExpensa ? parseFloat(ultimaExpensa.total_cobrado)||0   : null
+    const gastosUltimo    = ultimaExpensa ? parseFloat(ultimaExpensa.total_gastos)||0    : null
+
     setDatos({ deudores, acreedores, ingresos, egresos, egresosGastos,
-      egresosPagProv, resultado, porMedio })
+      egresosPagProv, resultado, porMedio,
+      expensasCerradas: expensasCerradas||[],
+      ultimaExpensa, saldoCajaUltimo, cobradoUltimo, gastosUltimo })
     setCargando(false)
   }
 
@@ -8056,6 +8072,63 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
               ))}
             </Card>
           </div>
+
+          {/* Historial de liquidaciones cerradas (datos migrados de PDFs) */}
+          {(datos.expensasCerradas||[]).length > 0 && (
+            <Card style={{ marginBottom:16 }}>
+              <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:10 }}>
+                📋 Historial de liquidaciones cerradas
+              </div>
+              <div style={{ fontSize:11, color:GR, marginBottom:10 }}>
+                Saldos finales reales según liquidaciones Abril 2026 (datos migrados de PDFs)
+              </div>
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <thead>
+                    <tr style={{ background:'#f3f4f6' }}>
+                      <th style={{ padding:'6px 10px', textAlign:'left', fontWeight:600 }}>Período</th>
+                      <th style={{ padding:'6px 10px', textAlign:'right', fontWeight:600 }}>Total gastos</th>
+                      <th style={{ padding:'6px 10px', textAlign:'right', fontWeight:600 }}>Total cobrado</th>
+                      <th style={{ padding:'6px 10px', textAlign:'right', fontWeight:600 }}>Saldo final</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(datos.expensasCerradas||[]).map((e,i) => {
+                      const sf = parseFloat(e.saldo_caja_final)||0
+                      return (
+                        <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                          <td style={{ padding:'6px 10px', fontWeight:600 }}>{e.periodo}</td>
+                          <td style={{ padding:'6px 10px', textAlign:'right', color:RJ }}>
+                            {e.total_gastos > 0 ? fmt(e.total_gastos) : '—'}
+                          </td>
+                          <td style={{ padding:'6px 10px', textAlign:'right', color:VD }}>
+                            {e.total_cobrado > 0 ? fmt(e.total_cobrado) : '—'}
+                          </td>
+                          <td style={{ padding:'6px 10px', textAlign:'right',
+                            fontWeight:800, color: sf >= 0 ? VD : RJ }}>
+                            {sf !== 0 ? (sf > 0 ? '+' : '') + fmt(sf) : '—'}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {datos.ultimaExpensa && datos.saldoCajaUltimo !== null && (
+                <div style={{ marginTop:10, padding:'10px 12px', borderRadius:8,
+                  background: datos.saldoCajaUltimo >= 0 ? '#f0fdf4' : '#fff1f2',
+                  border: '1px solid ' + (datos.saldoCajaUltimo >= 0 ? '#86efac' : '#fca5a5') }}>
+                  <span style={{ fontSize:12, fontWeight:600,
+                    color: datos.saldoCajaUltimo >= 0 ? VD : RJ }}>
+                    💰 Saldo arrastrado a Mayo 2026: {datos.saldoCajaUltimo > 0 ? '+' : ''}{fmt(datos.saldoCajaUltimo)}
+                  </span>
+                  <span style={{ fontSize:11, color:GR, marginLeft:8 }}>
+                    (saldo final Abril 2026 según liquidación)
+                  </span>
+                </div>
+              )}
+            </Card>
+          )}
         </>
       )}
     </div>
