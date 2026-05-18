@@ -1625,8 +1625,12 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
                         <span style={{ fontWeight:600, fontSize:13 }}>{periodoLabel(exp.periodo)}</span>
                         <Badge text="Cerrada" color={GR} bg='#f3f4f6' style={{ marginLeft:8 }} />
                       </div>
-                      <span style={{ fontSize:12, color:GR }}>
-                        Total: {fmt(exp.total_expensa)}
+                      <span style={{ fontSize:12,
+                        color: parseFloat(exp.saldo_caja_final||0) >= 0 ? '#16a34a' : '#dc2626',
+                        fontWeight:600 }}>
+                        {parseFloat(exp.saldo_caja_final||0) !== 0
+                          ? 'Saldo: ' + (parseFloat(exp.saldo_caja_final) > 0 ? '+' : '') + fmt(exp.saldo_caja_final)
+                          : (exp.total_gastos > 0 ? 'Gastos: ' + fmt(exp.total_gastos) : '')}
                       </span>
                     </div>
                   ))}
