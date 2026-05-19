@@ -961,8 +961,6 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         ? totalGastos
         : parseFloat(config.total_a_cobrar) || totalGastos
     }
-      ? totalGastos
-      : parseFloat(config.total_a_cobrar) || totalGastos
 
     if (totalACobrar <= 0) return setMsg({ tipo:'warn', texto:'El total a cobrar debe ser mayor a cero' })
     if (unidades.length === 0) return setMsg({ tipo:'warn', texto:'No hay unidades cargadas en este consorcio' })
