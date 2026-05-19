@@ -686,6 +686,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   const [saldoCajaAnterior, setSaldoCajaAnterior] = useState(0)
   // Cobranzas del período anterior (pagos recibidos en la liquidación anterior)
   const [cobradoPeriodoAnt, setCobradoPeriodoAnt] = useState(0)
+  const [cobradoActual, setCobradoActual]         = useState(0) // cobranzas del período en curso
   // Grupos y columnas de liquidación del consorcio activo
   const [gruposLiq, setGruposLiq]     = useState([])
   const [columnasLiq, setColumnasLiq] = useState([])
@@ -949,6 +950,11 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   }
 
   async function calcularDistribucion() {
+    // Resetear valores financieros al inicio del cálculo
+    setCobradoActual(0)
+    setSaldoCajaAnterior(0)
+    setCobradoPeriodoAnt(0)
+
     const colsActivas = columnasLiq.filter(c => c.activo)
     const tieneMultiCol = colsActivas.length > 1
 
@@ -1037,8 +1043,17 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
           }
         }
       }
-      // Usar total de detalles si existen, sino el total_cobrado migrado del PDF
+      // cobradoPeriodoAnt = pagos del período anterior (para el EF)
+      // se usa solo para mostrar el Estado Financiero del período que se está liquidando
+      // Se guarda el total cobrado del período anterior como referencia histórica
       setCobradoPeriodoAnt(totalCobradoAnt > 0 ? totalCobradoAnt : totalCobradoDirecto)
+
+    // Cargar cobranzas del período ACTUAL (mayo) — para el Estado Financiero correcto
+    // Estas son las que deben aparecer como "Ingresos del período" en el EF
+    const { data: cobranzasActuales } = await supabase.from('con_cobranzas')
+      .select('monto').eq('expensa_id', expSel?.id || '')
+    const totalCobradoActual = (cobranzasActuales||[]).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
+    setCobradoActual(totalCobradoActual)
     } else {
       setSaldoCajaAnterior(0)
       setCobradoPeriodoAnt(0)
@@ -1298,12 +1313,14 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       }).join('')
 
     // ── Estado financiero ─────────────────────────────────────────────────────
-    // saldoCajaAnterior = saldo de caja al inicio del período (saldo final de la liquidación anterior)
-    // cobradoPeriodoAnt = lo cobrado durante la liquidación anterior
-    // La fórmula del PDF de Adm. Global:
-    //   Saldo anterior + Cobros en término + Cobros adeudados + Intereses - Egresos = Saldo final
-    const saldoAntEF   = saldoCajaAnterior  // saldo de caja que trajo del período anterior
-    const cobradoTermEF = cobradoPeriodoAnt // pagos recibidos en el período anterior
+    // LÓGICA CONTABLE CORRECTA:
+    //   saldoAntEF    = saldo_caja_final del período anterior (lo que quedó en caja)
+    //   cobradoTermEF = cobranzas registradas en el PERÍODO ACTUAL (con_cobranzas de mayo)
+    //                   NO los cobros de abril (ya están incluidos en saldoAntEF)
+    //   egresos       = gastos del período actual pagados a proveedores
+    //   saldoFinalEF  = saldoAnt + ingresos - egresos
+    const saldoAntEF    = saldoCajaAnterior   // saldo_caja_final del período anterior
+    const cobradoTermEF = cobradoActual        // cobranzas del período en curso (mayo)
     const saldoFinalEF  = saldoAntEF + cobradoTermEF - totalGastosTotal
 
     // ── Prorrateo — tabla portrait con columnas compactas ────────────────────
@@ -1646,7 +1663,12 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       const totalACobrar = distribucion.reduce((a,d) => a + d.monto, 0)
 
       // 1. Actualizar la expensa con los totales definitivos
-      const totalCobrado = distribucion.reduce((a,d) => a + (d.pagos_anterior||0), 0)
+      // totalCobrado = cobranzas REALES registradas en este período (con_cobranzas)
+      // NO usar pagos_anterior (eso es la deuda que viene de períodos anteriores)
+      const { data: cobsMayo } = await supabase.from('con_cobranzas')
+        .select('monto').eq('expensa_id', expSel.id)
+      const totalCobrado = (cobsMayo||[]).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
+      // saldoCajaFinal = saldo anterior + lo cobrado en mayo - lo gastado en mayo
       const saldoCajaFinal = saldoCajaAnterior + totalCobrado - totalGastos
       await supabase.from('con_expensas').update({
         total_gastos: totalGastos,
