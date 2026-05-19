@@ -8268,8 +8268,11 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
         .order('periodo', { ascending: false }).limit(6),
     ])
 
-    // Deudores (saldo pendiente de cobrar a propietarios)
-    const deudores = (detalles||[]).filter(d=>d.estado!=='pagada').reduce((a,d) => {
+    // Deudores — saldo pendiente según la última expensa abierta
+    // Se toma de con_expensas_detalle filtrado a la expensa abierta actual
+    // Si no hay expensa abierta, se toma la última cerrada
+    // Fórmula por UF: MAX(0, saldo_anterior + monto + interes - pagos)
+    const deudores = (detalles||[]).reduce((a,d) => {
       const saldo = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0)
         + (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)
       return a + Math.max(0, saldo)
@@ -8282,11 +8285,15 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
     const ingresos = (cobranzas||[]).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
 
     // Egresos del período
+    // NOTA: con_gastos ya incluye todos los gastos del consorcio (honorarios, servicios, etc.)
+    // con_pagos_proveedor son pagos efectivos a proveedores — pueden solaparse con gastos
+    // Para evitar doble conteo, el egreso del período = solo gastos del consorcio
     const egresosGastos   = (gastos||[]).reduce((a,g) => a + (parseFloat(g.monto)||0), 0)
     const egresosPagProv  = (pagosProv||[]).reduce((a,p) => a + (parseFloat(p.monto)||0), 0)
-    const egresos = egresosGastos + egresosPagProv
+    // Egresos = gastos del consorcio (la fuente más confiable para el período)
+    const egresos = egresosGastos
 
-    // Resultado del período
+    // Resultado del período = Ingresos cobrados - Gastos ejecutados
     const resultado = ingresos - egresos
 
     // Ingresos por medio de pago
@@ -8391,16 +8398,20 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
             <Card>
               <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:10 }}>Detalle egresos</div>
-              {[
-                { l:'Gastos del consorcio', v:datos.egresosGastos },
-                { l:'Pagos a proveedores', v:datos.egresosPagProv },
-              ].map((k,i) => (
-                <div key={i} style={{ display:'flex', justifyContent:'space-between',
-                  padding:'8px 0', borderBottom:'1px solid #f3f4f6' }}>
-                  <span style={{ fontSize:13 }}>{k.l}</span>
-                  <span style={{ fontWeight:700, color:RJ }}>{fmt(k.v)}</span>
+              <div style={{ display:'flex', justifyContent:'space-between',
+                padding:'8px 0', borderBottom:'1px solid #f3f4f6' }}>
+                <span style={{ fontSize:13 }}>Gastos del consorcio</span>
+                <span style={{ fontWeight:700, color:RJ }}>{fmt(datos.egresosGastos)}</span>
+              </div>
+              {datos.egresosPagProv > 0 && (
+                <div style={{ display:'flex', justifyContent:'space-between',
+                  padding:'4px 0', borderBottom:'1px solid #f3f4f6' }}>
+                  <span style={{ fontSize:11, color:GR, fontStyle:'italic' }}>
+                    Pagos a proveedores (informativo)
+                  </span>
+                  <span style={{ fontSize:11, color:GR }}>{fmt(datos.egresosPagProv)}</span>
                 </div>
-              ))}
+              )}
               <div style={{ display:'flex', justifyContent:'space-between', padding:'8px 0',
                 borderTop:'2px solid #1A3FA0', marginTop:4 }}>
                 <span style={{ fontWeight:700, fontSize:13 }}>Total</span>
@@ -9714,24 +9725,46 @@ function CtaCorriente({ session, consorcioId, unidades, copropietarios }) {
     // Construir líneas de cuenta corriente
     const lineas = []
 
-    // Expensas (débitos automáticos)
+    // Expensas (débitos automáticos) — leídas de con_expensas_detalle
     for (const d of (dets||[])) {
       const periodo = d.con_expensas?.periodo || ''
       const [y,m] = (periodo||'').split('-')
       const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
       const perLabel = m ? `${meses[parseInt(m)-1]} ${y}` : periodo
-      if (parseFloat(d.saldo_anterior)||0 > 0) {
-        lineas.push({ fecha: d.created_at?.split('T')[0], tipo:'debito',
-          concepto: `Saldo anterior — ${perLabel}`, monto: parseFloat(d.saldo_anterior)||0,
-          origen: 'saldo_ant' })
+      const montoExpensa = parseFloat(d.monto)||0
+      const saldoAnt     = parseFloat(d.saldo_anterior)||0
+      const intMora      = parseFloat(d.interes_mora)||0
+
+      // Saldo anterior arrastrado del período previo
+      if (saldoAnt > 0) {
+        lineas.push({
+          fecha:   d.con_expensas?.fecha_vencimiento || d.created_at?.split('T')[0],
+          tipo:    'debito',
+          concepto:`Saldo anterior al ${perLabel}`,
+          monto:   saldoAnt,
+          origen:  'saldo_ant'
+        })
       }
-      lineas.push({ fecha: d.con_expensas?.fecha_vencimiento || d.created_at?.split('T')[0],
-        tipo:'debito', concepto: `Expensa ${perLabel} (${d.con_expensas?.tipo||''})`,
-        monto: parseFloat(d.monto)||0, origen: 'expensa', vto: d.con_expensas?.fecha_vencimiento })
-      if (parseFloat(d.interes_mora)||0 > 0) {
-        lineas.push({ fecha: d.created_at?.split('T')[0], tipo:'debito',
-          concepto: `Interés mora — ${perLabel}`, monto: parseFloat(d.interes_mora)||0,
-          origen: 'mora' })
+      // Expensa del período — solo si tiene monto (si está liquidada)
+      if (montoExpensa > 0) {
+        lineas.push({
+          fecha:   d.con_expensas?.fecha_vencimiento || d.created_at?.split('T')[0],
+          tipo:    'debito',
+          concepto:`Expensa ${perLabel}`,
+          monto:   montoExpensa,
+          origen:  'expensa',
+          vto:     d.con_expensas?.fecha_vencimiento
+        })
+      }
+      // Interés de mora
+      if (intMora > 0) {
+        lineas.push({
+          fecha:   d.created_at?.split('T')[0],
+          tipo:    'debito',
+          concepto:`Interés mora — ${perLabel}`,
+          monto:   intMora,
+          origen:  'mora'
+        })
       }
     }
 
