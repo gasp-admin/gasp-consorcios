@@ -671,6 +671,9 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     pct_mora_vto2: 3,          // % adicional por segundo vencimiento
     ajuste_centavos: true,     // distribuir los centavos sobrantes a UF1
   })
+  // Importes por columna: { [codigo_columna]: { monto: number, editable: bool } }
+  // Se inicializa al llegar al paso 3 desde los gastos de cada columna
+  const [importesPorColumna, setImportesPorColumna] = useState({})
   const [distribucion, setDistribucion] = useState([])
   const [procesando, setProcesando]     = useState(false)
   const [msg, setMsg]                   = useState(null)
@@ -904,8 +907,60 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   const totalGastos = gastos.reduce((a,g) => a + (parseFloat(g.monto)||0), 0)
 
   // ── PASO 3: Distribución ───────────────────────────────────────────────────
+  // Inicializar importes por columna a partir de los gastos cargados
+  // Se llama al hacer clic en "Continuar → Distribución"
+  function inicializarImportesPorColumna() {
+    const colsActivas = columnasLiq.filter(c => c.activo)
+    if (colsActivas.length === 0) return  // sin columnas → usa lógica global
+
+    const gruposOrdenados = [...gruposLiq].sort((a,b) => a.numero - b.numero)
+
+    // Calcular total de gastos por columna según grupos de liquidación
+    const totalesPorCol = {}
+    colsActivas.forEach(col => { totalesPorCol[col.codigo] = 0 })
+
+    gastos.forEach(g => {
+      // Buscar a qué columnas pertenece este gasto
+      const grp = gruposOrdenados.find(gr => gr.categorias?.includes(g.categoria))
+      const colsCodigos = grp?.columnas_coef?.length > 0
+        ? grp.columnas_coef
+        : [colsActivas[0]?.codigo]   // fallback: primera columna
+      const monto = parseFloat(g.monto) || 0
+      // Distribuir el gasto entre las columnas indicadas (partes iguales si hay varias)
+      const porCol = monto / (colsCodigos.length || 1)
+      colsCodigos.forEach(cc => {
+        if (totalesPorCol[cc] !== undefined) totalesPorCol[cc] += porCol
+      })
+    })
+
+    // Construir estado: { [codigo]: { monto: number, usar_total: true } }
+    const nuevoEstado = {}
+    colsActivas.forEach(col => {
+      nuevoEstado[col.codigo] = {
+        nombre: col.nombre,
+        campo_coef: col.campo_coef || 'porcentaje_fiscal',
+        monto: Math.round(totalesPorCol[col.codigo] || 0),
+        usar_total: true,   // si true: usa el total calculado; si false: editable manualmente
+      }
+    })
+    setImportesPorColumna(nuevoEstado)
+  }
+
   async function calcularDistribucion() {
-    const totalACobrar = config.usar_total_gastos
+    const colsActivas = columnasLiq.filter(c => c.activo)
+    const tieneMultiCol = colsActivas.length > 1
+
+    // Determinar el total a cobrar
+    // — Multicol: suma de los importes de todas las columnas (cada una editable)
+    // — Unicol / sin columnas: lógica global existente
+    let totalACobrar
+    if (tieneMultiCol && Object.keys(importesPorColumna).length > 0) {
+      totalACobrar = Object.values(importesPorColumna).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
+    } else {
+      totalACobrar = config.usar_total_gastos
+        ? totalGastos
+        : parseFloat(config.total_a_cobrar) || totalGastos
+    }
       ? totalGastos
       : parseFloat(config.total_a_cobrar) || totalGastos
 
@@ -960,21 +1015,37 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     const vto1 = `${anioVto}-${String(mesVto).padStart(2,'0')}-${String(config.vto1_dia||10).padStart(2,'0')}`
     const vto2 = `${anioVto}-${String(mesVto).padStart(2,'0')}-${String(config.vto2_dia||20).padStart(2,'0')}`
 
-    // Distribuir por coeficiente
-    // Lógica de redondeo con identificación de UF en centavos:
-    // El importe base se redondea al peso (sin decimales)
-    // Los centavos son el número de UF (UF 1 → ,01 — UF 25 → ,25)
+    // ── Distribución por columnas ────────────────────────────────────────────
+    // Para consorcios con múltiples columnas (ej: Mejillón con EXPENSAS A + B):
+    //   - Cada columna tiene su propio coeficiente (campo_coef) y monto
+    //   - La expensa de cada UF = suma de (monto_col * coef_UF / coef_total_col) por columna
+    // Para consorcios sin columnas configuradas: usa porcentaje_fiscal global (comportamiento anterior)
+
     const items = unidades.map((u, idx) => {
-      const ufNum = idx + 1 // número de orden de la UF (1-based)
+      const ufNum = idx + 1
       const cp    = copropietarios.find(c => c.id === u.propietario_id)
       const coef  = parseFloat(u.porcentaje_fiscal) || 0
       const pct   = coefTotal > 0 ? coef / coefTotal * 100 : 0
 
-      // Calcular expensa base = parte proporcional, redondeada al peso entero
-      const expensaBase = Math.round(totalACobrar * (coef / coefTotal))
+      let expensaBase = 0
 
-      // Redondeo: agregar el número de UF como centavos
-      // Ejemplo: UF 3, base $72.000 → $72.000,03
+      if (tieneMultiCol && Object.keys(importesPorColumna).length > 0) {
+        // Multicol: calcular aporte de cada columna para esta UF
+        Object.entries(importesPorColumna).forEach(([codigo, col]) => {
+          const campoCf = col.campo_coef || 'porcentaje_fiscal'
+          const coefUF  = parseFloat(u[campoCf]) || 0
+          // Total del coeficiente de esta columna entre todas las UFs
+          const coefTotalCol = unidades.reduce((a, uu) => a + (parseFloat(uu[campoCf])||0), 0)
+          if (coefTotalCol > 0) {
+            expensaBase += Math.round((parseFloat(col.monto)||0) * (coefUF / coefTotalCol))
+          }
+        })
+      } else {
+        // Unicol: comportamiento original
+        expensaBase = Math.round(totalACobrar * (coef / coefTotal))
+      }
+
+      // Redondeo: centavos = número de UF (identifica el pago en el banco)
       const centavosUF = ufNum / 100
 
       // Datos de la liq anterior para esta UF
@@ -1917,7 +1988,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
 
           {gastos.length > 0 && (
             <div style={{ display:'flex', gap:8 }}>
-              <Btn onClick={() => setPaso(3)}>Continuar → Distribución</Btn>
+              <Btn onClick={() => { inicializarImportesPorColumna(); setPaso(3) }}>Continuar → Distribución</Btn>
               <BtnSec onClick={() => setPaso(1)}>← Volver</BtnSec>
             </div>
           )}
@@ -1932,38 +2003,122 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
               Configurar distribución — {periodoLabel(expSel?.periodo)}
             </div>
 
-            {/* Monto a cobrar */}
-            <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8,
-              padding:'14px 16px', marginBottom:14 }}>
-              <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:10 }}>
-                Importe a distribuir
-              </div>
-              <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-                <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
-                  <input type="radio" checked={config.usar_total_gastos}
-                    onChange={()=>setConfig(c=>({...c,usar_total_gastos:true}))} />
-                  Igual a total de gastos <strong style={{marginLeft:4}}>{fmt(totalGastos)}</strong>
-                </label>
-              </div>
-              <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
-                  <input type="radio" checked={!config.usar_total_gastos}
-                    onChange={()=>setConfig(c=>({...c,usar_total_gastos:false}))} />
-                  Importe personalizado:
-                </label>
-                {!config.usar_total_gastos && (
-                  <input type="number" min="0" step="0.01"
-                    value={config.total_a_cobrar}
-                    onChange={e=>setConfig(c=>({...c,total_a_cobrar:e.target.value}))}
-                    placeholder="ej: 800000"
-                    style={{ width:160, padding:'6px 10px', border:'1px solid #93c5fd',
-                      borderRadius:7, fontSize:13, fontWeight:700 }} />
-                )}
-              </div>
-              <div style={{ fontSize:11, color:'#1e40af', marginTop:8 }}>
-                Puede ser mayor a los gastos para incluir fondo de reserva o redondeo.
-              </div>
-            </div>
+            {/* Monto a cobrar — por columna si hay múltiples columnas configuradas */}
+            {(() => {
+              const colsActivas = columnasLiq.filter(c => c.activo)
+              const tieneMultiCol = colsActivas.length > 1
+
+              if (tieneMultiCol && Object.keys(importesPorColumna).length > 0) {
+                // ── UI MULTICOL: una fila por columna ──────────────────────────────
+                const totalColumnas = Object.values(importesPorColumna).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
+                return (
+                  <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'14px 16px', marginBottom:14 }}>
+                    <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:10 }}>
+                      Importes a distribuir por columna
+                    </div>
+                    <div style={{ fontSize:11, color:'#1e40af', marginBottom:10 }}>
+                      Cada columna tiene su propio coeficiente. El importe es el total de gastos asignados a esa columna —
+                      podés modificarlo (ej: para incluir fondo de reserva o ajuste).
+                    </div>
+                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, marginBottom:8 }}>
+                      <thead>
+                        <tr style={{ background:'#dbeafe' }}>
+                          <th style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:700, color:AZ }}>Columna</th>
+                          <th style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:700, color:AZ }}>Coeficiente</th>
+                          <th style={{ padding:'7px 10px', textAlign:'right', fontSize:11, fontWeight:700, color:AZ }}>Gastos calculados</th>
+                          <th style={{ padding:'7px 10px', textAlign:'right', fontSize:11, fontWeight:700, color:AZ }}>Importe a distribuir</th>
+                          <th style={{ padding:'7px 10px', textAlign:'center', fontSize:11, fontWeight:700, color:AZ }}>Usar calculado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {colsActivas.map(col => {
+                          const estado = importesPorColumna[col.codigo] || { monto:0, usar_total:true }
+                          const gastosCol = (() => {
+                            const gruposOrd = [...gruposLiq].sort((a,b) => a.numero - b.numero)
+                            return gastos.reduce((acc, g) => {
+                              const grp = gruposOrd.find(gr => gr.categorias?.includes(g.categoria))
+                              const cols = grp?.columnas_coef?.length > 0 ? grp.columnas_coef : [colsActivas[0]?.codigo]
+                              if (cols.includes(col.codigo)) acc += (parseFloat(g.monto)||0) / cols.length
+                              return acc
+                            }, 0)
+                          })()
+                          return (
+                            <tr key={col.codigo} style={{ borderBottom:'1px solid #e5e7eb' }}>
+                              <td style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>{col.nombre}</td>
+                              <td style={{ padding:'8px 10px', fontSize:11, color:GR }}>{(col.campo_coef||'porcentaje_fiscal').replace('porcentaje_fiscal','Coef. fiscal').replace('pct_gtos_grales','Gtos. grales').replace('pct_fdo_obras','Fdo. obras').replace('pct_cochera','Cochera')}</td>
+                              <td style={{ padding:'8px 10px', textAlign:'right', color:GR }}>{fmt(Math.round(gastosCol))}</td>
+                              <td style={{ padding:'8px 10px', textAlign:'right' }}>
+                                <input
+                                  type="number" min="0" step="1"
+                                  value={estado.monto || ''}
+                                  onChange={e => setImportesPorColumna(prev => ({
+                                    ...prev,
+                                    [col.codigo]: { ...prev[col.codigo], monto: parseFloat(e.target.value)||0, usar_total: false }
+                                  }))}
+                                  style={{ width:140, padding:'6px 10px', border:'1px solid #93c5fd',
+                                    borderRadius:7, fontSize:13, fontWeight:700, textAlign:'right' }}
+                                />
+                              </td>
+                              <td style={{ padding:'8px 10px', textAlign:'center' }}>
+                                <input type="checkbox" checked={!!estado.usar_total}
+                                  onChange={e => setImportesPorColumna(prev => ({
+                                    ...prev,
+                                    [col.codigo]: {
+                                      ...prev[col.codigo],
+                                      monto: e.target.checked ? Math.round(gastosCol) : prev[col.codigo]?.monto,
+                                      usar_total: e.target.checked
+                                    }
+                                  }))} />
+                              </td>
+                            </tr>
+                          )
+                        })}
+                        <tr style={{ background:'#f0f4ff', borderTop:'2px solid '+AZ }}>
+                          <td colSpan={3} style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>Total a distribuir</td>
+                          <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:800, fontSize:15, color:AZ }}>{fmt(totalColumnas)}</td>
+                          <td />
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              }
+
+              // ── UI UNICOL: comportamiento original ─────────────────────────────
+              return (
+                <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8,
+                  padding:'14px 16px', marginBottom:14 }}>
+                  <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:10 }}>
+                    Importe a distribuir
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
+                    <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
+                      <input type="radio" checked={config.usar_total_gastos}
+                        onChange={()=>setConfig(c=>({...c,usar_total_gastos:true}))} />
+                      Igual a total de gastos <strong style={{marginLeft:4}}>{fmt(totalGastos)}</strong>
+                    </label>
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                    <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
+                      <input type="radio" checked={!config.usar_total_gastos}
+                        onChange={()=>setConfig(c=>({...c,usar_total_gastos:false}))} />
+                      Importe personalizado:
+                    </label>
+                    {!config.usar_total_gastos && (
+                      <input type="number" min="0" step="0.01"
+                        value={config.total_a_cobrar}
+                        onChange={e=>setConfig(c=>({...c,total_a_cobrar:e.target.value}))}
+                        placeholder="ej: 800000"
+                        style={{ width:160, padding:'6px 10px', border:'1px solid #93c5fd',
+                          borderRadius:7, fontSize:13, fontWeight:700 }} />
+                    )}
+                  </div>
+                  <div style={{ fontSize:11, color:'#1e40af', marginTop:8 }}>
+                    Puede ser mayor a los gastos para incluir fondo de reserva o redondeo.
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* Vencimientos */}
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:14 }}>
