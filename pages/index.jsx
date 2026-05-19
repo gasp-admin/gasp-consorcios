@@ -1203,14 +1203,17 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       if (!rubrosAgrup[label]) rubrosAgrup[label] = { gastos:[], total:0, porCol:{} }
       rubrosAgrup[label].gastos.push(g)
       rubrosAgrup[label].total += parseFloat(g.monto)||0
-      // En multi-columna: asignar gasto a la columna según el grupo
+      // En multi-columna: asignar gasto a cada columna según el grupo (por categoría)
+      // Un gasto puede aparecer en MÚLTIPLES columnas si el grupo así lo indica
       if (tieneMulticol) {
-        const grp = gruposOrdenados.find(gr=>{
-          const lbl = `${gr.numero} ${gr.nombre.replace(/^\d+\s+/,'')}`
-          return lbl === label
+        const grp = gruposOrdenados.find(gr => gr.categorias?.includes(g.categoria))
+        const colsCodigos = grp?.columnas_coef?.length > 0
+          ? grp.columnas_coef
+          : [colsActivas[0]?.codigo]
+        const monto = parseFloat(g.monto) || 0
+        colsCodigos.forEach(cc => {
+          rubrosAgrup[label].porCol[cc] = (rubrosAgrup[label].porCol[cc]||0) + monto
         })
-        const colGasto = grp?.columnas_coef?.[0] || colsActivas[0]?.codigo || 'COL1'
-        rubrosAgrup[label].porCol[colGasto] = (rubrosAgrup[label].porCol[colGasto]||0) + (parseFloat(g.monto)||0)
       }
     }
 
@@ -1226,14 +1229,13 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         const filas = data.gastos.map(g => {
           const montoG = parseFloat(g.monto)||0
           if (tieneMulticol) {
-            // Determinar a qué columna va este gasto
-            const grp = gruposOrdenados.find(gr => {
-              const lbl = `${gr.numero} ${gr.nombre.replace(/^\d+\s+/,'')}`
-              return lbl === label
-            })
-            const colCod = grp?.columnas_coef?.[0] || colsActivas[0]?.codigo || ''
+            // Determinar en qué columnas aparece este gasto (por categoría del grupo)
+            const grp = gruposOrdenados.find(gr => gr.categorias?.includes(g.categoria))
+            const colsCod = grp?.columnas_coef?.length > 0
+              ? grp.columnas_coef
+              : [colsActivas[0]?.codigo]
             const celdas = colsActivas.map(c =>
-              `<td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${c.codigo===colCod?fmtN(montoG):'0,00'}</td>`
+              `<td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${colsCod.includes(c.codigo)?fmtN(montoG):'—'}</td>`
             ).join('') + `<td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${fmtN(montoG)}</td>`
             return `<tr style="border-bottom:1px solid #eee"><td style="padding:2px 5px;font-size:7pt">${(g.concepto||'').replace(/</g,'&lt;')}${g.proveedor_nombre?', '+g.proveedor_nombre.replace(/</g,'&lt;'):''}${g.comprobante?', '+g.comprobante:''}</td>${celdas}</tr>`
           } else {
@@ -1425,13 +1427,40 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
   <table>
     <thead><tr><th style="text-align:left">Concepto</th>${encabezadosCol}</tr></thead>
     <tbody>${rubrosHTML}</tbody>
-    <tfoot><tr style="background:#0d2b3e;color:#fff;font-weight:700">
-      <td style="padding:3px 7px;font-size:8pt">TOTAL &nbsp; 100,00%</td>
-      ${tieneMulticol
-        ? colsActivas.map(c=>`<td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(gastos.filter(g=>{const grp=gruposOrdenados.find(gr=>gr.categorias?.includes(g.categoria));return grp?.columnas_coef?.[0]===c.codigo}).reduce((a,g)=>a+(parseFloat(g.monto)||0),0))}</td>`).join('')+'<td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">'+fmtN(totalGastosTotal)+'</td>'
-        : `<td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td><td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>`
-      }
-    </tr></tfoot>
+    <tfoot>
+      ${tieneMulticol ? (() => {
+        // Fila 1: Total gastos brutos por columna (suma de gastos asignados)
+        const totBrutosPorCol = {}
+        colsActivas.forEach(c => { totBrutosPorCol[c.codigo] = 0 })
+        gastos.forEach(g => {
+          const grp = gruposOrdenados.find(gr => gr.categorias?.includes(g.categoria))
+          const cols = grp?.columnas_coef?.length > 0 ? grp.columnas_coef : [colsActivas[0]?.codigo]
+          cols.forEach(cc => { if (totBrutosPorCol[cc] !== undefined) totBrutosPorCol[cc] += parseFloat(g.monto)||0 })
+        })
+        // Fila 2: Importes a prorratear configurados en el paso 3
+        const impProrr = importesPorColumna || {}
+        const celdasBrutos = colsActivas.map(c =>
+          `<td style="text-align:right;padding:3px 7px;font-size:7.5pt;white-space:nowrap">${fmtN(totBrutosPorCol[c.codigo]||0)}</td>`
+        ).join('') + `<td style="text-align:right;padding:3px 7px;font-size:7.5pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>`
+        const celdasProrr = colsActivas.map(c => {
+          const imp = impProrr[c.codigo]
+          const val = imp ? parseFloat(imp.monto)||0 : totBrutosPorCol[c.codigo]||0
+          return `<td style="text-align:right;padding:3px 7px;font-size:8pt;font-weight:800;white-space:nowrap">${fmtN(val)}</td>`
+        }).join('') + `<td style="text-align:right;padding:3px 7px;font-size:8pt;font-weight:800;white-space:nowrap">${fmtN(Object.values(impProrr).reduce((a,c)=>a+(parseFloat(c.monto)||0),0)||totalGastosTotal)}</td>`
+        return `<tr style="background:#475569;color:#fff">
+          <td style="padding:3px 7px;font-size:7.5pt">Total gastos brutos</td>
+          ${celdasBrutos}
+        </tr>
+        <tr style="background:#0d2b3e;color:#fff;font-weight:700">
+          <td style="padding:3px 7px;font-size:8pt">IMPORTE A PRORRATEAR</td>
+          ${celdasProrr}
+        </tr>`
+      })() : `<tr style="background:#0d2b3e;color:#fff;font-weight:700">
+        <td style="padding:3px 7px;font-size:8pt">TOTAL &nbsp; 100,00%</td>
+        <td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>
+        <td style="text-align:right;padding:3px 7px;font-size:8pt;white-space:nowrap">${fmtN(totalGastosTotal)}</td>
+      </tr>`}
+    </tfoot>
   </table>
 
   <div class="sec-title">ESTADO FINANCIERO</div>
