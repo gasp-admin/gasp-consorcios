@@ -920,16 +920,18 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     colsActivas.forEach(col => { totalesPorCol[col.codigo] = 0 })
 
     gastos.forEach(g => {
-      // Buscar a qué columnas pertenece este gasto
+      // Buscar a qué columnas pertenece este gasto según los grupos de liquidación
       const grp = gruposOrdenados.find(gr => gr.categorias?.includes(g.categoria))
       const colsCodigos = grp?.columnas_coef?.length > 0
         ? grp.columnas_coef
-        : [colsActivas[0]?.codigo]   // fallback: primera columna
+        : [colsActivas[0]?.codigo]   // fallback: primera columna activa
       const monto = parseFloat(g.monto) || 0
-      // Distribuir el gasto entre las columnas indicadas (partes iguales si hay varias)
-      const porCol = monto / (colsCodigos.length || 1)
+      // IMPORTANTE: el gasto va completo a CADA columna indicada.
+      // Si un gasto de electricidad figura en [EXPENSAS_A, SUB_2DO], significa
+      // que AMBAS columnas lo incluyen para el prorrateo por su coeficiente.
+      // No se divide el monto; cada columna lo prorratea independientemente.
       colsCodigos.forEach(cc => {
-        if (totalesPorCol[cc] !== undefined) totalesPorCol[cc] += porCol
+        if (totalesPorCol[cc] !== undefined) totalesPorCol[cc] += monto
       })
     })
 
@@ -1029,13 +1031,22 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
 
       if (tieneMultiCol && Object.keys(importesPorColumna).length > 0) {
         // Multicol: calcular aporte de cada columna para esta UF
+        // Para cada columna: intentar usar su campo_coef propio;
+        // si ese campo es 0 en TODAS las UFs (no configurado), hacer fallback a porcentaje_fiscal
         Object.entries(importesPorColumna).forEach(([codigo, col]) => {
+          const montoCol = parseFloat(col.monto) || 0
+          if (montoCol === 0) return  // columna sin importe → no aporta
           const campoCf = col.campo_coef || 'porcentaje_fiscal'
-          const coefUF  = parseFloat(u[campoCf]) || 0
-          // Total del coeficiente de esta columna entre todas las UFs
+          // Calcular el total del coeficiente de esta columna entre todas las UFs
           const coefTotalCol = unidades.reduce((a, uu) => a + (parseFloat(uu[campoCf])||0), 0)
-          if (coefTotalCol > 0) {
-            expensaBase += Math.round((parseFloat(col.monto)||0) * (coefUF / coefTotalCol))
+          // Fallback: si el campo alternativo tiene todos cero, usar porcentaje_fiscal
+          const campoEfectivo = coefTotalCol > 0 ? campoCf : 'porcentaje_fiscal'
+          const coefTotalEfectivo = coefTotalCol > 0
+            ? coefTotalCol
+            : unidades.reduce((a, uu) => a + (parseFloat(uu['porcentaje_fiscal'])||0), 0)
+          const coefUFEfectivo = parseFloat(u[campoEfectivo]) || 0
+          if (coefTotalEfectivo > 0) {
+            expensaBase += Math.round(montoCol * (coefUFEfectivo / coefTotalEfectivo))
           }
         })
       } else {
@@ -1063,14 +1074,20 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       const monto_vto2 = Math.round((expensaBase + centavosUF) * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100 + deuda + interes_mora
 
       // Calcular aporte desagregado por columna (para la planilla PDF)
+      // Misma lógica de fallback que expensaBase
       const aporte_por_columna = {}
       if (tieneMultiCol && Object.keys(importesPorColumna).length > 0) {
         Object.entries(importesPorColumna).forEach(([codigo, col]) => {
+          const montoCol = parseFloat(col.monto) || 0
           const campoCf = col.campo_coef || 'porcentaje_fiscal'
-          const coefUF  = parseFloat(u[campoCf]) || 0
           const coefTotalCol = unidades.reduce((a, uu) => a + (parseFloat(uu[campoCf])||0), 0)
-          aporte_por_columna[codigo] = coefTotalCol > 0
-            ? Math.round((parseFloat(col.monto)||0) * (coefUF / coefTotalCol))
+          const campoEfectivo = coefTotalCol > 0 ? campoCf : 'porcentaje_fiscal'
+          const coefTotalEfectivo = coefTotalCol > 0
+            ? coefTotalCol
+            : unidades.reduce((a, uu) => a + (parseFloat(uu['porcentaje_fiscal'])||0), 0)
+          const coefUFEfectivo = parseFloat(u[campoEfectivo]) || 0
+          aporte_por_columna[codigo] = (montoCol > 0 && coefTotalEfectivo > 0)
+            ? Math.round(montoCol * (coefUFEfectivo / coefTotalEfectivo))
             : 0
         })
       }
