@@ -1062,6 +1062,19 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       // 2do vencimiento: recargo solo sobre la expensa del período, deuda e interés sin recargo
       const monto_vto2 = Math.round((expensaBase + centavosUF) * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100 + deuda + interes_mora
 
+      // Calcular aporte desagregado por columna (para la planilla PDF)
+      const aporte_por_columna = {}
+      if (tieneMultiCol && Object.keys(importesPorColumna).length > 0) {
+        Object.entries(importesPorColumna).forEach(([codigo, col]) => {
+          const campoCf = col.campo_coef || 'porcentaje_fiscal'
+          const coefUF  = parseFloat(u[campoCf]) || 0
+          const coefTotalCol = unidades.reduce((a, uu) => a + (parseFloat(uu[campoCf])||0), 0)
+          aporte_por_columna[codigo] = coefTotalCol > 0
+            ? Math.round((parseFloat(col.monto)||0) * (coefUF / coefTotalCol))
+            : 0
+        })
+      }
+
       return {
         unidad_id: u.id,
         numero: u.numero_interno || u.numero,
@@ -1070,6 +1083,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         propietario: cp?.apellido_nombre || '—',
         coef, pct: pct.toFixed(4),
         expensa_base: expensaBase,
+        aporte_por_columna,   // desglose por columna para el PDF
         redondeo: centavosUF,
         monto: monto_total,
         monto_vto2,
@@ -1236,9 +1250,22 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
 
     // ── Prorrateo — tabla portrait con columnas compactas ────────────────────
     // TOTAL por UF = EXPENSA + REDONDEO + DEUDA + INTERÉS
+    // ── Prorrateo: columnas dinámicas (una columna por columna activa) ──────────
     const filasProrrateoPrev = distribucion.map((d,idx) => {
       const bgRow = idx % 2 === 0 ? '#fff' : '#f0f6fb'
       const totalUF = (parseFloat(d.expensa_base)||0) + (parseFloat(d.redondeo)||0) + (parseFloat(d.deuda)||0) + (parseFloat(d.interes_mora)||0)
+
+      // Celdas de columnas: si hay multicol, mostrar cada columna; sino la única
+      let celdasColumnas
+      if (tieneMulticol && d.aporte_por_columna && Object.keys(d.aporte_por_columna).length > 0) {
+        celdasColumnas = colsActivas.map(col => {
+          const val = d.aporte_por_columna[col.codigo] || 0
+          return `<td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${val > 0 ? fmtN(val) : '—'}</td>`
+        }).join('')
+      } else {
+        celdasColumnas = `<td style="text-align:right;padding:2px 4px;font-size:7.5pt;white-space:nowrap;font-weight:600">${fmtN(d.expensa_base)}</td>`
+      }
+
       return `<tr style="border-bottom:1px solid #d8e8f0;background:${bgRow}">
         <td style="padding:2px 4px;text-align:center;font-weight:700;font-size:7pt">${d.numero_uf}</td>
         <td style="padding:2px 4px;font-size:7pt">${String(d.numero||'').replace(/</g,'&lt;')}</td>
@@ -1248,7 +1275,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         <td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap;font-weight:${d.deuda>0?700:400};color:${d.deuda>0?'#b91c1c':'#374151'}">${fmtN(d.deuda)}</td>
         <td style="text-align:right;padding:2px 4px;font-size:7pt">${fmtN(d.interes_mora||0)}</td>
         <td style="text-align:right;padding:2px 4px;font-size:7pt">${d.pct}%</td>
-        <td style="text-align:right;padding:2px 4px;font-size:7.5pt;white-space:nowrap;font-weight:600">${fmtN(d.expensa_base)}</td>
+        ${celdasColumnas}
         <td style="text-align:right;padding:2px 4px;font-size:6.5pt;color:#9ca3af">${fmtN(d.redondeo)}</td>
         <td style="text-align:right;padding:2px 4px;font-size:8pt;font-weight:800;color:#1A3FA0;white-space:nowrap">${fmtN(totalUF)}</td>
         <td style="text-align:center;padding:2px 4px;font-size:7pt">${d.numero_uf}</td>
@@ -1263,6 +1290,13 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
     const totExpensa  = distribucion.reduce((a,d)=>a+d.expensa_base,0)
     const totRedondeo = distribucion.reduce((a,d)=>a+d.redondeo,0)
     const totTotal    = distribucion.reduce((a,d)=>a+d.expensa_base+d.redondeo+d.deuda+(d.interes_mora||0),0)
+    // Totales por columna (para fila de totales en pie de tabla)
+    const totPorColumna = {}
+    if (tieneMulticol) {
+      colsActivas.forEach(col => {
+        totPorColumna[col.codigo] = distribucion.reduce((a,d) => a + (d.aporte_por_columna?.[col.codigo]||0), 0)
+      })
+    }
 
     // ── Notas del período ────────────────────────────────────────────────────
     const notasText = (notasPeriodo || '').replace(/</g,'&lt;').replace(/\n/g,'<br/>')
@@ -1463,7 +1497,9 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         <th style="text-align:right;padding:3px 4px;width:56px">DEUDA</th>
         <th style="text-align:right;padding:3px 4px;width:46px">INTERES</th>
         <th style="text-align:right;padding:3px 4px;width:38px">%</th>
-        <th style="text-align:right;padding:3px 4px;width:66px">${colsActivas[0]?.nombre || 'EXPENSAS A'}</th>
+        ${tieneMulticol
+          ? colsActivas.map(col => `<th style="text-align:right;padding:3px 4px;min-width:52px">${col.nombre}</th>`).join('')
+          : `<th style="text-align:right;padding:3px 4px;width:66px">${colsActivas[0]?.nombre || 'EXPENSAS A'}</th>`}
         <th style="text-align:right;padding:3px 4px;width:50px">RED./AJUST.</th>
         <th style="text-align:right;padding:3px 4px;width:70px;background:#1A3FA0">TOTAL</th>
         <th style="text-align:center;padding:3px 4px;width:22px">U.F.</th>
@@ -1478,7 +1514,9 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         <td style="text-align:right;padding:3px 5px;font-size:7pt;white-space:nowrap">${fmtN(totDeuda)}</td>
         <td style="text-align:right;padding:3px 5px;font-size:7pt">${fmtN(totInteres)}</td>
         <td style="text-align:right;padding:3px 5px;font-size:7pt">100%</td>
-        <td style="text-align:right;padding:3px 5px;font-size:7.5pt;white-space:nowrap">${fmtN(totExpensa)}</td>
+        ${tieneMulticol
+          ? colsActivas.map(col => `<td style="text-align:right;padding:3px 5px;font-size:7pt;white-space:nowrap">${fmtN(totPorColumna[col.codigo]||0)}</td>`).join('')
+          : `<td style="text-align:right;padding:3px 5px;font-size:7.5pt;white-space:nowrap">${fmtN(totExpensa)}</td>`}
         <td style="text-align:right;padding:3px 5px;font-size:7pt;white-space:nowrap">${fmtN(totRedondeo)}</td>
         <td style="text-align:right;padding:3px 5px;font-size:8.5pt;white-space:nowrap">${fmtN(totTotal)}</td>
         <td></td>
@@ -2210,8 +2248,12 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                   <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
                     <thead>
                       <tr style={{ background:'#2e4057' }}>
-                        {['UF','Propietario','Sal. Ant.','Pagos Ant.','Deuda','Interés','%','1er Vto','Expensa','Redondeo','Total','2do Vto','Con Recargo'].map((h,i) => (
-                          <th key={i} style={{ padding:'5px 8px', textAlign:i>=2&&i!==7&&i!==11?'right':'left',
+                        {['UF','Propietario','Sal. Ant.','Pagos Ant.','Deuda','Interés','%','1er Vto',
+                            ...(columnasLiq.filter(c=>c.activo).length > 1
+                              ? columnasLiq.filter(c=>c.activo).map(c=>c.nombre)
+                              : ['Expensa']),
+                            'Redondeo','Total','2do Vto','Con Recargo'].map((h,i) => (
+                          <th key={i} style={{ padding:'5px 8px', textAlign:i>=2&&i!==7?'right':'left',
                             fontSize:10, fontWeight:700, color:'#fff', whiteSpace:'nowrap' }}>{h}</th>
                         ))}
                       </tr>
@@ -2238,9 +2280,17 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                           </td>
                           <td style={{ padding:'5px 8px', textAlign:'right', color:GR, fontSize:10 }}>{d.pct}%</td>
                           <td style={{ padding:'5px 8px', fontSize:10, color:GR, whiteSpace:'nowrap' }}>{fmtD(d.vto1)}</td>
-                          <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:700, color:AZ }}>
-                            {fmt(d.expensa_base)}
-                          </td>
+                          {columnasLiq.filter(c=>c.activo).length > 1
+                            ? columnasLiq.filter(c=>c.activo).map(col => (
+                                <td key={col.codigo} style={{ padding:'5px 8px', textAlign:'right', fontWeight:600,
+                                  color:d.aporte_por_columna?.[col.codigo]>0?AZ:GR }}>
+                                  {d.aporte_por_columna?.[col.codigo] > 0 ? fmt(d.aporte_por_columna[col.codigo]) : '—'}
+                                </td>
+                              ))
+                            : <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:700, color:AZ }}>
+                                {fmt(d.expensa_base)}
+                              </td>
+                          }
                           <td style={{ padding:'5px 8px', textAlign:'right', fontSize:10, color:'#9ca3af' }}>
                             {fmt(d.redondeo)}
                           </td>
@@ -2265,7 +2315,16 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                         </td>
                         <td style={{ padding:'6px 8px', textAlign:'right', fontSize:10 }}>100%</td>
                         <td />
-                        <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:800, fontSize:13 }}>{fmt(distribucion.reduce((a,d)=>a+d.expensa_base,0))}</td>
+                        {columnasLiq.filter(c=>c.activo).length > 1
+                          ? columnasLiq.filter(c=>c.activo).map(col => (
+                              <td key={col.codigo} style={{ padding:'6px 8px', textAlign:'right', fontWeight:700, fontSize:12 }}>
+                                {fmt(distribucion.reduce((a,d)=>a+(d.aporte_por_columna?.[col.codigo]||0),0))}
+                              </td>
+                            ))
+                          : <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:800, fontSize:13 }}>
+                              {fmt(distribucion.reduce((a,d)=>a+d.expensa_base,0))}
+                            </td>
+                        }
                         <td style={{ padding:'6px 8px', textAlign:'right', fontSize:10 }}>{fmt(distribucion.reduce((a,d)=>a+d.redondeo,0))}</td>
                         <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:800, fontSize:14 }}>{fmt(distribucion.reduce((a,d)=>a+d.monto,0))}</td>
                         <td />
