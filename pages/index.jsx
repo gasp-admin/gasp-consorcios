@@ -989,14 +989,53 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       const { data: detsAnt } = await supabase.from('con_expensas_detalle')
         .select('unidad_id, monto, saldo_anterior, pagos_periodo, interes_mora')
         .eq('expensa_id', expAnterior[0].id)
+
+      // También buscar cobranzas registradas en la expensa anterior (por UF)
+      const { data: cobranzasAnt } = await supabase.from('con_cobranzas')
+        .select('unidad_id, monto').eq('expensa_id', expAnterior[0].id)
+      const cobranzasPorUF = {}
+      for (const co of (cobranzasAnt||[])) {
+        cobranzasPorUF[co.unidad_id] = (cobranzasPorUF[co.unidad_id]||0) + (parseFloat(co.monto)||0)
+      }
+
       let totalCobradoAnt = 0
-      for (const d of (detsAnt||[])) {
-        const saldo = Math.max(0, (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0))
-        saldosAnt[d.unidad_id] = {
-          saldo,
-          pagos: parseFloat(d.pagos_periodo)||0,
+      if ((detsAnt||[]).length > 0) {
+        // Caso normal: hay detalles guardados por UF
+        for (const d of detsAnt) {
+          const pagosUF = cobranzasPorUF[d.unidad_id] || (parseFloat(d.pagos_periodo)||0)
+          const saldo = Math.max(0,
+            (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) +
+            (parseFloat(d.interes_mora)||0) - pagosUF
+          )
+          saldosAnt[d.unidad_id] = { saldo, pagos: pagosUF }
+          totalCobradoAnt += pagosUF
         }
-        totalCobradoAnt += parseFloat(d.pagos_periodo)||0
+      } else {
+        // Caso fallback: no hay detalles por UF (liquidación anterior cerrada sin detalles)
+        // Reconstruir montos por UF prorrateando total_expensa según coeficientes
+        const totalExpAnt = parseFloat(expAnterior[0].total_expensa) || 0
+        const totalCobAnt = parseFloat(expAnterior[0].total_cobrado) || totalCobradoDirecto
+        const coefTotalAnt = unidades.reduce((a,u) => a + (parseFloat(u.porcentaje_fiscal)||0), 0)
+
+        if (totalExpAnt > 0 && coefTotalAnt > 0) {
+          for (const u of unidades) {
+            const coefUF = parseFloat(u.porcentaje_fiscal) || 0
+            if (coefUF === 0) continue
+            // Monto proporcional de la UF en la expensa anterior
+            const montoUFAnt = Math.round(totalExpAnt * (coefUF / coefTotalAnt))
+            // Pago registrado para esta UF (de cobranzas si existe)
+            const pagosUF = cobranzasPorUF[u.id] || 0
+            // Pago proporcional estimado si no hay cobranzas individuales
+            const pagosEstimados = pagosUF > 0
+              ? pagosUF
+              : (totalCobAnt > 0 ? Math.round(totalCobAnt * (coefUF / coefTotalAnt)) : 0)
+            const saldo = Math.max(0, montoUFAnt - pagosEstimados)
+            if (saldo > 0 || pagosEstimados > 0) {
+              saldosAnt[u.id] = { saldo, pagos: pagosEstimados }
+              totalCobradoAnt += pagosEstimados
+            }
+          }
+        }
       }
       // Usar total de detalles si existen, sino el total_cobrado migrado del PDF
       setCobradoPeriodoAnt(totalCobradoAnt > 0 ? totalCobradoAnt : totalCobradoDirecto)
@@ -1633,12 +1672,38 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
         const { data: detsAnt } = await supabase.from('con_expensas_detalle')
           .select('unidad_id, monto, saldo_anterior, pagos_periodo, interes_mora')
           .eq('expensa_id', expAnterior[0].id)
-        for (const d of (detsAnt||[])) {
-          const saldo = Math.max(0,
-            (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) +
-            (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)
-          )
-          if (saldo > 0) saldosAnt[d.unidad_id] = saldo
+        // Cobranzas individuales de la expensa anterior
+        const { data: cobranzasAnt2 } = await supabase.from('con_cobranzas')
+          .select('unidad_id, monto').eq('expensa_id', expAnterior[0].id)
+        const cobPorUF2 = {}
+        for (const co of (cobranzasAnt2||[])) {
+          cobPorUF2[co.unidad_id] = (cobPorUF2[co.unidad_id]||0) + (parseFloat(co.monto)||0)
+        }
+        if ((detsAnt||[]).length > 0) {
+          // Hay detalles guardados
+          for (const d of detsAnt) {
+            const pagos = cobPorUF2[d.unidad_id] || (parseFloat(d.pagos_periodo)||0)
+            const saldo = Math.max(0,
+              (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) +
+              (parseFloat(d.interes_mora)||0) - pagos
+            )
+            if (saldo > 0) saldosAnt[d.unidad_id] = saldo
+          }
+        } else {
+          // Fallback: reconstruir desde total_expensa y coeficientes
+          const totalExpAnt2 = parseFloat(expAnterior[0].total_expensa) || 0
+          const totalCobAnt2 = parseFloat(expAnterior[0].total_cobrado) || 0
+          const coefTot2 = unidades.reduce((a,u) => a + (parseFloat(u.porcentaje_fiscal)||0), 0)
+          if (totalExpAnt2 > 0 && coefTot2 > 0) {
+            for (const u of unidades) {
+              const cf = parseFloat(u.porcentaje_fiscal) || 0
+              if (cf === 0) continue
+              const montoUF = Math.round(totalExpAnt2 * (cf / coefTot2))
+              const pagoUF = cobPorUF2[u.id] || (totalCobAnt2 > 0 ? Math.round(totalCobAnt2 * (cf/coefTot2)) : 0)
+              const saldo = Math.max(0, montoUF - pagoUF)
+              if (saldo > 0) saldosAnt[u.id] = saldo
+            }
+          }
         }
       }
 
