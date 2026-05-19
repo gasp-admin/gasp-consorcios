@@ -1047,17 +1047,17 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       // se usa solo para mostrar el Estado Financiero del período que se está liquidando
       // Se guarda el total cobrado del período anterior como referencia histórica
       setCobradoPeriodoAnt(totalCobradoAnt > 0 ? totalCobradoAnt : totalCobradoDirecto)
-
-    // Cargar cobranzas del período ACTUAL (mayo) — para el Estado Financiero correcto
-    // Estas son las que deben aparecer como "Ingresos del período" en el EF
-    const { data: cobranzasActuales } = await supabase.from('con_cobranzas')
-      .select('monto').eq('expensa_id', expSel?.id || '')
-    const totalCobradoActual = (cobranzasActuales||[]).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
-    setCobradoActual(totalCobradoActual)
     } else {
       setSaldoCajaAnterior(0)
       setCobradoPeriodoAnt(0)
     }
+
+    // Cargar cobranzas del período ACTUAL — siempre, independiente de si hay expensa anterior
+    // Son las que aparecen como "Ingresos del período" en el Estado Financiero
+    const { data: cobranzasActuales } = await supabase.from('con_cobranzas')
+      .select('monto').eq('expensa_id', expSel?.id || '')
+    const totalCobradoActual = (cobranzasActuales||[]).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
+    setCobradoActual(totalCobradoActual)
 
     // Calcular fechas de vencimiento
     const exp_periodo = expSel?.periodo || ''
