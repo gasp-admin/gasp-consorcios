@@ -8343,6 +8343,189 @@ function AnularCobranzas({ session, consorcioId, unidades, copropietarios, expen
   )
 }
 
+// ── FormComp: fuera del componente para evitar re-mount en cada render ──────
+function FormComp({ form, setForm, guardar, guardando, proveedores, expensas,
+  extraerFacturaConIA, extrayendoIA, archivoFactura }) {
+  const TIPOS = [
+    {v:'factura',l:'Factura'},{v:'remito',l:'Remito'},{v:'ticket',l:'Ticket'},
+    {v:'nota_debito',l:'Nota de débito'},{v:'nota_credito',l:'Nota de crédito'}
+  ]
+  return (
+    <Card style={{ marginBottom:16, border:`1.5px solid ${form.id?AM:AZ}` }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+        <div style={{ fontWeight:700, color:form.id?AM:AZ, fontSize:13 }}>
+          {form.id ? '✏ Editar comprobante' : '🧾 Nuevo comprobante'}
+        </div>
+      </div>
+
+      {/* IA solo en alta nueva */}
+      {!form.id && (
+        <div style={{ background:'#f0f9ff', border:'1px solid #bae6fd', borderRadius:8, padding:'10px 14px', marginBottom:14 }}>
+          <div style={{ fontSize:12, fontWeight:600, color:'#0369a1', marginBottom:6 }}>🤖 Extracción automática con IA (opcional)</div>
+          <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+            <input type="file" accept=".pdf,image/*"
+              onChange={e => e.target.files[0] && extraerFacturaConIA(e.target.files[0])}
+              style={{ fontSize:12, flex:1 }} disabled={extrayendoIA} />
+            {extrayendoIA && <span style={{ fontSize:12, color:'#0369a1', whiteSpace:'nowrap' }}>⏳ Analizando...</span>}
+            {archivoFactura && !extrayendoIA && <span style={{ fontSize:11, color:VD, whiteSpace:'nowrap' }}>✓ {archivoFactura.name.slice(0,20)}</span>}
+          </div>
+          <div style={{ fontSize:10, color:'#6b7280', marginTop:4 }}>Suba la factura y la IA completará los campos automáticamente.</div>
+        </div>
+      )}
+
+      <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:12, marginBottom:12 }}>
+        <Sel label="Proveedor *" value={form.proveedor_id||''} onChange={v=>setForm(f=>({...f,proveedor_id:v}))}
+          opts={[{v:'',l:'— Seleccione —'},...proveedores.map(p=>({v:p.id,l:p.razon_social}))]} />
+        <Sel label="Tipo" value={form.tipo||'factura'} onChange={v=>setForm(f=>({...f,tipo:v}))} opts={TIPOS} />
+        <div>
+          <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>N° comprobante</div>
+          <input value={form.numero||''} placeholder="0001-00012345"
+            onChange={e=>setForm(f=>({...f,numero:e.target.value}))}
+            style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+        </div>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:12, marginBottom:12 }}>
+        <div>
+          <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Concepto *</div>
+          <input value={form.concepto||''} placeholder="Descripción del servicio/producto"
+            onChange={e=>setForm(f=>({...f,concepto:e.target.value}))}
+            style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+        </div>
+        <div>
+          <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Fecha *</div>
+          <input type="date" value={form.fecha||''} onChange={e=>setForm(f=>({...f,fecha:e.target.value}))}
+            style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+        </div>
+        <div>
+          <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Vencimiento</div>
+          <input type="date" value={form.fecha_vencimiento||''} onChange={e=>setForm(f=>({...f,fecha_vencimiento:e.target.value}))}
+            style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+        </div>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:12, marginBottom:12 }}>
+        {[
+          { k:'monto_neto', l:'Monto neto' },
+          { k:'iva', l:'IVA' },
+          { k:'otros_impuestos', l:'Otros imp.' },
+          { k:'monto_total', l:'Total *' },
+        ].map(f2 => (
+          <div key={f2.k}>
+            <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>{f2.l}</div>
+            <input type="number" min="0" step="0.01" value={form[f2.k]||''}
+              onChange={e => {
+                const val = e.target.value
+                setForm(f => {
+                  const upd = {...f, [f2.k]: val}
+                  if (f2.k !== 'monto_total') {
+                    upd.monto_total = (
+                      (parseFloat(upd.monto_neto)||0) +
+                      (parseFloat(upd.iva)||0) +
+                      (parseFloat(upd.otros_impuestos)||0)
+                    ).toFixed(2)
+                  }
+                  return upd
+                })
+              }}
+              style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7,
+                fontSize:13, boxSizing:'border-box',
+                fontWeight: f2.k==='monto_total'?700:400,
+                background: f2.k==='monto_total'?'#f0f4ff':'#fff' }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+        <div>
+          <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Período asociado</div>
+          <select value={form.expensa_id||''} onChange={e=>setForm(f=>({...f,expensa_id:e.target.value}))}
+            style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+            <option value="">Sin período</option>
+            {expensas.map(e=><option key={e.id} value={e.id}>{e.periodo}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Notas</div>
+          <input value={form.notas||''} placeholder="Opcional"
+            onChange={e=>setForm(f=>({...f,notas:e.target.value}))}
+            style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:8 }}>
+        <Btn onClick={guardar} disabled={guardando}>{guardando?'⏳':form.id?'💾 Actualizar':'✓ Guardar'}</Btn>
+        <BtnSec onClick={()=>{setForm(null);setMsg(null)}}>Cancelar</BtnSec>
+      </div>
+    </Card>
+  )
+  )
+}
+
+// ── FormPago: fuera del componente para evitar re-mount en cada render ───────
+function FormPago({ formPago, setFormPago, pagarComprobante, proveedores }) {
+  const comp = formPago.comp
+    const prov = proveedores.find(p=>p.id===comp.proveedor_id)
+    return (
+      <Card style={{ marginBottom:16, border:'2px solid #86efac', background:'#f0fdf4' }}>
+        <div style={{ fontWeight:700, color:VD, fontSize:13, marginBottom:4 }}>💸 Registrar pago</div>
+        <div style={{ fontSize:12, color:GR, marginBottom:12 }}>
+          {prov?.razon_social} — {comp.tipo} {comp.numero||''} — {comp.concepto} — Saldo: <strong style={{ color:RJ }}>{fmt(comp.saldo_pendiente)}</strong>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:10 }}>
+          <div>
+            <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Monto a pagar *</div>
+            <input type="number" min="0" step="0.01" value={formPago.monto||''}
+              onChange={e=>setFormPago(f=>({...f,monto:e.target.value}))}
+              style={{ width:'100%', padding:'8px 11px', border:'1px solid #86efac', borderRadius:7, fontSize:14, fontWeight:700, boxSizing:'border-box' }} />
+          </div>
+          <div>
+            <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Fecha *</div>
+            <input type="date" value={formPago.fecha||hoy} onChange={e=>setFormPago(f=>({...f,fecha:e.target.value}))}
+              style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
+          </div>
+          <div>
+            <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Medio de pago</div>
+            <select value={formPago.medio_pago||'transferencia'} onChange={e=>setFormPago(f=>({...f,medio_pago:e.target.value}))}
+              style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+              {MEDIOS_PAGO.map(m=><option key={m.v} value={m.v}>{m.l}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10, marginBottom:12 }}>
+          <div>
+            <div style={{ fontSize:11, color:GR, marginBottom:3 }}>Ret. IIBB $</div>
+            <input type="number" min="0" step="0.01" value={formPago.retencion_iibb||''}
+              onChange={e=>setFormPago(f=>({...f,retencion_iibb:e.target.value}))}
+              style={{ width:'100%', padding:'7px 9px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, boxSizing:'border-box' }} />
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:GR, marginBottom:3 }}>Ret. Ganancias $</div>
+            <input type="number" min="0" step="0.01" value={formPago.retencion_ganancias||''}
+              onChange={e=>setFormPago(f=>({...f,retencion_ganancias:e.target.value}))}
+              style={{ width:'100%', padding:'7px 9px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, boxSizing:'border-box' }} />
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:GR, marginBottom:3 }}>N° Orden de pago</div>
+            <input value={formPago.nro_orden_pago||''} onChange={e=>setFormPago(f=>({...f,nro_orden_pago:e.target.value}))}
+              style={{ width:'100%', padding:'7px 9px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, boxSizing:'border-box' }} />
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:GR, marginBottom:3 }}>Referencia</div>
+            <input value={formPago.referencia||''} onChange={e=>setFormPago(f=>({...f,referencia:e.target.value}))}
+              style={{ width:'100%', padding:'7px 9px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, boxSizing:'border-box' }} />
+          </div>
+        </div>
+        {formPago.monto && (formPago.retencion_iibb||formPago.retencion_ganancias||formPago.retencion_iva) && (
+          <div style={{ fontSize:13, fontWeight:700, color:VD, marginBottom:10 }}>
+            Neto a transferir: {fmt((parseFloat(formPago.monto)||0)-(parseFloat(formPago.retencion_iibb)||0)-(parseFloat(formPago.retencion_ganancias)||0)-(parseFloat(formPago.retencion_iva)||0))}
+          </div>
+        )}
+        <div style={{ display:'flex', gap:8 }}>
+          <Btn color={VD} onClick={pagarComprobante}>✓ Confirmar pago</Btn>
+          <BtnSec onClick={()=>setFormPago(null)}>Cancelar</BtnSec>
+        </div>
+      </Card>
+    )
+  }
+
+
 function Comprobantes({ session, consorcioId, proveedores, expensas }) {
   const [comprobantes, setComprobantes] = useState([])
   const [form, setForm]   = useState(null)
@@ -8608,8 +8791,7 @@ function Comprobantes({ session, consorcioId, proveedores, expensas }) {
     {v:'cheque_tercero',l:'Cheque de tercero'},{v:'efectivo',l:'Efectivo'},{v:'otro',l:'Otro'}
   ]
 
-  // Formulario de comprobante (alta y edición)
-  const FormComp = () => (
+  // FormComp movido fuera del componente (ver definición antes de function Comprobantes)
     <Card style={{ marginBottom:16, border:`1.5px solid ${form.id?AM:AZ}` }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
         <div style={{ fontWeight:700, color:form.id?AM:AZ, fontSize:13 }}>
@@ -8715,8 +8897,7 @@ function Comprobantes({ session, consorcioId, proveedores, expensas }) {
     </Card>
   )
 
-  // Formulario de pago rápido inline
-  const FormPago = () => {
+  // FormPago movido fuera del componente (ver definición antes de function Comprobantes)
     const comp = formPago.comp
     const prov = proveedores.find(p=>p.id===comp.proveedor_id)
     return (
@@ -8801,8 +8982,22 @@ function Comprobantes({ session, consorcioId, proveedores, expensas }) {
 
       <Msg data={msg} />
 
-      {form && <FormComp />}
-      {formPago && <FormPago />}
+      {form && (
+        <FormComp
+          form={form} setForm={setForm}
+          guardar={guardar} guardando={guardando}
+          proveedores={proveedores} expensas={expensas}
+          extraerFacturaConIA={extraerFacturaConIA}
+          extrayendoIA={extrayendoIA} archivoFactura={archivoFactura}
+        />
+      )}
+      {formPago && (
+        <FormPago
+          formPago={formPago} setFormPago={setFormPago}
+          pagarComprobante={pagarComprobante}
+          proveedores={proveedores}
+        />
+      )}
 
       {/* Filtros */}
       <Card style={{ marginBottom:12 }}>
