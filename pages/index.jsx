@@ -344,14 +344,118 @@ function Unidades({ session, consorcioId, copropietarios }) {
     exportarExcel({titulo:'Unidades-Funcionales',columnas:cols,filas:rows})
   }
 
+  // ── Reajuste de coeficientes ──────────────────────────────────────────────
+  // Ajusta cada columna de coeficientes para que sume exactamente 100%.
+  // Calcula el delta (100 - suma_actual) y lo distribuye proporcionalmente
+  // entre todas las UFs que tienen coeficiente > 0 en esa columna.
+  // Aplica a todas las columnas configuradas: porcentaje_fiscal + las multicol.
+  async function reajustarCoeficientes() {
+    if (unidades.length === 0) return
+    if (!confirm(
+      '¿Reajustar coeficientes para que cada columna sume exactamente 100%?\n\n' +
+      'Se distribuirá el decimal faltante/sobrante proporcionalmente entre todas las UFs.\n\n' +
+      'Esta operación modifica los coeficientes en la base de datos.'
+    )) return
+
+    setMsg({ tipo:'ok', texto:'⏳ Reajustando coeficientes...' })
+
+    // Detectar todas las columnas de coeficiente disponibles en este consorcio
+    const COLUMNAS_COEF = [
+      'porcentaje_fiscal',
+      'pct_gtos_grales',
+      'pct_fdo_obras',
+      'pct_cochera',
+      'pct_gtos_part',
+    ]
+
+    // Solo procesar columnas que tienen al menos 1 valor > 0
+    const columnasActivas = COLUMNAS_COEF.filter(col =>
+      unidades.some(u => parseFloat(u[col]) > 0)
+    )
+
+    if (columnasActivas.length === 0) {
+      return setMsg({ tipo:'warn', texto:'No hay columnas de coeficiente con valores cargados.' })
+    }
+
+    const resultados = []
+    let totalErrores = 0
+
+    for (const col of columnasActivas) {
+      // UFs con valor positivo en esta columna
+      const ufsConCoef = unidades.filter(u => parseFloat(u[col]) > 0)
+      if (ufsConCoef.length === 0) continue
+
+      const sumaActual = ufsConCoef.reduce((a, u) => a + parseFloat(u[col]), 0)
+      const delta = 100 - sumaActual  // puede ser positivo (falta) o negativo (sobra)
+
+      // Si ya suma 100 con tolerancia de 0.01%, saltar
+      if (Math.abs(delta) < 0.01) {
+        resultados.push(`✅ ${col}: ya suma ${sumaActual.toFixed(4)}%`)
+        continue
+      }
+
+      // Distribuir delta proporcionalmente entre las UFs con coef > 0
+      // Ajuste de cada UF = delta × (coef_UF / suma_actual)
+      const ajustes = ufsConCoef.map(u => {
+        const coefActual = parseFloat(u[col])
+        const ajuste    = delta * (coefActual / sumaActual)
+        const nuevoCoef = Math.round((coefActual + ajuste) * 10000) / 10000 // 4 decimales
+        return { id: u.id, nuevoCoef }
+      })
+
+      // Verificar que los ajustes suman exactamente 100
+      const sumaAjustada = ajustes.reduce((a, x) => a + x.nuevoCoef, 0)
+      const residuo = 100 - sumaAjustada
+
+      // Si hay residuo por redondeo, sumarlo a la UF de mayor coeficiente
+      if (Math.abs(residuo) > 0.00001) {
+        const maxIdx = ajustes.reduce((mi, x, i, arr) => x.nuevoCoef > arr[mi].nuevoCoef ? i : mi, 0)
+        ajustes[maxIdx].nuevoCoef = Math.round((ajustes[maxIdx].nuevoCoef + residuo) * 10000) / 10000
+      }
+
+      // Actualizar en Supabase
+      let errores = 0
+      for (const { id, nuevoCoef } of ajustes) {
+        const { error } = await supabase.from('con_unidades')
+          .update({ [col]: nuevoCoef })
+          .eq('id', id)
+        if (error) errores++
+      }
+
+      const sumaFinal = ajustes.reduce((a, x) => a + x.nuevoCoef, 0)
+      if (errores === 0) {
+        resultados.push(`✅ ${col}: ${sumaActual.toFixed(4)}% → ${sumaFinal.toFixed(4)}% (Δ${delta>0?'+':''}${Math.abs(delta).toFixed(4)})%`)
+      } else {
+        resultados.push(`⚠️ ${col}: ${errores} errores al actualizar`)
+        totalErrores += errores
+      }
+    }
+
+    await cargar()
+    setMsg({
+      tipo: totalErrores === 0 ? 'ok' : 'warn',
+      texto: resultados.join(' | ')
+    })
+  }
+
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
         <div>
           <div style={{ fontWeight:700, fontSize:15, color:'#111' }}>Unidades Funcionales</div>
-          <div style={{ fontSize:12, color:GR }}>{unidades.length} unidades · Coef. total: {totalCoef.toFixed(4)}%</div>
+          <div style={{ fontSize:12, color:GR }}>{unidades.length} unidades · Coef. fiscal: <span style={{ fontWeight:700, color: Math.abs(totalCoef - 100) < 0.1 ? VD : RJ }}>{totalCoef.toFixed(4)}%</span>
+            {['pct_gtos_grales','pct_fdo_obras','pct_cochera','pct_gtos_part'].filter(col => unidades.some(u => parseFloat(u[col]) > 0)).map(col => {
+              const suma = unidades.reduce((a,u) => a + (parseFloat(u[col])||0), 0)
+              const ok   = Math.abs(suma - 100) < 0.1
+              const label = col.replace('pct_gtos_grales','Gtos.grales').replace('pct_fdo_obras','Fdo.obras').replace('pct_cochera','Cochera').replace('pct_gtos_part','Gtos.part')
+              return <span key={col}> · {label}: <span style={{ fontWeight:700, color: ok ? VD : RJ }}>{suma.toFixed(4)}%</span></span>
+            })}
+          </div>
         </div>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
         <Btn onClick={() => setForm({ tipo:'departamento', estado:'ocupada' })}>+ Nueva UF</Btn>
+        <Btn small color={AM} title="Reajustar coeficientes para que cada columna sume exactamente 100%" onClick={reajustarCoeficientes}>⚖️ Reajustar coeficientes</Btn>
+      </div>
       </div>
       <BarraListado busqueda={busqueda} onBuscar={setBusqueda} onPDF={handlePDF} onExcel={handleExcel} placeholder="Buscar por UF, tipo, propietario..." />
       <Msg data={msg} />
