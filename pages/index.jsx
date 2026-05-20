@@ -2027,7 +2027,7 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
                                 saldo_caja_final: 0,
                                 fecha_liquidacion: null,
                               }).eq('id', exp.id)
-                              await cargarDatos()
+                              await cargar()
                               setMsg({ tipo:'ok', texto:`✓ Liquidación de ${periodoLabel(exp.periodo)} anulada. El período quedó abierto.` })
                             } catch (err) {
                               setMsg({ tipo:'error', texto:'Error al anular: ' + err.message })
@@ -2692,7 +2692,7 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                   fecha_liquidacion: null
                 }).eq('id', expSel?.id)
                 // 4. Reset UI
-                await cargarDatos()
+                await cargar()
                 setPaso(1)
                 setDistribucion([])
                 setMsg({ tipo:'ok', texto:'✓ Liquidación anulada. El período quedó en estado abierto para una nueva liquidación.' })
