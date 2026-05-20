@@ -2025,7 +2025,6 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
                                 estado: 'abierta',
                                 total_cobrado: 0,
                                 saldo_caja_final: 0,
-                                fecha_liquidacion: null,
                               }).eq('id', exp.id)
                               await cargar()
                               setMsg({ tipo:'ok', texto:`✓ Liquidación de ${periodoLabel(exp.periodo)} anulada. El período quedó abierto.` })
@@ -2688,8 +2687,7 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                 await supabase.from('con_expensas').update({
                   estado: 'abierta',
                   total_cobrado: 0,
-                  saldo_caja_final: 0,
-                  fecha_liquidacion: null
+                  saldo_caja_final: 0
                 }).eq('id', expSel?.id)
                 // 4. Reset UI
                 await cargar()
