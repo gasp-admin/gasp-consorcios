@@ -2001,13 +2001,39 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
                         <span style={{ fontWeight:600, fontSize:13 }}>{periodoLabel(exp.periodo)}</span>
                         <Badge text="Cerrada" color={GR} bg='#f3f4f6' style={{ marginLeft:8 }} />
                       </div>
-                      <span style={{ fontSize:12,
-                        color: parseFloat(exp.saldo_caja_final||0) >= 0 ? '#16a34a' : '#dc2626',
-                        fontWeight:600 }}>
-                        {parseFloat(exp.saldo_caja_final||0) !== 0
-                          ? 'Saldo: ' + (parseFloat(exp.saldo_caja_final) > 0 ? '+' : '') + fmt(exp.saldo_caja_final)
-                          : (exp.total_gastos > 0 ? 'Gastos: ' + fmt(exp.total_gastos) : '')}
-                      </span>
+                      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                        <span style={{ fontSize:12,
+                          color: parseFloat(exp.saldo_caja_final||0) >= 0 ? '#16a34a' : '#dc2626',
+                          fontWeight:600 }}>
+                          {parseFloat(exp.saldo_caja_final||0) !== 0
+                            ? 'Saldo: ' + (parseFloat(exp.saldo_caja_final) > 0 ? '+' : '') + fmt(exp.saldo_caja_final)
+                            : (exp.total_gastos > 0 ? 'Gastos: ' + fmt(exp.total_gastos) : '')}
+                        </span>
+                        <Btn small color="#dc2626" style={{ background:'#fff', color:'#dc2626', border:'1px solid #dc2626', fontSize:11 }}
+                          title="Anular esta liquidación y dejar el período abierto para reliquidar"
+                          onClick={async () => {
+                            if (!window.confirm(
+                              `¿Anular la liquidación de ${periodoLabel(exp.periodo)}?\n\n` +
+                              `Se eliminarán los detalles por UF y los movimientos generados.\n` +
+                              `El período quedará ABIERTO para una nueva liquidación.\n\n` +
+                              `Los pagos ya registrados en Cobranzas NO se ven afectados.`
+                            )) return
+                            try {
+                              await supabase.from('con_expensas_detalle').delete().eq('expensa_id', exp.id)
+                              await supabase.from('con_movimientos_unidad').delete().eq('expensa_id', exp.id)
+                              await supabase.from('con_expensas').update({
+                                estado: 'abierta',
+                                total_cobrado: 0,
+                                saldo_caja_final: 0,
+                                fecha_liquidacion: null,
+                              }).eq('id', exp.id)
+                              await cargarDatos()
+                              setMsg({ tipo:'ok', texto:`✓ Liquidación de ${periodoLabel(exp.periodo)} anulada. El período quedó abierto.` })
+                            } catch (err) {
+                              setMsg({ tipo:'error', texto:'Error al anular: ' + err.message })
+                            }
+                          }}>🔄 Anular</Btn>
+                      </div>
                     </div>
                   ))}
                 </div>
