@@ -469,6 +469,38 @@ function Unidades({ session, consorcioId, copropietarios }) {
             <Input label="Sup. cubierta (m²)" value={form.superficie_cubierta} onChange={v=>F({superficie_cubierta:v})} type="number" />
             <Input label="Coeficiente fiscal %" value={form.porcentaje_fiscal} onChange={v=>F({porcentaje_fiscal:v})} type="number" placeholder="8.333..." required />
             <Sel label="Estado" value={form.estado} onChange={v=>F({estado:v})} opts={ESTADOS} />
+          </div>
+          {/* Coeficientes adicionales — aparecen si el consorcio tiene columnas de prorrateo configuradas */}
+          {(() => {
+            const camposExtra = [
+              { campo:'pct_fdo_obras',    label:'Coef. Fdo. Obras %' },
+              { campo:'pct_cochera',      label:'Coef. Cochera %' },
+              { campo:'pct_gtos_grales',  label:'Coef. Gtos. Grales %' },
+              { campo:'pct_gtos_part',    label:'Coef. Gtos. Part. %' },
+            ].filter(cf =>
+              // Mostrar el campo si: (a) el consorcio ya tiene UFs con ese coef > 0,
+              // o (b) el consorcio tiene una columna de liquidación con ese campo
+              unidades.some(u => parseFloat(u[cf.campo]) > 0) ||
+              columnasLiq.some(c => c.campo_coef === cf.campo)
+            )
+            if (!camposExtra.length) return null
+            return (
+              <div style={{ background:'#f8faff', border:'1px solid #dbeafe', borderRadius:8, padding:'12px 14px', marginBottom:12 }}>
+                <div style={{ fontSize:11, fontWeight:600, color:AZ, textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:10 }}>
+                  Coeficientes de prorrateo adicionales
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:10 }}>
+                  {camposExtra.map(cf => (
+                    <Input key={cf.campo} label={cf.label}
+                      value={form[cf.campo]||''}
+                      onChange={v=>F({[cf.campo]:v})}
+                      type="number" placeholder="0.0000..." />
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
             <Sel label="Copropietario" value={form.propietario_id} onChange={v=>F({propietario_id:v})}
               opts={[{v:'',l:'— Sin asignar —'}, ...copropietarios.map(c=>({v:c.id,l:c.apellido_nombre}))]} />
             <Input label="Descripción" value={form.descripcion} onChange={v=>F({descripcion:v})} placeholder="Observaciones..." />
@@ -2601,13 +2633,47 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
             Se generaron {distribucion.length} comprobantes individuales.
             Ya puede registrar cobranzas y enviar las liquidaciones por email.
           </div>
-          <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap', marginBottom:24 }}>
             <Btn onClick={() => setPagina('cobranzas')}>💳 Ir a Cobranzas</Btn>
             <Btn onClick={() => setPagina('emails')}
               style={{ background:'#7c3aed', color:'#fff' }}>✉️ Enviar liquidaciones</Btn>
             <BtnSec onClick={() => { setPaso(1); setExpSel(null); setGastos([]); setDistribucion([]); setMsg(null) }}>
               + Nuevo período
             </BtnSec>
+          </div>
+          {/* Anular liquidación */}
+          <div style={{ borderTop:'1px solid #fee2e2', paddingTop:20 }}>
+            <div style={{ fontSize:12, color:'#b91c1c', fontWeight:600, marginBottom:6 }}>
+              ¿Hay un error? Puede anular esta liquidación y practicar una nueva.
+            </div>
+            <div style={{ fontSize:11, color:GR, marginBottom:12 }}>
+              La anulación elimina los detalles por UF y los movimientos generados, y devuelve el período al estado <em>abierto</em>.
+              Los pagos ya registrados en Cobranzas no se ven afectados.
+            </div>
+            <Btn color="#dc2626" style={{ background:'#dc2626', color:'#fff' }} onClick={async () => {
+              if (!window.confirm('¿Confirma la anulación de la liquidación del período ' + expSel?.periodo + '?\nEsta acción no se puede deshacer.')) return
+              try {
+                setProcessando && setProcessando(true)
+                // 1. Borrar detalles UF
+                await supabase.from('con_expensas_detalle').delete().eq('expensa_id', expSel?.id)
+                // 2. Borrar movimientos generados en este período
+                await supabase.from('con_movimientos_unidad').delete().eq('expensa_id', expSel?.id)
+                // 3. Revertir expensa a abierta
+                await supabase.from('con_expensas').update({
+                  estado: 'abierta',
+                  total_cobrado: 0,
+                  saldo_caja_final: 0,
+                  fecha_liquidacion: null
+                }).eq('id', expSel?.id)
+                // 4. Reset UI
+                await cargarDatos()
+                setPaso(1)
+                setDistribucion([])
+                setMsg({ tipo:'ok', texto:'✓ Liquidación anulada. El período quedó en estado abierto para una nueva liquidación.' })
+              } catch(err) {
+                setMsg({ tipo:'error', texto:'Error al anular: ' + err.message })
+              }
+            }}>🔄 Anular liquidación y volver a empezar</Btn>
           </div>
         </Card>
       )}
@@ -5628,6 +5694,31 @@ function CuentasBancarias({ session, consorcioId, consorcioActivo }) {
         <div style={{ display:'flex', gap:8 }}>
           <Btn small color={GR} onClick={handlePDFCuentas}>🖨️ PDF</Btn>
           <Btn small color={VD} onClick={handleExcelCuentas}>📊 Excel</Btn>
+          <Btn small color={AZ} onClick={() => {
+            exportarPDF({
+              titulo: 'Listado de Cuentas Bancarias',
+              subtitulo: consorcioActivo?.nombre || '',
+              logoB64: LOGO_ADM_B64,
+              columnas: [
+                {key:'n',label:'#'},{key:'nombre',label:'Nombre / Referencia'},
+                {key:'banco',label:'Banco'},{key:'tipo',label:'Tipo'},
+                {key:'cbu',label:'CBU/CVU'},{key:'alias',label:'Alias'},
+                {key:'nro',label:'N° Cuenta'},
+                {key:'saldo_ini',label:'Saldo Inicial'},{key:'estado',label:'Estado'},
+              ],
+              filas: cuentas.map((c,i) => ({
+                n: i+1,
+                nombre: c.nombre,
+                banco: c.banco || '—',
+                tipo: c.tipo === 'corriente' ? 'Cta. Cte.' : c.tipo === 'caja_ahorro' ? 'Caja Ahorro' : 'Virtual (CVU)',
+                cbu: c.cbu || '—',
+                alias: c.alias || '—',
+                nro: c.nro_cuenta || '—',
+                saldo_ini: '$' + Number(c.saldo_inicial||0).toLocaleString('es-AR',{minimumFractionDigits:2}),
+                estado: c.activa ? 'Activa' : 'Inactiva',
+              })),
+            })
+          }}>📋 Listado completo</Btn>
           <Btn onClick={() => setForm({ tipo:'corriente', fecha_inicio: hoy })}>+ Nueva cuenta</Btn>
         </div>
       </div>
@@ -5972,6 +6063,7 @@ function EnviarEmails({ session, consorcioId, unidades, adminPerfil }) {
   const [resultado, setResultado] = useState(null)
   const [msg, setMsg]             = useState(null)
   const [emailLog, setEmailLog]   = useState([])
+  const [adjunto, setAdjunto]     = useState(null) // { nombre, tipo, base64 }
 
   async function cargarExpensas() {
     const { data } = await supabase.from('con_expensas').select('*')
@@ -6007,6 +6099,7 @@ function EnviarEmails({ session, consorcioId, unidades, adminPerfil }) {
           expensa_id: expSel,
           admin_id: session.user.id,
           test_email: esTest ? testEmail : undefined,
+          adjunto: adjunto ? { nombre: adjunto.nombre, tipo: adjunto.tipo, base64: adjunto.base64 } : undefined,
         })
       })
       const data = await res.json()
@@ -6069,6 +6162,34 @@ function EnviarEmails({ session, consorcioId, unidades, adminPerfil }) {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Adjunto opcional */}
+        <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'14px 16px', marginBottom:16 }}>
+          <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:8 }}>
+            📎 Adjunto (opcional)
+          </div>
+          <div style={{ fontSize:12, color:GR, marginBottom:8 }}>
+            Podés adjuntar hasta 1 archivo (PDF o imagen, máx. 5 MB) que se enviará junto a la liquidación.
+          </div>
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg"
+            onChange={e => {
+              const file = e.target.files?.[0]
+              if (!file) return setAdjunto(null)
+              if (file.size > 5 * 1024 * 1024) {
+                alert('El archivo supera los 5 MB. Seleccioná un archivo más pequeño.')
+                e.target.value = ''; return
+              }
+              const reader = new FileReader()
+              reader.onload = ev => setAdjunto({ nombre: file.name, tipo: file.type, base64: ev.target.result.split(',')[1] })
+              reader.readAsDataURL(file)
+            }}
+            style={{ fontSize:12, color:GR }} />
+          {adjunto && (
+            <div style={{ fontSize:11, color:VD, marginTop:6 }}>
+              ✓ {adjunto.nombre} listo para enviar
+            </div>
+          )}
         </div>
 
         {/* Test email */}
@@ -8330,6 +8451,300 @@ function ReporteMovimientos({ session, consorcioId, consorcioActivo, expensas })
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BALANCE ANUAL — Rendición de cuentas entre períodos
+// ══════════════════════════════════════════════════════════════════════════════
+function BalanceAnual({ session, consorcioId, consorcioActivo, adminPerfil }) {
+  const [periodoDesde, setPeriodoDesde] = useState(() => {
+    const d = new Date(); d.setFullYear(d.getFullYear()-1); return d.toISOString().slice(0,7)
+  })
+  const [periodoHasta, setPeriodoHasta] = useState(() => new Date().toISOString().slice(0,7))
+  const [datos, setDatos]     = useState(null)
+  const [cargando, setCargando] = useState(false)
+  const [msg, setMsg]         = useState(null)
+
+  const fmt = n => (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2})
+  const fmtM = n => { const v=Number(n)||0; return (v<0?'-':'')+'$'+Math.abs(v).toLocaleString('es-AR',{minimumFractionDigits:2}) }
+  const perLabel = p => { if(!p) return ''; const [y,m]=p.split('-'); return (['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(m)-1]||m)+' '+y.slice(2) }
+
+  const normCat = c => {
+    const cc=(c||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim()
+    if(cc.includes('contrat')||cc.includes('abon')) return 'contratos_abonos'
+    if(cc.includes('banc')||cc.includes('financiero')) return 'gastos_bancarios'
+    if(cc.includes('honorar')||cc.includes('admin')) return 'honorarios_admin'
+    if(cc.includes('municipal')||cc.includes('impuest')) return 'impuesto_municipal'
+    if(cc.includes('manten')||cc.includes('piscina')||cc.includes('parque')||cc.includes('ascensor')||cc.includes('bomba')||cc.includes('pintura')) return 'mantenimiento'
+    if(cc.includes('seguro')) return 'seguros'
+    if(cc.includes('servicio')||cc.includes('energia')||cc.includes('electr')||cc.includes('gas_serv')) return 'servicios_publicos'
+    if(cc.includes('varios')||cc.includes('material')||cc.includes('ferret')||cc.includes('limpieza')) return 'varios'
+    return 'otros'
+  }
+
+  const CATS_ORDER = ['contratos_abonos','gastos_bancarios','honorarios_admin','impuesto_municipal','mantenimiento','otros','seguros','servicios_publicos','varios']
+  const CATS_LABEL = {
+    contratos_abonos:'CONTRATOS Y ABONOS', gastos_bancarios:'GASTOS BANCARIOS',
+    honorarios_admin:'GASTOS DE ADMINISTRACIÓN', impuesto_municipal:'IMPUESTO MUNICIPAL',
+    mantenimiento:'MANTENIMIENTO GENERAL', otros:'OTROS EGRESOS',
+    seguros:'SEGUROS', servicios_publicos:'SERVICIOS PÚBLICOS', varios:'VARIOS'
+  }
+
+  async function generar() {
+    if(!periodoDesde||!periodoHasta||periodoDesde>periodoHasta)
+      return setMsg({tipo:'warn',texto:'Seleccioná un rango válido'})
+    setCargando(true); setDatos(null); setMsg(null)
+    try {
+      const {data:expensas} = await supabase.from('con_expensas')
+        .select('id,periodo,total_cobrado,saldo_caja_final').eq('consorcio_id',consorcioId)
+        .gte('periodo',periodoDesde).lte('periodo',periodoHasta).order('periodo')
+      if(!expensas?.length){setMsg({tipo:'warn',texto:'Sin períodos en el rango'}); setCargando(false); return}
+      const expIds = expensas.map(e=>e.id)
+      const {data:gastos} = await supabase.from('con_gastos')
+        .select('categoria,concepto,monto,expensa_id').in('expensa_id',expIds)
+      let saldoInicial0 = 0
+      const {data:expAnt} = await supabase.from('con_expensas')
+        .select('saldo_caja_final').eq('consorcio_id',consorcioId)
+        .lt('periodo',periodoDesde).order('periodo',{ascending:false}).limit(1)
+      if(expAnt?.[0]) saldoInicial0 = parseFloat(expAnt[0].saldo_caja_final)||0
+      const saldoInicialPorPeriodo = {}
+      const saldoFinalPorPeriodo = {}
+      const ingresosPorPeriodo = {}
+      for(let i=0;i<expensas.length;i++){
+        saldoInicialPorPeriodo[expensas[i].periodo] = i===0 ? saldoInicial0 : parseFloat(expensas[i-1].saldo_caja_final)||0
+        saldoFinalPorPeriodo[expensas[i].periodo] = parseFloat(expensas[i].saldo_caja_final)||0
+        ingresosPorPeriodo[expensas[i].periodo] = parseFloat(expensas[i].total_cobrado)||0
+      }
+      const mapa={}, totalsCat={}, totalsGlobal={}
+      let totalAnual=0, totalIngresos=0
+      for(const e of expensas) totalIngresos += parseFloat(e.total_cobrado)||0
+      for(const g of (gastos||[])){
+        const cat=normCat(g.categoria)
+        const per=expensas.find(e=>e.id===g.expensa_id)?.periodo
+        if(!per) continue
+        const monto=parseFloat(g.monto)||0
+        if(!mapa[cat]) mapa[cat]={}
+        if(!mapa[cat][g.concepto]) mapa[cat][g.concepto]={}
+        mapa[cat][g.concepto][per]=(mapa[cat][g.concepto][per]||0)+monto
+        if(!totalsCat[cat]) totalsCat[cat]={}
+        totalsCat[cat][per]=(totalsCat[cat][per]||0)+monto
+        totalsGlobal[per]=(totalsGlobal[per]||0)+monto
+        totalAnual+=monto
+      }
+      const periodos=expensas.map(e=>e.periodo)
+      const resultadoNeto=totalIngresos-totalAnual
+      const mesesPositivo=periodos.filter(p=>(saldoFinalPorPeriodo[p]||0)>=0).length
+      setDatos({periodos,mapa,totalsCat,totalsGlobal,totalAnual,totalIngresos,
+        ingresosPorPeriodo,saldoInicialPorPeriodo,saldoFinalPorPeriodo,
+        promedioIngresos:totalIngresos/periodos.length,
+        promedioEgresos:totalAnual/periodos.length,
+        resultadoNeto,mesesPositivo,CATS_ORDER,CATS_LABEL})
+    } catch(e){ setMsg({tipo:'error',texto:'Error: '+e.message}) }
+    setCargando(false)
+  }
+
+  function exportarPDFBalance(){
+    if(!datos) return
+    const d=datos
+    const w=window.open('','_blank')
+    const hoy=new Date().toLocaleDateString('es-AR')
+    const fmt2 = n => n!=null&&n!==''&&n!==0 ? (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2}) : '—'
+    let html=`<html><head><meta charset="utf-8"><style>
+      body{font-family:Arial,sans-serif;font-size:8.5px;margin:0;padding:6px}
+      h2{font-size:12px;margin:0 0 2px} .sub2{font-size:9px;color:#555;margin-bottom:6px}
+      table{width:100%;border-collapse:collapse;margin-bottom:6px;font-size:8px}
+      th{background:#1A3FA0;color:#fff;padding:3px 4px;text-align:right;white-space:nowrap}
+      th:first-child{text-align:left;min-width:160px}
+      td{padding:2px 4px;border-bottom:1px solid #e5e7eb;text-align:right;white-space:nowrap}
+      td:first-child{text-align:left}
+      .sub{background:#eff6ff;font-weight:bold} .cat{background:#dbeafe;font-weight:bold;text-transform:uppercase}
+      .neg{color:#dc2626} .pos{color:#16a34a} .total{background:#1A3FA0;color:#fff;font-weight:bold}
+      .si{background:#f0fdf4;font-weight:bold} .sf{background:#f0fdf4;font-weight:bold}
+      @media print{@page{size:A3 landscape;margin:6mm}}
+    </style></head><body>
+    <h2>RENDICIÓN DE CUENTAS — ${d.periodos[0]} / ${d.periodos[d.periodos.length-1]}</h2>
+    <div class="sub2">${consorcioActivo?.nombre||''} &nbsp;·&nbsp; Javier García Pérez RPAC N° 83 &nbsp;·&nbsp; ${hoy}</div>
+    <table><thead><tr><th>Categoría / Concepto</th>
+    ${d.periodos.map(p=>`<th>${perLabel(p)}</th>`).join('')}
+    <th>TOTAL</th><th>%</th><th>PROM.</th></tr></thead><tbody>`
+    html+=`<tr class="si"><td><b>SALDO INICIAL</b></td>${d.periodos.map(p=>`<td class="${(d.saldoInicialPorPeriodo[p]||0)<0?'neg':'pos'}">${fmt2(d.saldoInicialPorPeriodo[p])}</td>`).join('')}<td></td><td></td><td></td></tr>`
+    html+=`<tr class="cat"><td colspan="${d.periodos.length+4}">INGRESOS</td></tr>`
+    html+=`<tr><td style="padding-left:8px">Expensas cobradas</td>${d.periodos.map(p=>`<td class="pos">${fmt2(d.ingresosPorPeriodo[p])}</td>`).join('')}<td class="pos"><b>${fmt2(d.totalIngresos)}</b></td><td>—</td><td>${fmt2(d.promedioIngresos)}</td></tr>`
+    html+=`<tr class="cat"><td colspan="${d.periodos.length+4}">EGRESOS</td></tr>`
+    for(const cat of d.CATS_ORDER){
+      const conceps=Object.keys(d.mapa[cat]||{}); if(!conceps.length) continue
+      const totalCat=Object.values(d.totalsCat[cat]||{}).reduce((a,b)=>a+b,0)
+      const pct=d.totalAnual>0?(totalCat/d.totalAnual*100).toFixed(2):'0'
+      html+=`<tr class="sub"><td>${d.CATS_LABEL[cat]}</td>${d.periodos.map(p=>`<td>${fmt2(d.totalsCat[cat]?.[p])}</td>`).join('')}<td><b>${fmt2(totalCat)}</b></td><td>${pct}%</td><td>${fmt2(totalCat/d.periodos.length)}</td></tr>`
+      for(const con of conceps){
+        const totalCon=Object.values(d.mapa[cat][con]).reduce((a,b)=>a+b,0)
+        html+=`<tr><td style="padding-left:12px;color:#555">${con}</td>${d.periodos.map(p=>`<td>${fmt2(d.mapa[cat][con][p])}</td>`).join('')}<td>${fmt2(totalCon)}</td><td></td><td>${fmt2(totalCon/d.periodos.length)}</td></tr>`
+      }
+    }
+    html+=`<tr class="total"><td>TOTAL EGRESOS</td>${d.periodos.map(p=>`<td>${fmt2(d.totalsGlobal[p])}</td>`).join('')}<td>${fmt2(d.totalAnual)}</td><td>100%</td><td>${fmt2(d.promedioEgresos)}</td></tr>`
+    html+=`<tr class="sf"><td><b>SALDO FINAL</b></td>${d.periodos.map(p=>`<td class="${(d.saldoFinalPorPeriodo[p]||0)<0?'neg':'pos'}">${fmt2(d.saldoFinalPorPeriodo[p])}</td>`).join('')}<td></td><td></td><td></td></tr>`
+    html+=`</tbody></table><div style="font-size:8px;border-top:1px solid #1A3FA0;padding-top:3px">
+    Ingresos: $${fmt(d.totalIngresos)} · Egresos: $${fmt(d.totalAnual)} · Resultado neto: $${fmt(d.resultadoNeto)} · Meses positivos: ${d.mesesPositivo}/${d.periodos.length}
+    </div></body></html>`
+    w.document.write(html); w.document.close(); w.focus()
+    setTimeout(()=>w.print(),500)
+  }
+
+  async function exportarExcelBalance(){
+    if(!datos) return
+    if(!window.XLSX) await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)})
+    const XLSX=window.XLSX, d=datos, fv=n=>Number(n)||0
+    const rows=[
+      ['Rendición de cuentas — '+(consorcioActivo?.nombre||'')],
+      ['Período: '+d.periodos[0]+' al '+d.periodos[d.periodos.length-1]],[],
+      ['Concepto',...d.periodos,'TOTAL','%','PROMEDIO'],
+      ['SALDO INICIAL',...d.periodos.map(p=>fv(d.saldoInicialPorPeriodo[p])),'','',''],
+      ['INGRESOS',...d.periodos.map(()=>''),'','',''],
+      ['Expensas cobradas',...d.periodos.map(p=>fv(d.ingresosPorPeriodo[p])),fv(d.totalIngresos),'',fv(d.promedioIngresos)],
+      ['EGRESOS',...d.periodos.map(()=>''),'','',''],
+    ]
+    for(const cat of d.CATS_ORDER){
+      const conceps=Object.keys(d.mapa[cat]||{}); if(!conceps.length) continue
+      const totalCat=Object.values(d.totalsCat[cat]||{}).reduce((a,b)=>a+b,0)
+      const pct=d.totalAnual>0?(totalCat/d.totalAnual*100).toFixed(2)+'%':'0%'
+      rows.push([d.CATS_LABEL[cat],...d.periodos.map(p=>fv(d.totalsCat[cat]?.[p])),totalCat,pct,totalCat/d.periodos.length])
+      for(const con of conceps){
+        const totalCon=Object.values(d.mapa[cat][con]).reduce((a,b)=>a+b,0)
+        rows.push(['  '+con,...d.periodos.map(p=>fv(d.mapa[cat][con][p])),totalCon,'',totalCon/d.periodos.length])
+      }
+    }
+    rows.push(['TOTAL EGRESOS',...d.periodos.map(p=>fv(d.totalsGlobal[p])),d.totalAnual,'100%',d.promedioEgresos])
+    rows.push(['SALDO FINAL',...d.periodos.map(p=>fv(d.saldoFinalPorPeriodo[p])),'','',''])
+    rows.push([],['Total ingresos',fv(d.totalIngresos)],['Total egresos',fv(d.totalAnual)],['Resultado neto',fv(d.resultadoNeto)])
+    const wb=XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Balance Anual')
+    XLSX.writeFile(wb,`BalanceAnual_${consorcioActivo?.id||'cons'}_${d.periodos[0]}_${d.periodos[d.periodos.length-1]}.xlsx`)
+  }
+
+  return (
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+        <div style={{fontWeight:700,fontSize:15}}>📊 Balance Anual</div>
+        {datos && (
+          <div style={{display:'flex',gap:8}}>
+            <Btn small color={GR} onClick={exportarPDFBalance}>🖨️ PDF / Imprimir</Btn>
+            <Btn small color={VD} onClick={exportarExcelBalance}>📊 Excel</Btn>
+          </div>
+        )}
+      </div>
+      <div style={{fontSize:12,color:GR,marginBottom:16}}>Rendición de cuentas entre períodos seleccionados</div>
+      <Msg data={msg} />
+      <Card style={{marginBottom:16}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr auto',gap:12,alignItems:'flex-end'}}>
+          <div>
+            <div style={{fontSize:12,color:GR,marginBottom:4,fontWeight:500}}>Período desde</div>
+            <input type="month" value={periodoDesde} onChange={e=>setPeriodoDesde(e.target.value)}
+              style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:7,fontSize:13,boxSizing:'border-box'}}/>
+          </div>
+          <div>
+            <div style={{fontSize:12,color:GR,marginBottom:4,fontWeight:500}}>Período hasta</div>
+            <input type="month" value={periodoHasta} onChange={e=>setPeriodoHasta(e.target.value)}
+              style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:7,fontSize:13,boxSizing:'border-box'}}/>
+          </div>
+          <Btn onClick={generar} disabled={cargando}>{cargando?'⏳ Calculando...':'🔄 Generar balance'}</Btn>
+        </div>
+      </Card>
+      {cargando && <div style={{textAlign:'center',padding:32,color:GR}}>⏳ Cargando datos...</div>}
+      {datos && !cargando && (
+        <>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:16}}>
+            {[
+              {l:'Total ingresos',v:'$'+fmt(datos.totalIngresos),c:VD},
+              {l:'Total egresos',v:'$'+fmt(datos.totalAnual),c:RJ},
+              {l:'Resultado neto',v:(datos.resultadoNeto>=0?'+':'')+'$'+fmt(datos.resultadoNeto),c:datos.resultadoNeto>=0?VD:RJ},
+              {l:'Meses saldo +',v:`${datos.mesesPositivo} / ${datos.periodos.length}`,c:AZ},
+            ].map((k,i)=>(
+              <Card key={i} style={{textAlign:'center',padding:'12px 10px'}}>
+                <div style={{fontSize:10,color:GR,textTransform:'uppercase',fontWeight:600,marginBottom:4}}>{k.l}</div>
+                <div style={{fontSize:16,fontWeight:800,color:k.c}}>{k.v}</div>
+              </Card>
+            ))}
+          </div>
+          <Card style={{padding:0,overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:10,minWidth:datos.periodos.length*75+280}}>
+              <thead>
+                <tr style={{background:AZ,color:'#fff'}}>
+                  <th style={{padding:'6px 10px',textAlign:'left',fontWeight:700,fontSize:9,minWidth:170,position:'sticky',left:0,background:AZ}}>Categoría / Concepto</th>
+                  {datos.periodos.map(p=><th key={p} style={{padding:'6px 6px',textAlign:'right',fontSize:8,minWidth:68,whiteSpace:'nowrap'}}>{perLabel(p)}</th>)}
+                  <th style={{padding:'6px 6px',textAlign:'right',fontSize:9,minWidth:85,background:'#0f2d7a'}}>TOTAL</th>
+                  <th style={{padding:'6px 6px',textAlign:'right',fontSize:8,minWidth:44,background:'#0f2d7a'}}>%</th>
+                  <th style={{padding:'6px 6px',textAlign:'right',fontSize:8,minWidth:78,background:'#0f2d7a'}}>PROM.</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{background:'#f0fdf4',fontWeight:700}}>
+                  <td style={{padding:'5px 10px',fontSize:10,position:'sticky',left:0,background:'#f0fdf4'}}>SALDO INICIAL</td>
+                  {datos.periodos.map(p=>{const v=datos.saldoInicialPorPeriodo[p]||0;return<td key={p} style={{padding:'5px 6px',textAlign:'right',color:v<0?RJ:VD,fontSize:9}}>{v!==0?fmtM(v):'—'}</td>})}
+                  <td colSpan={3}></td>
+                </tr>
+                <tr style={{background:'#dbeafe',fontWeight:700}}>
+                  <td style={{padding:'5px 10px',fontSize:9,textTransform:'uppercase',position:'sticky',left:0,background:'#dbeafe'}}>INGRESOS</td>
+                  {datos.periodos.map(p=><td key={p}></td>)}<td colSpan={3}></td>
+                </tr>
+                <tr>
+                  <td style={{padding:'4px 10px',paddingLeft:16,fontSize:9,position:'sticky',left:0,background:'#fff'}}>Expensas cobradas</td>
+                  {datos.periodos.map(p=><td key={p} style={{padding:'4px 6px',textAlign:'right',color:VD,fontSize:9}}>{datos.ingresosPorPeriodo[p]?'$'+fmt(datos.ingresosPorPeriodo[p]):'—'}</td>)}
+                  <td style={{padding:'4px 6px',textAlign:'right',fontWeight:700,color:VD,fontSize:9}}>${fmt(datos.totalIngresos)}</td>
+                  <td></td>
+                  <td style={{padding:'4px 6px',textAlign:'right',fontSize:9,color:GR}}>${fmt(datos.promedioIngresos)}</td>
+                </tr>
+                <tr style={{background:'#fee2e2',fontWeight:700}}>
+                  <td style={{padding:'5px 10px',fontSize:9,textTransform:'uppercase',position:'sticky',left:0,background:'#fee2e2'}}>EGRESOS</td>
+                  {datos.periodos.map(p=><td key={p}></td>)}<td colSpan={3}></td>
+                </tr>
+                {datos.CATS_ORDER.map(cat=>{
+                  const conceps=Object.keys(datos.mapa[cat]||{}); if(!conceps.length) return null
+                  const totalCat=Object.values(datos.totalsCat[cat]||{}).reduce((a,b)=>a+b,0)
+                  const pct=datos.totalAnual>0?(totalCat/datos.totalAnual*100).toFixed(2):'0'
+                  return (
+                    <React.Fragment key={cat}>
+                      <tr style={{background:'#eff6ff'}}>
+                        <td style={{padding:'4px 10px',fontWeight:700,fontSize:9,textTransform:'uppercase',position:'sticky',left:0,background:'#eff6ff'}}>{datos.CATS_LABEL[cat]}</td>
+                        {datos.periodos.map(p=><td key={p} style={{padding:'4px 6px',textAlign:'right',fontWeight:600,fontSize:9}}>{datos.totalsCat[cat]?.[p]?'$'+fmt(datos.totalsCat[cat][p]):'—'}</td>)}
+                        <td style={{padding:'4px 6px',textAlign:'right',fontWeight:700,fontSize:9}}>${fmt(totalCat)}</td>
+                        <td style={{padding:'4px 6px',textAlign:'right',fontSize:8,color:GR}}>{pct}%</td>
+                        <td style={{padding:'4px 6px',textAlign:'right',fontSize:8,color:GR}}>${fmt(totalCat/datos.periodos.length)}</td>
+                      </tr>
+                      {conceps.map(con=>{
+                        const totalCon=Object.values(datos.mapa[cat][con]).reduce((a,b)=>a+b,0)
+                        return(
+                          <tr key={con} style={{borderBottom:'1px solid #f3f4f6'}}>
+                            <td style={{padding:'3px 10px',paddingLeft:20,fontSize:9,color:GR,position:'sticky',left:0,background:'#fff'}}>{con}</td>
+                            {datos.periodos.map(p=><td key={p} style={{padding:'3px 6px',textAlign:'right',fontSize:8}}>{datos.mapa[cat][con][p]?'$'+fmt(datos.mapa[cat][con][p]):'—'}</td>)}
+                            <td style={{padding:'3px 6px',textAlign:'right',fontSize:8}}>${fmt(totalCon)}</td>
+                            <td></td>
+                            <td style={{padding:'3px 6px',textAlign:'right',fontSize:8,color:GR}}>${fmt(totalCon/datos.periodos.length)}</td>
+                          </tr>
+                        )
+                      })}
+                    </React.Fragment>
+                  )
+                })}
+                <tr style={{background:AZ,color:'#fff',fontWeight:700}}>
+                  <td style={{padding:'6px 10px',fontSize:10,position:'sticky',left:0,background:AZ}}>TOTAL EGRESOS</td>
+                  {datos.periodos.map(p=><td key={p} style={{padding:'6px 6px',textAlign:'right',fontSize:9}}>${fmt(datos.totalsGlobal[p]||0)}</td>)}
+                  <td style={{padding:'6px 6px',textAlign:'right',fontWeight:800,fontSize:10}}>${fmt(datos.totalAnual)}</td>
+                  <td style={{padding:'6px 6px',textAlign:'right',fontSize:8}}>100%</td>
+                  <td style={{padding:'6px 6px',textAlign:'right',fontSize:9}}>${fmt(datos.promedioEgresos)}</td>
+                </tr>
+                <tr style={{background:'#f0fdf4',fontWeight:700}}>
+                  <td style={{padding:'6px 10px',fontSize:10,position:'sticky',left:0,background:'#f0fdf4'}}>SALDO FINAL</td>
+                  {datos.periodos.map(p=>{const v=datos.saldoFinalPorPeriodo[p]||0;return<td key={p} style={{padding:'6px 6px',textAlign:'right',color:v<0?RJ:VD,fontWeight:700,fontSize:9}}>{v!==0?(v>0?'+':'')+fmtM(v):'—'}</td>})}
+                  <td colSpan={3}></td>
+                </tr>
+              </tbody>
+            </table>
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ESTADO FINANCIERO GENERAL
 // ══════════════════════════════════════════════════════════════════════════════
 function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
@@ -8428,9 +8843,67 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
     cheque_propio:'Cheque propio', cheque_tercero:'Cheque de tercero', otros:'Otros'
   }
 
+  async function exportarEFPDF() {
+    if (!datos) return
+    exportarPDF({
+      titulo: 'Estado Financiero',
+      subtitulo: (consorcioActivo?.nombre||'') + '  |  Período: ' + desde + ' al ' + hasta,
+      logoB64: LOGO_ADM_B64,
+      columnas: [{key:'concepto',label:'Concepto'},{key:'importe',label:'Importe'}],
+      filas: [
+        {concepto:'Deudores (a cobrar)', importe:'$'+(Number(datos.deudores)||0).toLocaleString('es-AR',{minimumFractionDigits:2})},
+        {concepto:'Acreedores (a pagar)', importe:'$'+(Number(datos.acreedores)||0).toLocaleString('es-AR',{minimumFractionDigits:2})},
+        {concepto:'─── INGRESOS DEL PERÍODO ───', importe:''},
+        {concepto:'  Cobrado en período', importe:'$'+(Number(datos.ingresos)||0).toLocaleString('es-AR',{minimumFractionDigits:2})},
+        {concepto:'─── EGRESOS DEL PERÍODO ───', importe:''},
+        {concepto:'  Gastos del consorcio', importe:'$'+(Number(datos.egresosGastos)||0).toLocaleString('es-AR',{minimumFractionDigits:2})},
+        {concepto:'  TOTAL EGRESOS', importe:'$'+(Number(datos.egresos)||0).toLocaleString('es-AR',{minimumFractionDigits:2})},
+        {concepto:'RESULTADO NETO', importe:(datos.resultado>=0?'+':'')+('$'+(Number(datos.resultado)||0).toLocaleString('es-AR',{minimumFractionDigits:2}))},
+      ],
+    })
+  }
+
+  async function exportarEFExcel() {
+    if (!datos) return
+    if (!window.XLSX) await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)})
+    const XLSX = window.XLSX
+    const fmt = n => Number(n)||0
+    const rows = [
+      ['Estado Financiero — ' + (consorcioActivo?.nombre||'')],
+      ['Período: ' + desde + ' al ' + hasta],
+      [],
+      ['Concepto','Importe'],
+      ['Deudores (a cobrar)', fmt(datos.deudores)],
+      ['Acreedores (a pagar)', fmt(datos.acreedores)],
+      [],['INGRESOS'],
+      ['Cobrado en período', fmt(datos.ingresos)],
+      [],['EGRESOS'],
+      ['Gastos del consorcio', fmt(datos.egresosGastos)],
+      ['Total egresos', fmt(datos.egresos)],
+      [],
+      ['RESULTADO NETO', fmt(datos.resultado)],
+      [],
+      ['HISTORIAL LIQUIDACIONES','','',''],
+      ['Período','Total gastos','Total cobrado','Saldo final'],
+      ...(datos.expensasCerradas||[]).map(e=>[e.periodo,fmt(e.total_gastos),fmt(e.total_cobrado),fmt(e.saldo_caja_final)]),
+    ]
+    XLSX.utils.book_append_sheet(XLSX.utils.book_new(), XLSX.utils.aoa_to_sheet(rows), 'Estado Financiero')
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Estado Financiero')
+    XLSX.writeFile(wb, `EstadoFinanciero_${consorcioActivo?.id||'cons'}_${hasta}.xlsx`)
+  }
+
   return (
     <div>
-      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>🏦 Estado financiero</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>🏦 Estado financiero</div>
+        {datos && (
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn small color={GR} onClick={exportarEFPDF}>🖨️ PDF</Btn>
+            <Btn small color={VD} onClick={exportarEFExcel}>📊 Excel</Btn>
+          </div>
+        )}
+      </div>
       <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
         Posición financiera general de {consorcioActivo?.nombre}
       </div>
@@ -10965,6 +11438,7 @@ export default function App() {
     { id:'cta_corriente',    label:'Cta. corriente UF',     icon:'📋', sec:'Contabilidad' },
     { id:'reporte_movimientos', label:'Movim. por período', icon:'📈', sec:'Reportes' },
     { id:'estado_financiero',   label:'Estado financiero',  icon:'🏦', sec:'Reportes' },
+    { id:'balance_anual',       label:'Balance Anual',       icon:'📊', sec:'Reportes' },
     { id:'emails',           label:'Enviar liquidación',    icon:'✉️', sec:'Comunicaciones' },
     { id:'email_tracking',   label:'Seguimiento emails',    icon:'📬', sec:'Comunicaciones' },
     { id:'plan_cuentas',     label:'Plan de cuentas',       icon:'📑', sec:'Configuración' },
@@ -11026,6 +11500,7 @@ export default function App() {
       case 'mov_varios':       return <MovimientosVarios session={session} consorcioId={cid} expensas={expensas} />
       case 'reporte_movimientos': return <ReporteMovimientos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} />
       case 'estado_financiero':   return <EstadoFinanciero session={session} consorcioId={cid} consorcioActivo={consorcioActivo} />
+      case 'balance_anual':       return <BalanceAnual session={session} consorcioId={cid} consorcioActivo={consorcioActivo} adminPerfil={adminPerfil} />
       case 'anular_cobranza':     return <AnularCobranzas session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
       case 'comprobantes':   return <Comprobantes session={session} consorcioId={cid} proveedores={proveedores} expensas={expensas} />
       case 'pagos_prov':     return <PagosProveedor session={session} consorcioId={cid} proveedores={proveedores} />
