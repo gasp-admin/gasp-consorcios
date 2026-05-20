@@ -795,7 +795,7 @@ function Copropietarios({ session, consorcioId, onUpdate }) {
 // LIQUIDACIÓN DE PERÍODO — crear, distribuir y cerrar expensas
 // Basado en el flujo de Administración Global
 // ══════════════════════════════════════════════════════════════════════════════
-function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, copropietarios, expensas, cargar, setPagina }) {
+function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, copropietarios, adminPerfil, expensas, cargar, setPagina }) {
   const [paso, setPaso]           = useState(1) // 1=período, 2=gastos, 3=distribución, 4=cierre
   const [expSel, setExpSel]       = useState(null)  // expensa en edición
   const [gastos, setGastos]       = useState([])
@@ -1891,6 +1891,36 @@ function LiquidacionPeriodo({ session, consorcioId, consorcioActivo, unidades, c
       setMsg({ tipo:'ok', texto:`✓ Período ${expSel.periodo} cerrado — ${distribucion.length} unidades — Total $${totalACobrar.toLocaleString('es-AR')}` })
       setPaso(4)
       await cargar()
+
+      // Generar PDF de liquidación automáticamente al cerrar el período
+      // Usar timeout para que el DOM se actualice primero
+      setTimeout(() => {
+        try {
+          const expActualizado = { ...expSel,
+            total_gastos: totalGastos,
+            total_expensa: totalACobrar,
+            estado: 'cerrada',
+          }
+          generarPDFLiquidacion({
+            consorcioActivo,
+            expensa: expActualizado,
+            gastos,
+            detalles: distribucion.map(d => ({
+              unidad_id: d.unidad_id,
+              monto: d.monto,
+              saldo_anterior: d.saldo_anterior || 0,
+              pagos_periodo: 0,
+              interes_mora: 0,
+              redondeo: d.redondeo || 0,
+            })),
+            unidades,
+            copropietarios,
+            adminPerfil: adminPerfil || {},
+          })
+        } catch(pdfErr) {
+          console.warn('PDF generación error:', pdfErr)
+        }
+      }, 800)
 
     } catch(e) {
       setMsg({ tipo:'error', texto: 'Error: ' + e.message })
@@ -11667,7 +11697,7 @@ export default function App() {
       case 'listado_consorcios': return <ListadoConsorcios session={session} consorcios={consorcios} />
       case 'unidades':       return <Unidades session={session} consorcioId={cid} copropietarios={copropietarios} />
       case 'copropietarios': return <Copropietarios session={session} consorcioId={cid} onUpdate={setCopropietarios} />
-      case 'liquidacion':    return <LiquidacionPeriodo session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} expensas={expensas} setExpensas={setExpensas} cargar={()=>cargarConsorcio(cid, session?.user?.id)} setPagina={setPagina} />
+      case 'liquidacion':    return <LiquidacionPeriodo session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} adminPerfil={adminPerfil} expensas={expensas} setExpensas={setExpensas} cargar={()=>cargarConsorcio(cid, session?.user?.id)} setPagina={setPagina} />
       case 'expensas':       return <Expensas session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} adminPerfil={adminPerfil} />
       case 'cobranzas':      return <Cobranzas session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} adminPerfil={adminPerfil} />
       case 'morosos':        return <Morosos session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} />
