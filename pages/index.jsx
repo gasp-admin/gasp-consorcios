@@ -8452,172 +8452,368 @@ function ReporteMovimientos({ session, consorcioId, consorcioActivo, expensas })
 
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Constantes para BalanceAnual (module-level para evitar recreación en cada render)
+const BA_CATS_ORDER = ['contratos_abonos','gastos_bancarios','honorarios_admin','impuesto_municipal','mantenimiento','otros','seguros','servicios_publicos','varios']
+const BA_CATS_LABEL = {
+  contratos_abonos:'CONTRATOS Y ABONOS', gastos_bancarios:'GASTOS BANCARIOS',
+  honorarios_admin:'GASTOS DE ADMINISTRACIÓN', impuesto_municipal:'IMPUESTO MUNICIPAL',
+  mantenimiento:'MANTENIMIENTO GENERAL', otros:'OTROS EGRESOS',
+  seguros:'SEGUROS', servicios_publicos:'SERVICIOS PÚBLICOS', varios:'VARIOS'
+}
+function baNormCat(c) {
+  const cc = (c||'').toLowerCase()
+    .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+    .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').trim()
+  if (cc.includes('contrat')||cc.includes('abon')) return 'contratos_abonos'
+  if (cc.includes('banc')||cc.includes('financiero')) return 'gastos_bancarios'
+  if (cc.includes('honorar')||cc.includes('admin')) return 'honorarios_admin'
+  if (cc.includes('municipal')||cc.includes('impuest')) return 'impuesto_municipal'
+  if (cc.includes('manten')||cc.includes('piscina')||cc.includes('parque')||cc.includes('ascensor')||cc.includes('bomba')||cc.includes('pintura')) return 'mantenimiento'
+  if (cc.includes('seguro')) return 'seguros'
+  if (cc.includes('servicio')||cc.includes('energia')||cc.includes('electr')||cc.includes('gas_serv')) return 'servicios_publicos'
+  if (cc.includes('varios')||cc.includes('material')||cc.includes('ferret')||cc.includes('limpieza')) return 'varios'
+  return 'otros'
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // BALANCE ANUAL — Rendición de cuentas entre períodos
 // ══════════════════════════════════════════════════════════════════════════════
-function BalanceAnual({ session, consorcioId, consorcioActivo, adminPerfil }) {
+function BalanceAnual({ session, consorcioId, consorcioActivo }) {
   const [periodoDesde, setPeriodoDesde] = useState(() => {
     const d = new Date(); d.setFullYear(d.getFullYear()-1); return d.toISOString().slice(0,7)
   })
   const [periodoHasta, setPeriodoHasta] = useState(() => new Date().toISOString().slice(0,7))
-  const [datos, setDatos]     = useState(null)
+  const [datos, setDatos]       = useState(null)
   const [cargando, setCargando] = useState(false)
-  const [msg, setMsg]         = useState(null)
+  const [msg, setMsg]           = useState(null)
 
-  const fmt = n => (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2})
-  const fmtM = n => { const v=Number(n)||0; return (v<0?'-':'')+'$'+Math.abs(v).toLocaleString('es-AR',{minimumFractionDigits:2}) }
-  const perLabel = p => { if(!p) return ''; const [y,m]=p.split('-'); return (['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(m)-1]||m)+' '+y.slice(2) }
-
-  const normCat = c => {
-    const cc=(c||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim()
-    if(cc.includes('contrat')||cc.includes('abon')) return 'contratos_abonos'
-    if(cc.includes('banc')||cc.includes('financiero')) return 'gastos_bancarios'
-    if(cc.includes('honorar')||cc.includes('admin')) return 'honorarios_admin'
-    if(cc.includes('municipal')||cc.includes('impuest')) return 'impuesto_municipal'
-    if(cc.includes('manten')||cc.includes('piscina')||cc.includes('parque')||cc.includes('ascensor')||cc.includes('bomba')||cc.includes('pintura')) return 'mantenimiento'
-    if(cc.includes('seguro')) return 'seguros'
-    if(cc.includes('servicio')||cc.includes('energia')||cc.includes('electr')||cc.includes('gas_serv')) return 'servicios_publicos'
-    if(cc.includes('varios')||cc.includes('material')||cc.includes('ferret')||cc.includes('limpieza')) return 'varios'
-    return 'otros'
+  const fmt  = n => (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})
+  const fmtS = (n, positivo) => {
+    const v = Number(n)||0
+    if (v === 0) return '—'
+    const s = '$' + Math.abs(v).toLocaleString('es-AR',{minimumFractionDigits:2})
+    return v < 0 ? '-' + s : (positivo && v > 0 ? '+' + s : s)
   }
-
-  const CATS_ORDER = ['contratos_abonos','gastos_bancarios','honorarios_admin','impuesto_municipal','mantenimiento','otros','seguros','servicios_publicos','varios']
-  const CATS_LABEL = {
-    contratos_abonos:'CONTRATOS Y ABONOS', gastos_bancarios:'GASTOS BANCARIOS',
-    honorarios_admin:'GASTOS DE ADMINISTRACIÓN', impuesto_municipal:'IMPUESTO MUNICIPAL',
-    mantenimiento:'MANTENIMIENTO GENERAL', otros:'OTROS EGRESOS',
-    seguros:'SEGUROS', servicios_publicos:'SERVICIOS PÚBLICOS', varios:'VARIOS'
+  const perLabel = p => {
+    if (!p) return ''
+    const [y,m] = p.split('-')
+    return (['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(m)-1]||m) + ' ' + y.slice(2)
   }
 
   async function generar() {
-    if(!periodoDesde||!periodoHasta||periodoDesde>periodoHasta)
-      return setMsg({tipo:'warn',texto:'Seleccioná un rango válido'})
+    if (!periodoDesde || !periodoHasta || periodoDesde > periodoHasta)
+      return setMsg({tipo:'warn', texto:'Seleccioná un rango de períodos válido'})
     setCargando(true); setDatos(null); setMsg(null)
     try {
-      const {data:expensas} = await supabase.from('con_expensas')
-        .select('id,periodo,total_cobrado,saldo_caja_final').eq('consorcio_id',consorcioId)
-        .gte('periodo',periodoDesde).lte('periodo',periodoHasta).order('periodo')
-      if(!expensas?.length){setMsg({tipo:'warn',texto:'Sin períodos en el rango'}); setCargando(false); return}
-      const expIds = expensas.map(e=>e.id)
-      const {data:gastos} = await supabase.from('con_gastos')
-        .select('categoria,concepto,monto,expensa_id').in('expensa_id',expIds)
+      const {data: expensas, error: errExp} = await supabase.from('con_expensas')
+        .select('id,periodo,total_cobrado,saldo_caja_final')
+        .eq('consorcio_id', consorcioId)
+        .gte('periodo', periodoDesde).lte('periodo', periodoHasta)
+        .order('periodo')
+      if (errExp) throw new Error(errExp.message)
+      if (!expensas || expensas.length === 0) {
+        setMsg({tipo:'warn', texto:'No hay períodos en el rango seleccionado'})
+        setCargando(false); return
+      }
+
+      const expIds = expensas.map(e => e.id)
+      const {data: gastos} = await supabase.from('con_gastos')
+        .select('categoria,concepto,monto,expensa_id')
+        .in('expensa_id', expIds)
+
+      // Saldo anterior al primer período
       let saldoInicial0 = 0
-      const {data:expAnt} = await supabase.from('con_expensas')
-        .select('saldo_caja_final').eq('consorcio_id',consorcioId)
-        .lt('periodo',periodoDesde).order('periodo',{ascending:false}).limit(1)
-      if(expAnt?.[0]) saldoInicial0 = parseFloat(expAnt[0].saldo_caja_final)||0
+      const {data: expAnt} = await supabase.from('con_expensas')
+        .select('saldo_caja_final').eq('consorcio_id', consorcioId)
+        .lt('periodo', periodoDesde).order('periodo', {ascending:false}).limit(1)
+      if (expAnt && expAnt[0]) saldoInicial0 = parseFloat(expAnt[0].saldo_caja_final) || 0
+
+      // Mapas de saldos e ingresos por período
       const saldoInicialPorPeriodo = {}
-      const saldoFinalPorPeriodo = {}
-      const ingresosPorPeriodo = {}
-      for(let i=0;i<expensas.length;i++){
-        saldoInicialPorPeriodo[expensas[i].periodo] = i===0 ? saldoInicial0 : parseFloat(expensas[i-1].saldo_caja_final)||0
-        saldoFinalPorPeriodo[expensas[i].periodo] = parseFloat(expensas[i].saldo_caja_final)||0
-        ingresosPorPeriodo[expensas[i].periodo] = parseFloat(expensas[i].total_cobrado)||0
+      const saldoFinalPorPeriodo   = {}
+      const ingresosPorPeriodo     = {}
+      for (let i = 0; i < expensas.length; i++) {
+        const p = expensas[i].periodo
+        saldoInicialPorPeriodo[p] = i === 0 ? saldoInicial0 : (parseFloat(expensas[i-1].saldo_caja_final) || 0)
+        saldoFinalPorPeriodo[p]   = parseFloat(expensas[i].saldo_caja_final) || 0
+        ingresosPorPeriodo[p]     = parseFloat(expensas[i].total_cobrado) || 0
       }
-      const mapa={}, totalsCat={}, totalsGlobal={}
-      let totalAnual=0, totalIngresos=0
-      for(const e of expensas) totalIngresos += parseFloat(e.total_cobrado)||0
-      for(const g of (gastos||[])){
-        const cat=normCat(g.categoria)
-        const per=expensas.find(e=>e.id===g.expensa_id)?.periodo
-        if(!per) continue
-        const monto=parseFloat(g.monto)||0
-        if(!mapa[cat]) mapa[cat]={}
-        if(!mapa[cat][g.concepto]) mapa[cat][g.concepto]={}
-        mapa[cat][g.concepto][per]=(mapa[cat][g.concepto][per]||0)+monto
-        if(!totalsCat[cat]) totalsCat[cat]={}
-        totalsCat[cat][per]=(totalsCat[cat][per]||0)+monto
-        totalsGlobal[per]=(totalsGlobal[per]||0)+monto
-        totalAnual+=monto
+
+      // Mapa: cat → { concepto → { período → monto } }
+      const mapa        = {}
+      const totalsCat   = {}
+      const totalsGlobal = {}
+      let totalAnual    = 0
+      let totalIngresos = 0
+
+      for (const e of expensas) totalIngresos += parseFloat(e.total_cobrado) || 0
+
+      for (const g of (gastos || [])) {
+        const cat   = baNormCat(g.categoria)
+        const exp   = expensas.find(e => e.id === g.expensa_id)
+        const per   = exp ? exp.periodo : null
+        if (!per) continue
+        const monto = parseFloat(g.monto) || 0
+        if (!mapa[cat])                  mapa[cat]        = {}
+        if (!mapa[cat][g.concepto])      mapa[cat][g.concepto] = {}
+        if (!totalsCat[cat])             totalsCat[cat]   = {}
+        mapa[cat][g.concepto][per]  = (mapa[cat][g.concepto][per]  || 0) + monto
+        totalsCat[cat][per]         = (totalsCat[cat][per]         || 0) + monto
+        totalsGlobal[per]           = (totalsGlobal[per]           || 0) + monto
+        totalAnual += monto
       }
-      const periodos=expensas.map(e=>e.periodo)
-      const resultadoNeto=totalIngresos-totalAnual
-      const mesesPositivo=periodos.filter(p=>(saldoFinalPorPeriodo[p]||0)>=0).length
-      setDatos({periodos,mapa,totalsCat,totalsGlobal,totalAnual,totalIngresos,
-        ingresosPorPeriodo,saldoInicialPorPeriodo,saldoFinalPorPeriodo,
-        promedioIngresos:totalIngresos/periodos.length,
-        promedioEgresos:totalAnual/periodos.length,
-        resultadoNeto,mesesPositivo,CATS_ORDER,CATS_LABEL})
-    } catch(e){ setMsg({tipo:'error',texto:'Error: '+e.message}) }
+
+      const periodos      = expensas.map(e => e.periodo)
+      const resultadoNeto = totalIngresos - totalAnual
+      const mesesPositivo = periodos.filter(p => (saldoFinalPorPeriodo[p] || 0) >= 0).length
+
+      setDatos({
+        periodos, mapa, totalsCat, totalsGlobal, totalAnual, totalIngresos,
+        ingresosPorPeriodo, saldoInicialPorPeriodo, saldoFinalPorPeriodo,
+        promedioIngresos: periodos.length > 0 ? totalIngresos / periodos.length : 0,
+        promedioEgresos:  periodos.length > 0 ? totalAnual    / periodos.length : 0,
+        resultadoNeto, mesesPositivo,
+      })
+    } catch (err) {
+      setMsg({tipo:'error', texto:'Error al generar: ' + (err.message || String(err))})
+    }
     setCargando(false)
   }
 
-  function exportarPDFBalance(){
-    if(!datos) return
-    const d=datos
-    const w=window.open('','_blank')
-    const hoy=new Date().toLocaleDateString('es-AR')
-    const fmt2 = n => n!=null&&n!==''&&n!==0 ? (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2}) : '—'
-    let html=`<html><head><meta charset="utf-8"><style>
-      body{font-family:Arial,sans-serif;font-size:8.5px;margin:0;padding:6px}
-      h2{font-size:12px;margin:0 0 2px} .sub2{font-size:9px;color:#555;margin-bottom:6px}
-      table{width:100%;border-collapse:collapse;margin-bottom:6px;font-size:8px}
-      th{background:#1A3FA0;color:#fff;padding:3px 4px;text-align:right;white-space:nowrap}
-      th:first-child{text-align:left;min-width:160px}
-      td{padding:2px 4px;border-bottom:1px solid #e5e7eb;text-align:right;white-space:nowrap}
+  function exportarPDFBalance() {
+    if (!datos) return
+    const d   = datos
+    const w   = window.open('', '_blank')
+    if (!w) { alert('Habilitá las ventanas emergentes para imprimir.'); return }
+    const hoy = new Date().toLocaleDateString('es-AR')
+    const f2  = n => (Number(n)||0) !== 0 ? (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2}) : '—'
+    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      body{font-family:Arial,sans-serif;font-size:8px;margin:0;padding:6px}
+      h2{font-size:12px;margin:0 0 2px}.sub2{font-size:9px;color:#555;margin-bottom:6px}
+      table{width:100%;border-collapse:collapse;margin-bottom:6px}
+      th{background:#1A3FA0;color:#fff;padding:3px 4px;text-align:right;white-space:nowrap;font-size:7.5px}
+      th:first-child{text-align:left;min-width:150px}
+      td{padding:2px 4px;border-bottom:1px solid #e5e7eb;text-align:right;white-space:nowrap;font-size:7.5px}
       td:first-child{text-align:left}
-      .sub{background:#eff6ff;font-weight:bold} .cat{background:#dbeafe;font-weight:bold;text-transform:uppercase}
-      .neg{color:#dc2626} .pos{color:#16a34a} .total{background:#1A3FA0;color:#fff;font-weight:bold}
-      .si{background:#f0fdf4;font-weight:bold} .sf{background:#f0fdf4;font-weight:bold}
+      .cat{background:#dbeafe;font-weight:bold;text-transform:uppercase;font-size:7px}
+      .sub{background:#eff6ff;font-weight:bold}.neg{color:#dc2626}.pos{color:#16a34a}
+      .toteg{background:#1A3FA0;color:#fff;font-weight:bold}
+      .sf{background:#f0fdf4;font-weight:bold}
       @media print{@page{size:A3 landscape;margin:6mm}}
     </style></head><body>
-    <h2>RENDICIÓN DE CUENTAS — ${d.periodos[0]} / ${d.periodos[d.periodos.length-1]}</h2>
-    <div class="sub2">${consorcioActivo?.nombre||''} &nbsp;·&nbsp; Javier García Pérez RPAC N° 83 &nbsp;·&nbsp; ${hoy}</div>
-    <table><thead><tr><th>Categoría / Concepto</th>
-    ${d.periodos.map(p=>`<th>${perLabel(p)}</th>`).join('')}
-    <th>TOTAL</th><th>%</th><th>PROM.</th></tr></thead><tbody>`
-    html+=`<tr class="si"><td><b>SALDO INICIAL</b></td>${d.periodos.map(p=>`<td class="${(d.saldoInicialPorPeriodo[p]||0)<0?'neg':'pos'}">${fmt2(d.saldoInicialPorPeriodo[p])}</td>`).join('')}<td></td><td></td><td></td></tr>`
-    html+=`<tr class="cat"><td colspan="${d.periodos.length+4}">INGRESOS</td></tr>`
-    html+=`<tr><td style="padding-left:8px">Expensas cobradas</td>${d.periodos.map(p=>`<td class="pos">${fmt2(d.ingresosPorPeriodo[p])}</td>`).join('')}<td class="pos"><b>${fmt2(d.totalIngresos)}</b></td><td>—</td><td>${fmt2(d.promedioIngresos)}</td></tr>`
-    html+=`<tr class="cat"><td colspan="${d.periodos.length+4}">EGRESOS</td></tr>`
-    for(const cat of d.CATS_ORDER){
-      const conceps=Object.keys(d.mapa[cat]||{}); if(!conceps.length) continue
-      const totalCat=Object.values(d.totalsCat[cat]||{}).reduce((a,b)=>a+b,0)
-      const pct=d.totalAnual>0?(totalCat/d.totalAnual*100).toFixed(2):'0'
-      html+=`<tr class="sub"><td>${d.CATS_LABEL[cat]}</td>${d.periodos.map(p=>`<td>${fmt2(d.totalsCat[cat]?.[p])}</td>`).join('')}<td><b>${fmt2(totalCat)}</b></td><td>${pct}%</td><td>${fmt2(totalCat/d.periodos.length)}</td></tr>`
-      for(const con of conceps){
-        const totalCon=Object.values(d.mapa[cat][con]).reduce((a,b)=>a+b,0)
-        html+=`<tr><td style="padding-left:12px;color:#555">${con}</td>${d.periodos.map(p=>`<td>${fmt2(d.mapa[cat][con][p])}</td>`).join('')}<td>${fmt2(totalCon)}</td><td></td><td>${fmt2(totalCon/d.periodos.length)}</td></tr>`
+    <h2>RENDICION DE CUENTAS ${d.periodos[0]} / ${d.periodos[d.periodos.length-1]}</h2>
+    <div class="sub2">${consorcioActivo ? consorcioActivo.nombre : ''} &nbsp; Javier Garcia Perez RPAC N 83 &nbsp; ${hoy}</div>
+    <table><thead><tr>
+      <th>Categoria / Concepto</th>
+      ${d.periodos.map(p => '<th>' + perLabel(p) + '</th>').join('')}
+      <th>TOTAL</th><th>%</th><th>PROM.</th>
+    </tr></thead><tbody>`
+
+    html += '<tr class="sf"><td><b>SALDO INICIAL</b></td>'
+    html += d.periodos.map(p => {
+      const v = d.saldoInicialPorPeriodo[p] || 0
+      return '<td class="' + (v < 0 ? 'neg' : 'pos') + '">' + f2(v) + '</td>'
+    }).join('')
+    html += '<td></td><td></td><td></td></tr>'
+
+    html += '<tr class="cat"><td colspan="' + (d.periodos.length + 4) + '">INGRESOS</td></tr>'
+    html += '<tr><td style="padding-left:8px">Expensas cobradas</td>'
+    html += d.periodos.map(p => '<td class="pos">' + f2(d.ingresosPorPeriodo[p]) + '</td>').join('')
+    html += '<td class="pos"><b>' + f2(d.totalIngresos) + '</b></td><td>—</td><td>' + f2(d.promedioIngresos) + '</td></tr>'
+
+    html += '<tr class="cat"><td colspan="' + (d.periodos.length + 4) + '">EGRESOS</td></tr>'
+    for (const cat of BA_CATS_ORDER) {
+      const conceps = Object.keys(d.mapa[cat] || {})
+      if (!conceps.length) continue
+      const totalCat = Object.values(d.totalsCat[cat] || {}).reduce((a, b) => a + b, 0)
+      const pct = d.totalAnual > 0 ? (totalCat / d.totalAnual * 100).toFixed(2) : '0'
+      html += '<tr class="sub"><td>' + BA_CATS_LABEL[cat] + '</td>'
+      html += d.periodos.map(p => '<td>' + f2(d.totalsCat[cat] ? d.totalsCat[cat][p] : 0) + '</td>').join('')
+      html += '<td><b>' + f2(totalCat) + '</b></td><td>' + pct + '%</td><td>' + f2(totalCat / d.periodos.length) + '</td></tr>'
+      for (const con of conceps) {
+        const totalCon = Object.values(d.mapa[cat][con]).reduce((a, b) => a + b, 0)
+        html += '<tr><td style="padding-left:12px;color:#555">' + con + '</td>'
+        html += d.periodos.map(p => '<td>' + f2(d.mapa[cat][con][p]) + '</td>').join('')
+        html += '<td>' + f2(totalCon) + '</td><td></td><td>' + f2(totalCon / d.periodos.length) + '</td></tr>'
       }
     }
-    html+=`<tr class="total"><td>TOTAL EGRESOS</td>${d.periodos.map(p=>`<td>${fmt2(d.totalsGlobal[p])}</td>`).join('')}<td>${fmt2(d.totalAnual)}</td><td>100%</td><td>${fmt2(d.promedioEgresos)}</td></tr>`
-    html+=`<tr class="sf"><td><b>SALDO FINAL</b></td>${d.periodos.map(p=>`<td class="${(d.saldoFinalPorPeriodo[p]||0)<0?'neg':'pos'}">${fmt2(d.saldoFinalPorPeriodo[p])}</td>`).join('')}<td></td><td></td><td></td></tr>`
-    html+=`</tbody></table><div style="font-size:8px;border-top:1px solid #1A3FA0;padding-top:3px">
-    Ingresos: $${fmt(d.totalIngresos)} · Egresos: $${fmt(d.totalAnual)} · Resultado neto: $${fmt(d.resultadoNeto)} · Meses positivos: ${d.mesesPositivo}/${d.periodos.length}
-    </div></body></html>`
-    w.document.write(html); w.document.close(); w.focus()
-    setTimeout(()=>w.print(),500)
+    html += '<tr class="toteg"><td>TOTAL EGRESOS</td>'
+    html += d.periodos.map(p => '<td>' + f2(d.totalsGlobal[p]) + '</td>').join('')
+    html += '<td>' + f2(d.totalAnual) + '</td><td>100%</td><td>' + f2(d.promedioEgresos) + '</td></tr>'
+
+    html += '<tr class="sf"><td><b>SALDO FINAL</b></td>'
+    html += d.periodos.map(p => {
+      const v = d.saldoFinalPorPeriodo[p] || 0
+      return '<td class="' + (v < 0 ? 'neg' : 'pos') + '">' + (v !== 0 ? (v > 0 ? '+' : '') + f2(v) : '—') + '</td>'
+    }).join('')
+    html += '<td></td><td></td><td></td></tr>'
+
+    html += '</tbody></table>'
+    html += '<div style="font-size:8px;border-top:1px solid #1A3FA0;padding-top:3px">'
+    html += 'Ingresos: $' + f2(d.totalIngresos) + ' | Egresos: $' + f2(d.totalAnual)
+    html += ' | Resultado neto: $' + f2(d.resultadoNeto)
+    html += ' | Meses con saldo positivo: ' + d.mesesPositivo + '/' + d.periodos.length
+    html += '</div></body></html>'
+
+    w.document.write(html)
+    w.document.close()
+    w.focus()
+    setTimeout(() => { try { w.print() } catch(e) {} }, 600)
   }
 
-  async function exportarExcelBalance(){
-    if(!datos) return
-    if(!window.XLSX) await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)})
-    const XLSX=window.XLSX, d=datos, fv=n=>Number(n)||0
-    const rows=[
-      ['Rendición de cuentas — '+(consorcioActivo?.nombre||'')],
-      ['Período: '+d.periodos[0]+' al '+d.periodos[d.periodos.length-1]],[],
-      ['Concepto',...d.periodos,'TOTAL','%','PROMEDIO'],
-      ['SALDO INICIAL',...d.periodos.map(p=>fv(d.saldoInicialPorPeriodo[p])),'','',''],
-      ['INGRESOS',...d.periodos.map(()=>''),'','',''],
-      ['Expensas cobradas',...d.periodos.map(p=>fv(d.ingresosPorPeriodo[p])),fv(d.totalIngresos),'',fv(d.promedioIngresos)],
-      ['EGRESOS',...d.periodos.map(()=>''),'','',''],
+  async function exportarExcelBalance() {
+    if (!datos) return
+    if (!window.XLSX) {
+      await new Promise((res, rej) => {
+        const s = document.createElement('script')
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+        s.onload = res; s.onerror = rej
+        document.head.appendChild(s)
+      })
+    }
+    const XLSX = window.XLSX
+    const d    = datos
+    const fv   = n => Number(n) || 0
+    const rows = [
+      ['Rendicion de cuentas — ' + (consorcioActivo ? consorcioActivo.nombre : '')],
+      ['Periodo: ' + d.periodos[0] + ' al ' + d.periodos[d.periodos.length - 1]],
+      [],
+      ['Concepto', ...d.periodos, 'TOTAL', '%', 'PROMEDIO'],
+      ['SALDO INICIAL', ...d.periodos.map(p => fv(d.saldoInicialPorPeriodo[p])), '', '', ''],
+      ['INGRESOS', ...d.periodos.map(() => ''), '', '', ''],
+      ['Expensas cobradas', ...d.periodos.map(p => fv(d.ingresosPorPeriodo[p])), fv(d.totalIngresos), '', fv(d.promedioIngresos)],
+      ['EGRESOS', ...d.periodos.map(() => ''), '', '', ''],
     ]
-    for(const cat of d.CATS_ORDER){
-      const conceps=Object.keys(d.mapa[cat]||{}); if(!conceps.length) continue
-      const totalCat=Object.values(d.totalsCat[cat]||{}).reduce((a,b)=>a+b,0)
-      const pct=d.totalAnual>0?(totalCat/d.totalAnual*100).toFixed(2)+'%':'0%'
-      rows.push([d.CATS_LABEL[cat],...d.periodos.map(p=>fv(d.totalsCat[cat]?.[p])),totalCat,pct,totalCat/d.periodos.length])
-      for(const con of conceps){
-        const totalCon=Object.values(d.mapa[cat][con]).reduce((a,b)=>a+b,0)
-        rows.push(['  '+con,...d.periodos.map(p=>fv(d.mapa[cat][con][p])),totalCon,'',totalCon/d.periodos.length])
+    for (const cat of BA_CATS_ORDER) {
+      const conceps = Object.keys(d.mapa[cat] || {})
+      if (!conceps.length) continue
+      const totalCat = Object.values(d.totalsCat[cat] || {}).reduce((a, b) => a + b, 0)
+      const pct = d.totalAnual > 0 ? (totalCat / d.totalAnual * 100).toFixed(2) + '%' : '0%'
+      rows.push([BA_CATS_LABEL[cat], ...d.periodos.map(p => fv(d.totalsCat[cat] ? d.totalsCat[cat][p] : 0)), totalCat, pct, totalCat / d.periodos.length])
+      for (const con of conceps) {
+        const totalCon = Object.values(d.mapa[cat][con]).reduce((a, b) => a + b, 0)
+        rows.push(['  ' + con, ...d.periodos.map(p => fv(d.mapa[cat][con][p])), totalCon, '', totalCon / d.periodos.length])
       }
     }
-    rows.push(['TOTAL EGRESOS',...d.periodos.map(p=>fv(d.totalsGlobal[p])),d.totalAnual,'100%',d.promedioEgresos])
-    rows.push(['SALDO FINAL',...d.periodos.map(p=>fv(d.saldoFinalPorPeriodo[p])),'','',''])
-    rows.push([],['Total ingresos',fv(d.totalIngresos)],['Total egresos',fv(d.totalAnual)],['Resultado neto',fv(d.resultadoNeto)])
-    const wb=XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Balance Anual')
-    XLSX.writeFile(wb,`BalanceAnual_${consorcioActivo?.id||'cons'}_${d.periodos[0]}_${d.periodos[d.periodos.length-1]}.xlsx`)
+    rows.push(['TOTAL EGRESOS', ...d.periodos.map(p => fv(d.totalsGlobal[p])), d.totalAnual, '100%', d.promedioEgresos])
+    rows.push(['SALDO FINAL',   ...d.periodos.map(p => fv(d.saldoFinalPorPeriodo[p])), '', '', ''])
+    rows.push([], ['Total ingresos', fv(d.totalIngresos)], ['Total egresos', fv(d.totalAnual)], ['Resultado neto', fv(d.resultadoNeto)])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Balance Anual')
+    const nombre = consorcioActivo ? consorcioActivo.id : 'cons'
+    XLSX.writeFile(wb, 'BalanceAnual_' + nombre + '_' + d.periodos[0] + '_' + d.periodos[d.periodos.length-1] + '.xlsx')
+  }
+
+  // Construir filas de la tabla sin React.Fragment (evita bug en Next.js/SWC con tbody)
+  function buildTablaRows(d) {
+    if (!d) return []
+    const rows = []
+
+    // Saldo inicial
+    rows.push(
+      <tr key="si" style={{background:'#f0fdf4',fontWeight:700}}>
+        <td style={{padding:'5px 10px',fontSize:10,position:'sticky',left:0,background:'#f0fdf4',fontWeight:700}}>SALDO INICIAL</td>
+        {d.periodos.map(p => {
+          const v = d.saldoInicialPorPeriodo[p] || 0
+          return <td key={p} style={{padding:'5px 6px',textAlign:'right',color:v<0?RJ:VD,fontSize:9}}>{v!==0?fmtS(v,true):'—'}</td>
+        })}
+        <td colSpan={3}></td>
+      </tr>
+    )
+    // Ingresos header
+    rows.push(
+      <tr key="ing-h" style={{background:'#dbeafe',fontWeight:700}}>
+        <td style={{padding:'5px 10px',fontSize:9,textTransform:'uppercase',position:'sticky',left:0,background:'#dbeafe',fontWeight:700}}>INGRESOS</td>
+        {d.periodos.map(p => <td key={p}></td>)}
+        <td colSpan={3}></td>
+      </tr>
+    )
+    // Expensas cobradas
+    rows.push(
+      <tr key="ing-exp">
+        <td style={{padding:'4px 10px',paddingLeft:16,fontSize:9,position:'sticky',left:0,background:'#fff'}}>Expensas cobradas</td>
+        {d.periodos.map(p => (
+          <td key={p} style={{padding:'4px 6px',textAlign:'right',color:VD,fontSize:9}}>
+            {d.ingresosPorPeriodo[p] ? '$' + fmt(d.ingresosPorPeriodo[p]) : '—'}
+          </td>
+        ))}
+        <td style={{padding:'4px 6px',textAlign:'right',fontWeight:700,color:VD,fontSize:9}}>${fmt(d.totalIngresos)}</td>
+        <td></td>
+        <td style={{padding:'4px 6px',textAlign:'right',fontSize:9,color:GR}}>${fmt(d.promedioIngresos)}</td>
+      </tr>
+    )
+    // Egresos header
+    rows.push(
+      <tr key="eg-h" style={{background:'#fee2e2',fontWeight:700}}>
+        <td style={{padding:'5px 10px',fontSize:9,textTransform:'uppercase',position:'sticky',left:0,background:'#fee2e2',fontWeight:700}}>EGRESOS</td>
+        {d.periodos.map(p => <td key={p}></td>)}
+        <td colSpan={3}></td>
+      </tr>
+    )
+    // Categorías
+    for (const cat of BA_CATS_ORDER) {
+      const conceps = Object.keys(d.mapa[cat] || {})
+      if (!conceps.length) continue
+      const totalCat = Object.values(d.totalsCat[cat] || {}).reduce((a, b) => a + b, 0)
+      const pct = d.totalAnual > 0 ? (totalCat / d.totalAnual * 100).toFixed(2) : '0'
+      rows.push(
+        <tr key={'cat-' + cat} style={{background:'#eff6ff'}}>
+          <td style={{padding:'4px 10px',fontWeight:700,fontSize:9,textTransform:'uppercase',position:'sticky',left:0,background:'#eff6ff'}}>{BA_CATS_LABEL[cat]}</td>
+          {d.periodos.map(p => (
+            <td key={p} style={{padding:'4px 6px',textAlign:'right',fontWeight:600,fontSize:9}}>
+              {(d.totalsCat[cat] && d.totalsCat[cat][p]) ? '$' + fmt(d.totalsCat[cat][p]) : '—'}
+            </td>
+          ))}
+          <td style={{padding:'4px 6px',textAlign:'right',fontWeight:700,fontSize:9}}>${fmt(totalCat)}</td>
+          <td style={{padding:'4px 6px',textAlign:'right',fontSize:8,color:GR}}>{pct}%</td>
+          <td style={{padding:'4px 6px',textAlign:'right',fontSize:8,color:GR}}>${fmt(totalCat / d.periodos.length)}</td>
+        </tr>
+      )
+      for (const con of conceps) {
+        const totalCon = Object.values(d.mapa[cat][con]).reduce((a, b) => a + b, 0)
+        rows.push(
+          <tr key={'con-' + cat + '-' + con} style={{borderBottom:'1px solid #f3f4f6'}}>
+            <td style={{padding:'3px 10px',paddingLeft:20,fontSize:9,color:GR,position:'sticky',left:0,background:'#fff'}}>{con}</td>
+            {d.periodos.map(p => (
+              <td key={p} style={{padding:'3px 6px',textAlign:'right',fontSize:8}}>
+                {d.mapa[cat][con][p] ? '$' + fmt(d.mapa[cat][con][p]) : '—'}
+              </td>
+            ))}
+            <td style={{padding:'3px 6px',textAlign:'right',fontSize:8}}>${fmt(totalCon)}</td>
+            <td></td>
+            <td style={{padding:'3px 6px',textAlign:'right',fontSize:8,color:GR}}>${fmt(totalCon / d.periodos.length)}</td>
+          </tr>
+        )
+      }
+    }
+    // Total egresos
+    rows.push(
+      <tr key="total-eg" style={{background:AZ,color:'#fff',fontWeight:700}}>
+        <td style={{padding:'6px 10px',fontSize:10,position:'sticky',left:0,background:AZ,fontWeight:700}}>TOTAL EGRESOS</td>
+        {d.periodos.map(p => (
+          <td key={p} style={{padding:'6px 6px',textAlign:'right',fontSize:9}}>${fmt(d.totalsGlobal[p] || 0)}</td>
+        ))}
+        <td style={{padding:'6px 6px',textAlign:'right',fontWeight:800,fontSize:10}}>${fmt(d.totalAnual)}</td>
+        <td style={{padding:'6px 6px',textAlign:'right',fontSize:8}}>100%</td>
+        <td style={{padding:'6px 6px',textAlign:'right',fontSize:9}}>${fmt(d.promedioEgresos)}</td>
+      </tr>
+    )
+    // Saldo final
+    rows.push(
+      <tr key="sf" style={{background:'#f0fdf4',fontWeight:700}}>
+        <td style={{padding:'6px 10px',fontSize:10,position:'sticky',left:0,background:'#f0fdf4',fontWeight:700}}>SALDO FINAL</td>
+        {d.periodos.map(p => {
+          const v = d.saldoFinalPorPeriodo[p] || 0
+          return (
+            <td key={p} style={{padding:'6px 6px',textAlign:'right',color:v<0?RJ:VD,fontWeight:700,fontSize:9}}>
+              {v !== 0 ? fmtS(v, true) : '—'}
+            </td>
+          )
+        })}
+        <td colSpan={3}></td>
+      </tr>
+    )
+    return rows
   }
 
   return (
@@ -8631,111 +8827,70 @@ function BalanceAnual({ session, consorcioId, consorcioActivo, adminPerfil }) {
           </div>
         )}
       </div>
-      <div style={{fontSize:12,color:GR,marginBottom:16}}>Rendición de cuentas entre períodos seleccionados</div>
+      <div style={{fontSize:12,color:GR,marginBottom:16}}>
+        Rendición de cuentas entre períodos seleccionados
+      </div>
       <Msg data={msg} />
+
       <Card style={{marginBottom:16}}>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr auto',gap:12,alignItems:'flex-end'}}>
           <div>
             <div style={{fontSize:12,color:GR,marginBottom:4,fontWeight:500}}>Período desde</div>
-            <input type="month" value={periodoDesde} onChange={e=>setPeriodoDesde(e.target.value)}
-              style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:7,fontSize:13,boxSizing:'border-box'}}/>
+            <input type="month" value={periodoDesde} onChange={e => setPeriodoDesde(e.target.value)}
+              style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:7,fontSize:13,boxSizing:'border-box'}} />
           </div>
           <div>
             <div style={{fontSize:12,color:GR,marginBottom:4,fontWeight:500}}>Período hasta</div>
-            <input type="month" value={periodoHasta} onChange={e=>setPeriodoHasta(e.target.value)}
-              style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:7,fontSize:13,boxSizing:'border-box'}}/>
+            <input type="month" value={periodoHasta} onChange={e => setPeriodoHasta(e.target.value)}
+              style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:7,fontSize:13,boxSizing:'border-box'}} />
           </div>
-          <Btn onClick={generar} disabled={cargando}>{cargando?'⏳ Calculando...':'🔄 Generar balance'}</Btn>
+          <Btn onClick={generar} disabled={cargando}>
+            {cargando ? '⏳ Calculando...' : '🔄 Generar balance'}
+          </Btn>
         </div>
       </Card>
-      {cargando && <div style={{textAlign:'center',padding:32,color:GR}}>⏳ Cargando datos...</div>}
+
+      {cargando && (
+        <div style={{textAlign:'center',padding:32,color:GR}}>⏳ Cargando datos del período...</div>
+      )}
+
       {datos && !cargando && (
         <>
+          {/* KPIs */}
           <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:16}}>
             {[
-              {l:'Total ingresos',v:'$'+fmt(datos.totalIngresos),c:VD},
-              {l:'Total egresos',v:'$'+fmt(datos.totalAnual),c:RJ},
-              {l:'Resultado neto',v:(datos.resultadoNeto>=0?'+':'')+'$'+fmt(datos.resultadoNeto),c:datos.resultadoNeto>=0?VD:RJ},
-              {l:'Meses saldo +',v:`${datos.mesesPositivo} / ${datos.periodos.length}`,c:AZ},
-            ].map((k,i)=>(
+              {l:'Total ingresos',   v:'$' + fmt(datos.totalIngresos),   c:VD},
+              {l:'Total egresos',    v:'$' + fmt(datos.totalAnual),       c:RJ},
+              {l:'Resultado neto',   v:(datos.resultadoNeto>=0?'+':'') + '$' + fmt(Math.abs(datos.resultadoNeto)), c:datos.resultadoNeto>=0?VD:RJ},
+              {l:'Meses saldo +',    v:datos.mesesPositivo + ' / ' + datos.periodos.length, c:AZ},
+            ].map((k, i) => (
               <Card key={i} style={{textAlign:'center',padding:'12px 10px'}}>
                 <div style={{fontSize:10,color:GR,textTransform:'uppercase',fontWeight:600,marginBottom:4}}>{k.l}</div>
                 <div style={{fontSize:16,fontWeight:800,color:k.c}}>{k.v}</div>
               </Card>
             ))}
           </div>
-          <Card style={{padding:0,overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:10,minWidth:datos.periodos.length*75+280}}>
+
+          {/* Tabla principal */}
+          <Card style={{padding:0,overflowX:'auto',marginBottom:16}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:10,minWidth: datos.periodos.length * 75 + 300}}>
               <thead>
                 <tr style={{background:AZ,color:'#fff'}}>
-                  <th style={{padding:'6px 10px',textAlign:'left',fontWeight:700,fontSize:9,minWidth:170,position:'sticky',left:0,background:AZ}}>Categoría / Concepto</th>
-                  {datos.periodos.map(p=><th key={p} style={{padding:'6px 6px',textAlign:'right',fontSize:8,minWidth:68,whiteSpace:'nowrap'}}>{perLabel(p)}</th>)}
-                  <th style={{padding:'6px 6px',textAlign:'right',fontSize:9,minWidth:85,background:'#0f2d7a'}}>TOTAL</th>
+                  <th style={{padding:'6px 10px',textAlign:'left',fontWeight:700,fontSize:9,minWidth:170,position:'sticky',left:0,background:AZ}}>
+                    Categoría / Concepto
+                  </th>
+                  {datos.periodos.map(p => (
+                    <th key={p} style={{padding:'6px 6px',textAlign:'right',fontSize:8,minWidth:70,whiteSpace:'nowrap'}}>
+                      {perLabel(p)}
+                    </th>
+                  ))}
+                  <th style={{padding:'6px 6px',textAlign:'right',fontSize:9,minWidth:88,background:'#0f2d7a'}}>TOTAL</th>
                   <th style={{padding:'6px 6px',textAlign:'right',fontSize:8,minWidth:44,background:'#0f2d7a'}}>%</th>
-                  <th style={{padding:'6px 6px',textAlign:'right',fontSize:8,minWidth:78,background:'#0f2d7a'}}>PROM.</th>
+                  <th style={{padding:'6px 6px',textAlign:'right',fontSize:8,minWidth:80,background:'#0f2d7a'}}>PROM.</th>
                 </tr>
               </thead>
               <tbody>
-                <tr style={{background:'#f0fdf4',fontWeight:700}}>
-                  <td style={{padding:'5px 10px',fontSize:10,position:'sticky',left:0,background:'#f0fdf4'}}>SALDO INICIAL</td>
-                  {datos.periodos.map(p=>{const v=datos.saldoInicialPorPeriodo[p]||0;return<td key={p} style={{padding:'5px 6px',textAlign:'right',color:v<0?RJ:VD,fontSize:9}}>{v!==0?fmtM(v):'—'}</td>})}
-                  <td colSpan={3}></td>
-                </tr>
-                <tr style={{background:'#dbeafe',fontWeight:700}}>
-                  <td style={{padding:'5px 10px',fontSize:9,textTransform:'uppercase',position:'sticky',left:0,background:'#dbeafe'}}>INGRESOS</td>
-                  {datos.periodos.map(p=><td key={p}></td>)}<td colSpan={3}></td>
-                </tr>
-                <tr>
-                  <td style={{padding:'4px 10px',paddingLeft:16,fontSize:9,position:'sticky',left:0,background:'#fff'}}>Expensas cobradas</td>
-                  {datos.periodos.map(p=><td key={p} style={{padding:'4px 6px',textAlign:'right',color:VD,fontSize:9}}>{datos.ingresosPorPeriodo[p]?'$'+fmt(datos.ingresosPorPeriodo[p]):'—'}</td>)}
-                  <td style={{padding:'4px 6px',textAlign:'right',fontWeight:700,color:VD,fontSize:9}}>${fmt(datos.totalIngresos)}</td>
-                  <td></td>
-                  <td style={{padding:'4px 6px',textAlign:'right',fontSize:9,color:GR}}>${fmt(datos.promedioIngresos)}</td>
-                </tr>
-                <tr style={{background:'#fee2e2',fontWeight:700}}>
-                  <td style={{padding:'5px 10px',fontSize:9,textTransform:'uppercase',position:'sticky',left:0,background:'#fee2e2'}}>EGRESOS</td>
-                  {datos.periodos.map(p=><td key={p}></td>)}<td colSpan={3}></td>
-                </tr>
-                {datos.CATS_ORDER.map(cat=>{
-                  const conceps=Object.keys(datos.mapa[cat]||{}); if(!conceps.length) return null
-                  const totalCat=Object.values(datos.totalsCat[cat]||{}).reduce((a,b)=>a+b,0)
-                  const pct=datos.totalAnual>0?(totalCat/datos.totalAnual*100).toFixed(2):'0'
-                  return (
-                    <React.Fragment key={cat}>
-                      <tr style={{background:'#eff6ff'}}>
-                        <td style={{padding:'4px 10px',fontWeight:700,fontSize:9,textTransform:'uppercase',position:'sticky',left:0,background:'#eff6ff'}}>{datos.CATS_LABEL[cat]}</td>
-                        {datos.periodos.map(p=><td key={p} style={{padding:'4px 6px',textAlign:'right',fontWeight:600,fontSize:9}}>{datos.totalsCat[cat]?.[p]?'$'+fmt(datos.totalsCat[cat][p]):'—'}</td>)}
-                        <td style={{padding:'4px 6px',textAlign:'right',fontWeight:700,fontSize:9}}>${fmt(totalCat)}</td>
-                        <td style={{padding:'4px 6px',textAlign:'right',fontSize:8,color:GR}}>{pct}%</td>
-                        <td style={{padding:'4px 6px',textAlign:'right',fontSize:8,color:GR}}>${fmt(totalCat/datos.periodos.length)}</td>
-                      </tr>
-                      {conceps.map(con=>{
-                        const totalCon=Object.values(datos.mapa[cat][con]).reduce((a,b)=>a+b,0)
-                        return(
-                          <tr key={con} style={{borderBottom:'1px solid #f3f4f6'}}>
-                            <td style={{padding:'3px 10px',paddingLeft:20,fontSize:9,color:GR,position:'sticky',left:0,background:'#fff'}}>{con}</td>
-                            {datos.periodos.map(p=><td key={p} style={{padding:'3px 6px',textAlign:'right',fontSize:8}}>{datos.mapa[cat][con][p]?'$'+fmt(datos.mapa[cat][con][p]):'—'}</td>)}
-                            <td style={{padding:'3px 6px',textAlign:'right',fontSize:8}}>${fmt(totalCon)}</td>
-                            <td></td>
-                            <td style={{padding:'3px 6px',textAlign:'right',fontSize:8,color:GR}}>${fmt(totalCon/datos.periodos.length)}</td>
-                          </tr>
-                        )
-                      })}
-                    </React.Fragment>
-                  )
-                })}
-                <tr style={{background:AZ,color:'#fff',fontWeight:700}}>
-                  <td style={{padding:'6px 10px',fontSize:10,position:'sticky',left:0,background:AZ}}>TOTAL EGRESOS</td>
-                  {datos.periodos.map(p=><td key={p} style={{padding:'6px 6px',textAlign:'right',fontSize:9}}>${fmt(datos.totalsGlobal[p]||0)}</td>)}
-                  <td style={{padding:'6px 6px',textAlign:'right',fontWeight:800,fontSize:10}}>${fmt(datos.totalAnual)}</td>
-                  <td style={{padding:'6px 6px',textAlign:'right',fontSize:8}}>100%</td>
-                  <td style={{padding:'6px 6px',textAlign:'right',fontSize:9}}>${fmt(datos.promedioEgresos)}</td>
-                </tr>
-                <tr style={{background:'#f0fdf4',fontWeight:700}}>
-                  <td style={{padding:'6px 10px',fontSize:10,position:'sticky',left:0,background:'#f0fdf4'}}>SALDO FINAL</td>
-                  {datos.periodos.map(p=>{const v=datos.saldoFinalPorPeriodo[p]||0;return<td key={p} style={{padding:'6px 6px',textAlign:'right',color:v<0?RJ:VD,fontWeight:700,fontSize:9}}>{v!==0?(v>0?'+':'')+fmtM(v):'—'}</td>})}
-                  <td colSpan={3}></td>
-                </tr>
+                {buildTablaRows(datos)}
               </tbody>
             </table>
           </Card>
@@ -8744,6 +8899,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo, adminPerfil }) {
     </div>
   )
 }
+
 
 // ESTADO FINANCIERO GENERAL
 // ══════════════════════════════════════════════════════════════════════════════
