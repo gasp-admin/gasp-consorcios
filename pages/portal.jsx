@@ -1,5 +1,6 @@
-// portal.jsx v3 — Portal del Copropietario GASP Consorcios
-// Muestra planilla de liquidación completa al navegar a #liquidacion-YYYY-MM
+// portal.jsx v5 — Portal del Copropietario GASP Consorcios
+// NUEVO v5: Sección "📁 Documentación del consorcio" con link a carpeta Drive
+// + Tab "Documentos" con acceso directo y descripción de contenidos disponibles
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
@@ -141,20 +142,19 @@ export default function Portal() {
   const [adminPerfil, setAdminPerfil] = useState(null)
   const [cuentaBanco, setCuentaBanco] = useState(null)
   const [tab, setTab]                 = useState('cuenta')
-  // Planilla de liquidación expandida
-  const [periodoExpandido, setPeriodoExpandido] = useState(null) // 'YYYY-MM' | null
+  const [periodoExpandido, setPeriodoExpandido] = useState(null)
   const [gastosPeriodo, setGastosPeriodo]       = useState([])
   const [loadingGastos, setLoadingGastos]       = useState(false)
 
   useEffect(() => { if (token) cargar(token) }, [token])
 
-  // Leer hash al montar y cuando cambia loading
   useEffect(() => {
     if (loading || !token) return
     const hash = window.location.hash
     if (!hash) return
     if (hash === '#cuenta-corriente') { setTab('cuenta'); return }
     if (hash === '#pagos') { setTab('pagos'); return }
+    if (hash === '#documentos') { setTab('documentos'); return }
     if (hash.startsWith('#liquidacion-')) {
       const per = hash.replace('#liquidacion-', '')
       setTab('cuenta')
@@ -191,7 +191,6 @@ export default function Portal() {
 
       setCoprop(cp); setConsorcio(con); setAdminPerfil(adm)
       setCuentaBanco(cuentas?.[0] || null)
-      // Filtrar detalles válidos
       setDetalles((dets||[]).filter(d =>
         (parseFloat(d.monto)||0) > 0 || (parseFloat(d.saldo_anterior)||0) > 0
       ))
@@ -200,23 +199,18 @@ export default function Portal() {
     setLoading(false)
   }
 
-  // Estado para datos del PDF completo
   const [todosDetalles, setTodosDetalles]   = useState([])
   const [todasUnidades, setTodasUnidades]   = useState([])
   const [todosCoprop, setTodosCoprop]       = useState([])
   const [generandoPDF, setGenerandoPDF]     = useState(false)
   const [expensaActual, setExpensaActual]   = useState(null)
 
-  // Cargar y expandir la planilla de un período específico
   async function expandirPeriodo(per) {
     setPeriodoExpandido(per)
     setLoadingGastos(true)
-    // Buscar la expensa_id del período desde los detalles cargados
     const det = detalles.find(d => d.con_expensas?.periodo === per)
     const expId = det?.expensa_id
     if (!expId) { setLoadingGastos(false); return }
-
-    // Cargar en paralelo: gastos, todos los detalles del período, todas las UFs, todos los copropietarios, perfil expensa
     const [
       { data: gastos }, { data: todsDets }, { data: todsUfs },
       { data: todsCps }, { data: expData }
@@ -254,9 +248,7 @@ export default function Portal() {
         copropietarios: todosCoprop,
         adminPerfil: adminPerfil || {},
       })
-    } catch(e) {
-      alert('Error al generar PDF: ' + e.message)
-    }
+    } catch(e) { alert('Error al generar PDF: ' + e.message) }
     setGenerandoPDF(false)
   }
 
@@ -269,6 +261,9 @@ export default function Portal() {
   const cbu    = cuentaBanco?.cbu   || consorcio?.cbu   || null
   const alias  = cuentaBanco?.alias || consorcio?.alias_cbu || '—'
   const banco  = cuentaBanco?.banco || consorcio?.banco  || '—'
+
+  // ── Drive ──────────────────────────────────────────────────────────────────
+  const driveFolderUrl = consorcio?.drive_folder_url || null
 
   if (!token) return null
   if (loading) return (
@@ -306,7 +301,6 @@ export default function Portal() {
     const saldo   = saldoDet(detExpandido)
     const esPag   = detExpandido.estado === 'pagada'
     const totalGastos = gastosPeriodo.reduce((a,g) => a + (parseFloat(g.monto)||0), 0)
-    // Agrupar gastos por categoría
     const gastosPorCat = {}
     for (const g of gastosPeriodo) {
       const cat = g.categoria || 'varios'
@@ -320,7 +314,6 @@ export default function Portal() {
           <title>Liquidación {periodoLabel(periodoExpandido)} — {consorcio?.nombre}</title>
           <meta name="viewport" content="width=device-width,initial-scale=1" />
         </Head>
-        {/* Header */}
         <div style={{ background:AZ, color:'#fff', padding:'14px 18px',
           position:'sticky', top:0, zIndex:10, boxShadow:'0 2px 8px #0003' }}>
           <div style={{ maxWidth:680, margin:'0 auto', display:'flex',
@@ -332,9 +325,7 @@ export default function Portal() {
                 ← Volver
               </button>
               <div>
-                <div style={{ fontSize:10, opacity:0.7, textTransform:'uppercase' }}>
-                  Liquidación
-                </div>
+                <div style={{ fontSize:10, opacity:0.7, textTransform:'uppercase' }}>Liquidación</div>
                 <div style={{ fontSize:15, fontWeight:700 }}>
                   {periodoLabel(periodoExpandido)} — {consorcio?.nombre}
                 </div>
@@ -348,8 +339,6 @@ export default function Portal() {
         </div>
 
         <div id="planilla-liq" style={{ maxWidth:680, margin:'0 auto', padding:'16px 14px' }}>
-
-          {/* Encabezado planilla */}
           <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px',
             marginBottom:14, boxShadow:'0 2px 12px #0001', borderLeft:`4px solid ${AZ}` }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:8 }}>
@@ -377,11 +366,9 @@ export default function Portal() {
             </div>
           </div>
 
-          {/* Tabla de composición de la expensa */}
           <div style={{ background:'#fff', borderRadius:14, overflow:'hidden',
             marginBottom:14, boxShadow:'0 2px 12px #0001' }}>
-            <div style={{ background:AZ, color:'#fff', padding:'10px 18px',
-              fontWeight:700, fontSize:13 }}>
+            <div style={{ background:AZ, color:'#fff', padding:'10px 18px', fontWeight:700, fontSize:13 }}>
               Composición de su expensa
             </div>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
@@ -424,16 +411,12 @@ export default function Portal() {
             </table>
           </div>
 
-          {/* Detalle de gastos del consorcio */}
           <div style={{ background:'#fff', borderRadius:14, overflow:'hidden',
             marginBottom:14, boxShadow:'0 2px 12px #0001' }}>
-            <div style={{ background:'#374151', color:'#fff', padding:'10px 18px',
-              fontWeight:700, fontSize:13 }}>
+            <div style={{ background:'#374151', color:'#fff', padding:'10px 18px', fontWeight:700, fontSize:13 }}>
               Gastos del consorcio — {periodoLabel(periodoExpandido)}
               {totalGastos > 0 && (
-                <span style={{ float:'right', fontWeight:400, fontSize:12 }}>
-                  Total: {fmt(totalGastos)}
-                </span>
+                <span style={{ float:'right', fontWeight:400, fontSize:12 }}>Total: {fmt(totalGastos)}</span>
               )}
             </div>
             {loadingGastos ? (
@@ -449,11 +432,9 @@ export default function Portal() {
                   return (
                     <div key={cat}>
                       <div style={{ background:'#eff6ff', padding:'7px 18px',
-                        fontSize:11, fontWeight:700, color:AZ,
-                        textTransform:'uppercase', letterSpacing:'0.04em',
-                        display:'flex', justifyContent:'space-between' }}>
-                        <span>{cat}</span>
-                        <span>{fmt(subtotal)}</span>
+                        fontSize:11, fontWeight:700, color:AZ, textTransform:'uppercase',
+                        letterSpacing:'0.04em', display:'flex', justifyContent:'space-between' }}>
+                        <span>{cat}</span><span>{fmt(subtotal)}</span>
                       </div>
                       {gs.map((g, i) => (
                         <div key={i} style={{ display:'flex', justifyContent:'space-between',
@@ -484,13 +465,10 @@ export default function Portal() {
             )}
           </div>
 
-          {/* Datos de pago */}
           {cbu && (
             <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px',
               marginBottom:14, border:`1.5px solid #dbeafe`, boxShadow:'0 2px 8px #0001' }}>
-              <div style={{ fontWeight:700, fontSize:14, color:AZ, marginBottom:12 }}>
-                💳 Cómo pagar
-              </div>
+              <div style={{ fontWeight:700, fontSize:14, color:AZ, marginBottom:12 }}>💳 Cómo pagar</div>
               <div style={{ fontSize:13, color:'#374151', lineHeight:2 }}>
                 <div><span style={{ color:GR }}>Titular:</span> <strong>{consorcio?.nombre}</strong></div>
                 <div><span style={{ color:GR }}>CBU:</span>{' '}
@@ -506,7 +484,6 @@ export default function Portal() {
             </div>
           )}
 
-          {/* Botón PDF completo */}
           <button onClick={abrirPDFCompleto} disabled={generandoPDF || loadingGastos}
             style={{ width:'100%', padding:'13px', background:'#374151', color:'#fff',
               border:'none', borderRadius:12, fontWeight:700, fontSize:14,
@@ -514,7 +491,6 @@ export default function Portal() {
             {generandoPDF ? '⏳ Generando...' : '📄 Ver planilla completa PDF (imprimible)'}
           </button>
 
-          {/* Botón volver */}
           <button onClick={() => { setPeriodoExpandido(null); setGastosPeriodo([]) }}
             style={{ width:'100%', padding:'13px', background:AZ, color:'#fff',
               border:'none', borderRadius:12, fontWeight:700, fontSize:14, cursor:'pointer' }}>
@@ -613,19 +589,45 @@ export default function Portal() {
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* ── ACCESO RÁPIDO DRIVE (si existe) ── */}
+        {driveFolderUrl && (
+          <a href={driveFolderUrl} target="_blank" rel="noreferrer"
+            style={{ display:'flex', alignItems:'center', gap:14, padding:'16px 20px',
+              background:'linear-gradient(135deg,#f0fdf4 0%,#dcfce7 100%)',
+              border:'1.5px solid #86efac', borderRadius:14, marginBottom:14,
+              textDecoration:'none', boxShadow:'0 2px 8px #0001' }}>
+            <div style={{ width:44, height:44, background:'#16a34a', borderRadius:10,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:22, flexShrink:0 }}>
+              📁
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontWeight:700, fontSize:14, color:'#14532d' }}>
+                Documentación del consorcio
+              </div>
+              <div style={{ fontSize:12, color:'#166534', marginTop:2, lineHeight:1.4 }}>
+                Acceda al reglamento de propiedad, planos, actas de asamblea y liquidaciones históricas
+              </div>
+            </div>
+            <div style={{ color:'#16a34a', fontSize:20, fontWeight:700 }}>›</div>
+          </a>
+        )}
+
+        {/* Tabs — incluye "Documentos" si hay Drive */}
         <div style={{ display:'flex', gap:4, marginBottom:14,
-          background:'#fff', borderRadius:12, padding:4, boxShadow:'0 2px 8px #0001' }}>
+          background:'#fff', borderRadius:12, padding:4, boxShadow:'0 2px 8px #0001',
+          overflowX:'auto' }}>
           {[
-            { id:'cuenta', label:'📋 Cuenta corriente' },
-            { id:'pagos',  label:'💳 Pagos' },
-            { id:'contacto', label:'📞 Contacto' },
+            { id:'cuenta',    label:'📋 Expensas' },
+            { id:'pagos',     label:'💳 Pagos' },
+            ...(driveFolderUrl ? [{ id:'documentos', label:'📁 Documentos' }] : []),
+            { id:'contacto',  label:'📞 Contacto' },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
-              style={{ flex:1, padding:'9px 6px', border:'none', cursor:'pointer',
+              style={{ flex:'1 0 auto', padding:'9px 8px', border:'none', cursor:'pointer',
                 borderRadius:9, fontSize:12, fontWeight: tab===t.id ? 700 : 500,
                 background: tab===t.id ? AZ : 'transparent',
-                color: tab===t.id ? '#fff' : GR }}>
+                color: tab===t.id ? '#fff' : GR, whiteSpace:'nowrap' }}>
               {t.label}
             </button>
           ))}
@@ -678,7 +680,6 @@ export default function Portal() {
                             color: esPag ? VD : s > 0 ? RJ : GR }}>
                             {esPag ? '✓' : fmt(s)}
                           </div>
-                          {/* Botón ver liquidación completa */}
                           <button onClick={() => expandirPeriodo(per)}
                             style={{ background:AZ, color:'#fff', border:'none',
                               borderRadius:7, padding:'5px 11px', fontSize:11,
@@ -704,13 +705,10 @@ export default function Portal() {
               </div>
             )}
 
-            {/* Datos de pago en cuenta corriente */}
             {cbu && (
               <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px',
                 marginTop:14, border:`1.5px solid #dbeafe`, boxShadow:'0 2px 8px #0001' }}>
-                <div style={{ fontWeight:700, fontSize:14, color:AZ, marginBottom:12 }}>
-                  💳 Cómo pagar
-                </div>
+                <div style={{ fontWeight:700, fontSize:14, color:AZ, marginBottom:12 }}>💳 Cómo pagar</div>
                 <div style={{ fontSize:13, color:'#374151', lineHeight:2 }}>
                   <div><span style={{ color:GR }}>Titular:</span> <strong>{consorcio?.nombre}</strong></div>
                   <div><span style={{ color:GR }}>CBU:</span>{' '}
@@ -740,9 +738,7 @@ export default function Portal() {
             ) : (
               <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px',
                 boxShadow:'0 2px 12px #0001' }}>
-                <div style={{ fontWeight:700, fontSize:14, marginBottom:14 }}>
-                  Historial de pagos
-                </div>
+                <div style={{ fontWeight:700, fontSize:14, marginBottom:14 }}>Historial de pagos</div>
                 {cobranzas.map((c, i) => (
                   <div key={c.id} style={{ display:'flex', justifyContent:'space-between',
                     alignItems:'center', padding:'11px 0',
@@ -761,6 +757,74 @@ export default function Portal() {
                     <div style={{ fontWeight:800, fontSize:16, color:VD }}>{fmt(c.monto)}</div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: DOCUMENTOS (NUEVO v5) */}
+        {tab === 'documentos' && (
+          <div id="documentos">
+            {driveFolderUrl ? (
+              <div>
+                {/* Botón principal */}
+                <a href={driveFolderUrl} target="_blank" rel="noreferrer"
+                  style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:10,
+                    padding:'18px 20px', background:'#16a34a', color:'#fff',
+                    textDecoration:'none', borderRadius:14, fontWeight:700, fontSize:16,
+                    marginBottom:16, boxShadow:'0 4px 16px #16a34a33' }}>
+                  <span style={{ fontSize:24 }}>📁</span>
+                  Abrir carpeta de documentos del consorcio
+                  <span style={{ fontSize:16, opacity:0.7 }}>↗</span>
+                </a>
+
+                {/* Descripción de contenidos */}
+                <div style={{ background:'#fff', borderRadius:14, padding:'20px',
+                  boxShadow:'0 2px 12px #0001', marginBottom:14 }}>
+                  <div style={{ fontWeight:700, fontSize:14, color:'#14532d', marginBottom:14 }}>
+                    📂 Documentos disponibles en la carpeta
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                    {[
+                      { icon:'📜', title:'Reglamento de propiedad horizontal',
+                        desc:'Documento constitutivo del consorcio. Establece los derechos y obligaciones de cada propietario.' },
+                      { icon:'🗓️', title:'Actas de asambleas',
+                        desc:'Registro de todas las reuniones de propietarios, decisiones tomadas y votaciones.' },
+                      { icon:'📐', title:'Planos del edificio',
+                        desc:'Planos originales y actualizaciones de la propiedad.' },
+                      { icon:'📊', title:'Liquidaciones históricas',
+                        desc:'Liquidaciones de expensas de períodos anteriores en formato PDF.' },
+                      { icon:'📋', title:'Contratos y pólizas',
+                        desc:'Seguros vigentes, contratos de mantenimiento y otros documentos operativos.' },
+                    ].map(({ icon, title, desc }) => (
+                      <div key={title} style={{ display:'flex', gap:12, padding:'12px',
+                        background:'#f9fafb', borderRadius:10, border:'1px solid #e5e7eb' }}>
+                        <div style={{ fontSize:24, flexShrink:0 }}>{icon}</div>
+                        <div>
+                          <div style={{ fontWeight:600, fontSize:13, color:'#111', marginBottom:3 }}>{title}</div>
+                          <div style={{ fontSize:12, color:GR, lineHeight:1.5 }}>{desc}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Nota acceso */}
+                <div style={{ padding:'12px 16px', background:'#fffbeb', border:'1px solid #fde68a',
+                  borderRadius:10, fontSize:12, color:'#92400e' }}>
+                  ℹ️ Para acceder necesita una cuenta Google. Si no tiene acceso a algún documento,
+                  contacte a su administrador.
+                </div>
+              </div>
+            ) : (
+              <div style={{ background:'#fff', borderRadius:14, padding:32,
+                textAlign:'center', color:GR }}>
+                <div style={{ fontSize:36, marginBottom:12 }}>📁</div>
+                <div style={{ fontWeight:600, marginBottom:8 }}>Documentación no disponible</div>
+                <div style={{ fontSize:13 }}>
+                  La administración aún no ha configurado la carpeta de documentos para este consorcio.
+                  Contacte al administrador.
+                </div>
               </div>
             )}
           </div>
