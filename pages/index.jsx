@@ -6924,71 +6924,33 @@ function Asambleas({ session, consorcioId, consorcioActivo, unidades, copropieta
   // generarTexto DEBE declararse ANTES de abrirDetalle (evita TDZ)
   const generarTexto = (a) => {
     if (!a) return ''
-    const cn   = consorcioActivo ? consorcioActivo.nombre || '...' : '...'
+    const cn   = consorcioActivo ? (consorcioActivo.nombre || '...') : '...'
     const tipo = a.tipo === 'ordinaria' ? 'ORDINARIA' : 'EXTRAORDINARIA'
     const tipoL = a.tipo === 'ordinaria' ? 'Ordinaria' : 'Extraordinaria'
     const fC   = a.fecha ? new Date(a.fecha+'T12:00:00').toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '...'
     const fL   = a.fecha ? new Date(a.fecha+'T12:00:00').toLocaleDateString('es-AR',{day:'numeric',month:'long',year:'numeric'}) : '...'
     const plat = a.plataforma_virtual ? (a.plataforma_virtual.charAt(0).toUpperCase()+a.plataforma_virtual.slice(1)) : 'Zoom'
-    const od   = (a.orden_del_dia||[]).map((p,i) => (i+1)+'. '+p).join('
-')
-    const cab  = 'Del Lenguado 1313 Local 3 — Pinamar
-(02254) 51-6386 / (02267) 15 444035
-administración@administracionpinamar.com
-
-'
-    const firma = '
-
-Javier García Pérez — Administrador — Mat. RPAC N° 83
-
-'+NOTA_RP
+    const od   = (a.orden_del_dia||[]).map((p,i) => (i+1)+'. '+p).join('\n')
+    const cab  = 'Del Lenguado 1313 Local 3 — Pinamar\n(02254) 51-6386 / (02267) 15 444035\nadministración@administracionpinamar.com\n\n'
+    const firma = '\n\nJavier García Pérez — Administrador — Mat. RPAC N° 83\n\n'+NOTA_RP
     if (a.modalidad === 'virtual' || a.modalidad === 'mixta') {
-      const mixta = a.modalidad === 'mixta' ? ('
-Presencial: '+(a.lugar||'...')+' — y a distancia vía '+plat) : ''
+      const mixta = a.modalidad === 'mixta' ? ('\nPresencial: '+(a.lugar||'...')+' — y a distancia vía '+plat) : ''
       const clave = a.clave_virtual ? ('Clave: '+a.clave_virtual) : ''
       const moda  = a.modalidad === 'virtual' ? 'modalidad a distancia' : 'modalidad presencial y virtual'
-      return cab+'CONVOCATORIA A ASAMBLEA GENERAL '+tipo+'
-'+cn.toUpperCase()+' — PINAMAR
-'+
-        mixta+'
-— '+fC+' — '+a.hora+' hs —
-
-De mi mayor consideración:
-
-'+
+      return cab+'CONVOCATORIA A ASAMBLEA GENERAL '+tipo+'\n'+cn.toUpperCase()+' — PINAMAR\n'+
+        mixta+'\n— '+fC+' — '+a.hora+' hs —\n\nDe mi mayor consideración:\n\n'+
         'En carácter de administrador del '+cn+', lo invito a una Asamblea General '+tipoL+
-        ' a celebrarse bajo '+moda+' el día '+fL+' a las '+a.hora+' hs.
-
-'+
-        'ORDEN DEL DÍA
-'+od+'
-
-Ingreso — link de acceso:
-'+
-        (a.link_virtual||'[COMPLETAR LINK]')+'
-'+clave+
-        '
-
-Es requisito: nombre y apellido visibles; cámara encendida al acreditarse y votar.'+firma
+        ' a celebrarse bajo '+moda+' el día '+fL+' a las '+a.hora+' hs.\n\n'+
+        'ORDEN DEL DÍA\n'+od+'\n\nIngreso — link de acceso:\n'+
+        (a.link_virtual||'[COMPLETAR LINK]')+'\n'+clave+
+        '\n\nEs requisito: nombre y apellido visibles; cámara encendida al acreditarse y votar.'+firma
     }
-    return cab+'CONVOCATORIA A ASAMBLEA GENERAL '+tipo+'
-'+cn.toUpperCase()+' — PINAMAR
-'+
-      (a.lugar ? ('A las '+a.hora+' horas en '+a.lugar+'
-') : '
-')+
-      '
-De mi mayor consideración:
-
-Por la presente, y en mi carácter de Administrador del '+cn+
+    return cab+'CONVOCATORIA A ASAMBLEA GENERAL '+tipo+'\n'+cn.toUpperCase()+' — PINAMAR\n'+
+      (a.lugar ? ('A las '+a.hora+' horas en '+a.lugar+'\n') : '\n')+
+      '\nDe mi mayor consideración:\n\nPor la presente, y en mi carácter de Administrador del '+cn+
       ', convoco a Asamblea General '+tipoL+', para el día '+fL+' a las '+a.hora+
-      ' horas en '+(a.lugar||'...')+'
-
-ORDEN DEL DÍA
-'+od+
-      '
-
-Sin más por el particular, saluda atte.'+firma
+      ' horas en '+(a.lugar||'...')+'\n\nORDEN DEL DÍA\n'+od+
+      '\n\nSin más por el particular, saluda atte.'+firma
   }
 
   // cargar ANTES de useEffect
