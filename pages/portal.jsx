@@ -128,6 +128,89 @@ function generarPDFLiquidacion({ consorcioActivo, expensa, gastos, detalles, uni
   win.document.write(html); win.document.close(); win.focus()
 }
 
+function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail }) {
+  const [asunto, setAsunto]   = useState('')
+  const [detalle, setDetalle] = useState('')
+  const [tipo, setTipo]       = useState('reclamo')
+  const [enviado, setEnviado] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  const [msg, setMsg]         = useState(null)
+
+  const TIPOS = [
+    ['reclamo',    '🔧 Reclamo técnico'],
+    ['consulta',   '❓ Consulta administrativa'],
+    ['expensa',    '💳 Consulta sobre expensas'],
+    ['ruido',      '🔊 Ruidos/molestias'],
+    ['otro',       '📝 Otro'],
+  ]
+
+  const enviar = async () => {
+    if (!asunto.trim() || !detalle.trim()) return setMsg('Completá el asunto y el detalle')
+    setEnviando(true)
+    try {
+      const { error } = await supabase.from('con_reclamos').insert([{
+        consorcio_id: consorcioId,
+        copropietario_id: copropietarioId,
+        unidad_id: unidadId,
+        tipo, asunto, descripcion: detalle,
+        estado: 'abierto',
+        created_at: new Date().toISOString(),
+      }])
+      if (error) throw error
+      setEnviado(true)
+      setAsunto(''); setDetalle(''); setMsg(null)
+    } catch (e) {
+      setMsg('Error al enviar. Intentá de nuevo.')
+    }
+    setEnviando(false)
+  }
+
+  if (enviado) return (
+    <div style={{ textAlign:'center', padding:'24px 0' }}>
+      <div style={{ fontSize:36, marginBottom:8 }}>✅</div>
+      <div style={{ fontWeight:700, marginBottom:6 }}>Reclamo enviado</div>
+      <div style={{ fontSize:12, color:GR, marginBottom:16 }}>El administrador recibirá tu reclamo y te contactará a la brevedad.</div>
+      <button onClick={() => setEnviado(false)}
+        style={{ padding:'8px 20px', background:AZ, color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontWeight:600 }}>
+        Enviar otro
+      </button>
+    </div>
+  )
+
+  return (
+    <div>
+      {msg && <div style={{ padding:'8px 12px', background:'#fef2f2', borderRadius:8, fontSize:12, color:RJ, marginBottom:12 }}>{msg}</div>}
+      <div style={{ marginBottom:12 }}>
+        <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Tipo de consulta</div>
+        <select value={tipo} onChange={e => setTipo(e.target.value)}
+          style={{ width:'100%', padding:'10px', border:'1px solid #d1d5db', borderRadius:8, fontSize:13 }}>
+          {TIPOS.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </div>
+      <div style={{ marginBottom:12 }}>
+        <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Asunto</div>
+        <input value={asunto} onChange={e => setAsunto(e.target.value)}
+          placeholder="Describí brevemente el problema"
+          style={{ width:'100%', padding:'10px', border:'1px solid #d1d5db', borderRadius:8, fontSize:13, boxSizing:'border-box' }}/>
+      </div>
+      <div style={{ marginBottom:16 }}>
+        <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Detalle</div>
+        <textarea value={detalle} onChange={e => setDetalle(e.target.value)} rows={4}
+          placeholder="Describí el problema con el mayor detalle posible..."
+          style={{ width:'100%', padding:'10px', border:'1px solid #d1d5db', borderRadius:8, fontSize:13, fontFamily:'inherit', resize:'vertical', boxSizing:'border-box' }}/>
+      </div>
+      <button onClick={enviar} disabled={enviando || !asunto.trim() || !detalle.trim()}
+        style={{ width:'100%', padding:'12px', background:AZ, color:'#fff', border:'none', borderRadius:8,
+          cursor: enviando||!asunto.trim()||!detalle.trim() ? 'not-allowed' : 'pointer',
+          opacity: enviando||!asunto.trim()||!detalle.trim() ? 0.5 : 1,
+          fontWeight:700, fontSize:14 }}>
+        {enviando ? '⏳ Enviando...' : '📤 Enviar reclamo'}
+      </button>
+    </div>
+  )
+}
+
+
 export default function Portal() {
   const router = useRouter()
   const { token } = router.query
@@ -621,6 +704,7 @@ export default function Portal() {
             { id:'cuenta',    label:'📋 Expensas' },
             { id:'pagos',     label:'💳 Pagos' },
             ...(driveFolderUrl ? [{ id:'documentos', label:'📁 Documentos' }] : []),
+            { id:'reclamos',  label:'🎫 Reclamos' },
             { id:'contacto',  label:'📞 Contacto' },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
@@ -831,7 +915,26 @@ export default function Portal() {
         )}
 
         {/* TAB: CONTACTO */}
-        {tab === 'contacto' && (
+        {
+          {/* Tab Reclamos */}
+          {tab === 'reclamos' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div style={{ background:'#fff', borderRadius:14, padding:20, boxShadow:'0 2px 12px #0001' }}>
+                <div style={{ fontWeight:700, fontSize:14, marginBottom:4 }}>🎫 Reclamos y Consultas</div>
+                <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+                  Enviá un reclamo o consulta al administrador. Te responderemos a la brevedad.
+                </div>
+                <Reclamo
+                  unidadId={unidad?.id}
+                  copropietarioId={copropietario?.id}
+                  consorcioId={copropietario?.consorcio_id}
+                  adminEmail={adminPerfil?.email}
+                />
+              </div>
+            </div>
+          )}
+
+tab === 'contacto' && (
           <div>
             {adminPerfil ? (
               <div style={{ background:'#fff', borderRadius:14, padding:20,
