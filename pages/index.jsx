@@ -5997,7 +5997,7 @@ function RendicionCuentas({ session, consorcioId, consorcioActivo, expensas, cop
     const totalDeudores  = totalExpensa - totalIngresos
 
     // Agrupar gastos por categoría
-    const gastosPorCat: Record<string,number> = {}
+    const gastosPorCat = {}
     ;(gastos||[]).forEach(g => {
       const cat = g.categoria || 'otros'
       gastosPorCat[cat] = (gastosPorCat[cat]||0) + Number(g.monto||0)
@@ -6066,7 +6066,7 @@ function RendicionCuentas({ session, consorcioId, consorcioActivo, expensas, cop
       <thead><tr><th>Categoría</th><th class="txt-right">Importe</th></tr></thead>
       <tbody>
         ${Object.entries(gastosPorCat).map(([cat,monto]) =>
-          `<tr><td style="text-transform:capitalize">${cat}</td><td class="txt-right">${fmt(monto as number)}</td></tr>`
+          `<tr><td style="text-transform:capitalize">${cat}</td><td class="txt-right">${fmt(Number(monto))}</td></tr>`
         ).join('')}
         ${totalSueldos > 0 ? `<tr><td>Sueldos netos</td><td class="txt-right">${fmt(totalSueldos)}</td></tr>` : ''}
         ${totalFateryh > 0 ? `<tr><td>F.A.T.E.R.Y.H.</td><td class="txt-right">${fmt(totalFateryh)}</td></tr>` : ''}
