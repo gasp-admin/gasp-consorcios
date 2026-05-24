@@ -924,8 +924,8 @@ export default function Portal() {
               </div>
               <Reclamo
                 unidadId={unidad?.id}
-                copropietarioId={copropietario?.id}
-                consorcioId={copropietario?.consorcio_id}
+                copropietarioId={coprop?.id}
+                consorcioId={unidad?.consorcio_id}
                 adminEmail={adminPerfil?.email}
               />
             </div>
