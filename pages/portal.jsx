@@ -914,27 +914,26 @@ export default function Portal() {
           </div>
         )}
 
-        {/* TAB: CONTACTO */}
-        {
-          {/* Tab Reclamos */}
-          {tab === 'reclamos' && (
-            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-              <div style={{ background:'#fff', borderRadius:14, padding:20, boxShadow:'0 2px 12px #0001' }}>
-                <div style={{ fontWeight:700, fontSize:14, marginBottom:4 }}>🎫 Reclamos y Consultas</div>
-                <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
-                  Enviá un reclamo o consulta al administrador. Te responderemos a la brevedad.
-                </div>
-                <Reclamo
-                  unidadId={unidad?.id}
-                  copropietarioId={copropietario?.id}
-                  consorcioId={copropietario?.consorcio_id}
-                  adminEmail={adminPerfil?.email}
-                />
+        {/* Tab Reclamos */}
+        {tab === 'reclamos' && (
+          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+            <div style={{ background:'#fff', borderRadius:14, padding:20, boxShadow:'0 2px 12px #0001' }}>
+              <div style={{ fontWeight:700, fontSize:14, marginBottom:4 }}>🎫 Reclamos y Consultas</div>
+              <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+                Enviá un reclamo o consulta al administrador. Te responderemos a la brevedad.
               </div>
+              <Reclamo
+                unidadId={unidad?.id}
+                copropietarioId={copropietario?.id}
+                consorcioId={copropietario?.consorcio_id}
+                adminEmail={adminPerfil?.email}
+              />
             </div>
-          )}
+          </div>
+        )}
 
-tab === 'contacto' && (
+        {/* TAB: CONTACTO */}
+        {tab === 'contacto' && (
           <div>
             {adminPerfil ? (
               <div style={{ background:'#fff', borderRadius:14, padding:20,
