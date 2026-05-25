@@ -7078,19 +7078,19 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
   const AK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBheXpxYmt5ZG12b3ZqeGx6bnVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0OTg0ODAsImV4cCI6MjA5MTA3NDQ4MH0.ut-cHjkd1oztZa-W3uYRbHDScEB4RLg55WtfIcBidm8';
   const EF_URL = `${SB}/functions/v1/importar-liquidacion-historica`;
 
-  const [tab, setTab]                         = React.useState('importar');
-  const [driveUrl, setDriveUrl]               = React.useState('');
-  const [archivosEncontrados, setArchivosEncontrados] = React.useState([]);
-  const [seleccionados, setSeleccionados]     = React.useState([]);
-  const [cola, setCola]                       = React.useState([]);
-  const [historial, setHistorial]             = React.useState([]);
-  const [loading, setLoading]                 = React.useState(false);
-  const [procesando, setProcesando]           = React.useState(false);
-  const [msg, setMsg]                         = React.useState('');
-  const [progreso, setProgreso]               = React.useState({ actual: 0, total: 0 });
-  const [detalle, setDetalle]                 = React.useState(null);
-  const [filtroCon, setFiltroCon]             = React.useState('todos');
-  const [fileIdsManual, setFileIdsManual]     = React.useState('');
+  const [tab, setTab]                         = useState('importar');
+  const [driveUrl, setDriveUrl]               = useState('');
+  const [archivosEncontrados, setArchivosEncontrados] = useState([]);
+  const [seleccionados, setSeleccionados]     = useState([]);
+  const [cola, setCola]                       = useState([]);
+  const [historial, setHistorial]             = useState([]);
+  const [loading, setLoading]                 = useState(false);
+  const [procesando, setProcesando]           = useState(false);
+  const [msg, setMsg]                         = useState('');
+  const [progreso, setProgreso]               = useState({ actual: 0, total: 0 });
+  const [detalle, setDetalle]                 = useState(null);
+  const [filtroCon, setFiltroCon]             = useState('todos');
+  const [fileIdsManual, setFileIdsManual]     = useState('');
 
   const tok = session?.access_token;
 
@@ -7123,7 +7123,7 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
     } finally { setLoading(false); }
   };
 
-  React.useEffect(() => { cargarTodo(); }, []);
+  useEffect(() => { cargarTodo(); }, []);
 
   const extraerFolderId = (url) => {
     const m = url.match(/\/folders\/([a-zA-Z0-9_-]+)/);
