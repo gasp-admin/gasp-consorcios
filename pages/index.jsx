@@ -280,7 +280,7 @@ function generarPDFLiquidacion({ consorcioActivo, expensa, gastos, detalles, uni
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. UNIDADES FUNCIONALES
 // ══════════════════════════════════════════════════════════════════════════════
-function Unidades({ session, consorcioId, copropietarios }) {
+function Unidades({ session, consorcioId, copropietarios, columnasLiq }) {
   const [unidades, setUnidades] = useState([])
   const [form, setForm] = useState(null)
   const [msg, setMsg] = useState(null)
@@ -602,7 +602,7 @@ function Unidades({ session, consorcioId, copropietarios }) {
                             <Btn small title="Enviar link por WhatsApp" onClick={() => {
                               const url = 'https://consorcios.administracionpinamar.com/portal?token=' + u.portal_token
                               const txt = encodeURIComponent('Estimado/a ' + cp2.apellido_nombre + ', le enviamos el link a su portal de expensas donde puede consultar su estado de cuenta:\n' + url)
-                              window.open(`https://wa.me/549${cp2.telefono.replace(/\D/g,'')}?text=${txt}`, '_blank')
+                              window.open(`https://wa.me/549${(()=>{let n=(cp2.telefono||'').replace(/\D/g,'');if(n.startsWith('549'))return n;if(n.startsWith('54'))return '9'+n.slice(2);if(n.startsWith('0'))n=n.slice(1);return n})()}?text=${txt}`, '_blank')
                             }} style={{ background:'#dcfce7', color:'#166534' }}>📱</Btn>
                           ) : null
                         })()}
@@ -775,7 +775,7 @@ function Copropietarios({ session, consorcioId, onUpdate }) {
               </div>
             </div>
             <div style={{ display:'flex', gap:6 }}>
-              {cp.telefono && <Btn small color='#25d366' onClick={() => window.open(`https://wa.me/549${cp.telefono.replace(/\D/g,'')}`)}>WhatsApp</Btn>}
+              {cp.telefono && <Btn small color='#25d366' onClick={() => window.open(`https://wa.me/549${(()=>{let n=(cp.telefono||'').replace(/\D/g,'');if(n.startsWith('549'))return n;if(n.startsWith('54'))return '9'+n.slice(2);if(n.startsWith('0'))n=n.slice(1);return n})()}`)}>WhatsApp</Btn>}
               <Btn small onClick={() => { setForm({...cp}); setTabForm('principal') }} style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
               <Btn small onClick={() => eliminar(cp.id)} style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
             </div>
@@ -3391,7 +3391,7 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios, adminPerfil
                                 const cp2 = copropietarios.find(c => c.id === u.propietario_id)
                                 if (cp2?.telefono) {
                                   const txt = encodeURIComponent(`Estimado/a ${cp2.apellido_nombre}, consulte su estado de cuenta en:\n${url}`)
-                                  window.open(`https://wa.me/549${cp2.telefono.replace(/\D/g,'')}?text=${txt}`, '_blank')
+                                  window.open(`https://wa.me/549${(()=>{let n=(cp2.telefono||'').replace(/\D/g,'');if(n.startsWith('549'))return n;if(n.startsWith('54'))return '9'+n.slice(2);if(n.startsWith('0'))n=n.slice(1);return n})()}?text=${txt}`, '_blank')
                                 } else {
                                   navigator.clipboard.writeText(url)
                                     .then(() => setMsg({ tipo:'ok', texto:`✓ Link copiado — ${u.numero}` }))
@@ -3580,7 +3580,7 @@ function Morosos({ session, consorcioId, unidades, copropietarios }) {
     const cp=u?copropietarios.find(c=>c.id===u.propietario_id):null
     if (!cp?.telefono) return alert('El copropietario no tiene teléfono registrado')
     const msg=encodeURIComponent(`Estimado/a ${cp.apellido_nombre}, le informamos que tiene pendiente el pago de expensas del período ${periodoLabel(det.con_expensas?.periodo)} por ${fmt(det.monto)}. Por favor regularice su situación. Gracias.`)
-    window.open(`https://wa.me/549${cp.telefono.replace(/\D/g,'')}?text=${msg}`,'_blank')
+    window.open(`https://wa.me/549${(()=>{let n=(cp.telefono||'').replace(/\D/g,'');if(n.startsWith('549'))return n;if(n.startsWith('54'))return '9'+n.slice(2);if(n.startsWith('0'))n=n.slice(1);return n})()}?text=${msg}`,'_blank')
   }
 
   function generarIntimacion(det) {
@@ -3677,7 +3677,7 @@ function Morosos({ session, consorcioId, unidades, copropietarios }) {
             const cp=u?copropietarios.find(c=>c.id===u.propietario_id):null
             if (cp?.telefono) {
               const msg=encodeURIComponent(`Estimado/a ${cp.apellido_nombre}, tiene expensas pendientes por ${fmt(d.monto)} del período ${periodoLabel(d.con_expensas?.periodo)}. Por favor regularice.`)
-              window.open(`https://wa.me/549${cp.telefono.replace(/\D/g,'')}?text=${msg}`,'_blank')
+              window.open(`https://wa.me/549${(()=>{let n=(cp.telefono||'').replace(/\D/g,'');if(n.startsWith('549'))return n;if(n.startsWith('54'))return '9'+n.slice(2);if(n.startsWith('0'))n=n.slice(1);return n})()}?text=${msg}`,'_blank')
               await new Promise(r=>setTimeout(r,500))
             }
           }
@@ -14469,9 +14469,9 @@ function CtaCorriente({ session, consorcioId, unidades, copropietarios }) {
       supabase.from('con_expensas_detalle').select('*, con_expensas(periodo,fecha_vencimiento,tipo)')
         .eq('unidad_id', uid).order('created_at', { ascending: true }),
       supabase.from('con_cobranzas').select('*, con_expensas(periodo)')
-        .eq('unidad_id', uid).eq('estado', 'vigente').order('fecha', { ascending: true }),
+        .eq('unidad_id', uid).in('estado', ['vigente','acreditado','cobrado']).order('fecha', { ascending: true }),
       supabase.from('con_movimientos_unidad').select('*')
-        .eq('unidad_id', uid).eq('estado', 'vigente').order('fecha', { ascending: true }),
+        .eq('unidad_id', uid).in('estado', ['vigente','acreditado','cobrado']).order('fecha', { ascending: true }),
     ])
 
     // Construir líneas de cuenta corriente
@@ -16131,7 +16131,7 @@ export default function App() {
     switch(pagina) {
       case 'dashboard':      return <Dashboard consorcios={consorcios} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} formCon={formCon} setFormCon={setFormCon} msgCon={msgCon} guardarConsorcio={guardarConsorcio} setConsorcioActivo={setConsorcioActivo} cargarConsorcio={cargarConsorcio} setPagina={setPagina} />
       case 'listado_consorcios': return <ListadoConsorcios session={session} consorcios={consorcios} />
-      case 'unidades':       return <Unidades session={session} consorcioId={cid} copropietarios={copropietarios} />
+      case 'unidades':       return <Unidades session={session} consorcioId={cid} copropietarios={copropietarios} columnasLiq={columnasLiq||[]} />
       case 'copropietarios': return <Copropietarios session={session} consorcioId={cid} onUpdate={setCopropietarios} />
       case 'sueldos':        return <Sueldos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} />
       case 'liquidacion':    return <LiquidacionPeriodo session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} adminPerfil={adminPerfil} expensas={expensas} setExpensas={setExpensas} cargar={()=>cargarConsorcio(cid, session?.user?.id)} setPagina={setPagina} />
