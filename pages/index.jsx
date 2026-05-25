@@ -15085,7 +15085,7 @@ function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
               </div>
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:24 }}>
-              {[{l:'Unidades',v:totalUFs,c:AZ,icon:'🏢',action:'unidades'},{l:'Ocupadas',v:ocupadas,c:VD,icon:'✅',action:'unidades'},{l:'Copropietarios',v:copropietarios.length,c:AM,icon:'👤',action:'copropietarios'},{l:'Coef. total',v:coefTotal.toFixed(2)+'%',c:'#6d28d9',icon:'📊',action:null}].map((k,i)=>(
+              {[{l:'Unidades',v:totalUFs,c:AZ,icon:'🏢',action:'unidades'},{l:'Cta. Cte. UFs',v:'→',c:VD,icon:'📋',action:'cta_corriente'},{l:'Copropietarios',v:copropietarios.length,c:AM,icon:'👤',action:'copropietarios'},{l:'Coef. total',v:coefTotal.toFixed(2)+'%',c:'#6d28d9',icon:'📊',action:null}].map((k,i)=>(
                 <button key={i} onClick={()=>{ if(k.action) setPagina(k.action) }}
                   style={{ textAlign:'center', cursor:k.action?'pointer':'default', background:'#fff', border:'0.5px solid #ddd', borderRadius:10, padding:16, width:'100%' }}>
                   <div style={{ fontSize:24, marginBottom:6 }}>{k.icon}</div>
@@ -15095,7 +15095,7 @@ function Dashboard({ consorcios, consorcioActivo, unidades, copropietarios,
               ))}
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-              {[{id:'expensas',icon:'💰',label:'Gestionar Expensas',desc:'Crear período, calcular, cobrar'},{id:'comprobantes',icon:'🧾',label:'Comprobantes',desc:'Facturas y comprobantes de proveedores'},{id:'morosos',icon:'⚠️',label:'Ver Morosos',desc:'Cuotas pendientes y contacto'},{id:'cta_corriente',icon:'📋',label:'Cta. corriente UF',desc:'Movimientos por unidad funcional'}].map(m=>(
+              {[{id:'cobranzas',icon:'💳',label:'Cobranzas',desc:'Registro de cobros y cobranza automática'},{id:'comprobantes',icon:'🧾',label:'Comprobantes',desc:'Facturas y comprobantes de proveedores'},{id:'morosos',icon:'⚠️',label:'Ver Morosos',desc:'Cuotas pendientes y contacto'},{id:'cta_corriente',icon:'📋',label:'Cta. corriente UF',desc:'Movimientos por unidad funcional'},{id:'sueldos',icon:'👷',label:'Sueldos',desc:'Liquidación de sueldos y cargas sociales'}].map(m=>(
                 <button key={m.id} onClick={()=>{ setPagina(m.id) }}
                   style={{ cursor:'pointer', background:'#fff', border:'0.5px solid #ddd', borderRadius:10, padding:16, width:'100%', textAlign:'left' }}>
                   <div style={{ fontSize:28, marginBottom:8 }}>{m.icon}</div>
