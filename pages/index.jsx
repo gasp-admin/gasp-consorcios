@@ -7548,7 +7548,7 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
                   <thead>
                     <tr style={{ background: '#f8fafc' }}>
                       {['UF','Dpto','Propietario','Coef%','Saldo Ant.','Pagos','Interés','Expensa','Total'].map((h) => (
-                        <th key={h} style={{ padding: '6px 10px', textAlign: 'right', color: '#6b7280', fontWeight: 600, borderBottom: '1px solid #e5e7eb', textAlign: ['Dpto','Propietario'].includes(h) ? 'left' : 'right' }}>{h}</th>
+                        <th key={h} style={{ padding: '6px 10px', color: '#6b7280', fontWeight: 600, borderBottom: '1px solid #e5e7eb', textAlign: ['Dpto','Propietario'].includes(h) ? 'left' : 'right' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
