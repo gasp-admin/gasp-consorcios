@@ -7137,28 +7137,27 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
       return;
     }
     setLoading(true);
-    setMsg('🔍 Buscando liquidaciones en Drive...');
+    setMsg('🔍 Consultando carpeta de Drive...');
     try {
-      const r = await fetch(`${SB}/functions/v1/extraer-datos-consorcio-drive`, {
+      const r = await fetch(`${SB}/functions/v1/listar-drive-pdfs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
-        body: JSON.stringify({ accion: 'listar_pdfs', folder_id: folderId })
+        body: JSON.stringify({ folder_id: folderId })
       });
       const d = await r.json();
-      if (d.archivos && d.archivos.length > 0) {
-        const keywords = ['liq', 'expensa', 'liquidac', 'periodo'];
-        const filtrados = d.archivos.filter((a) =>
-          keywords.some((k) => a.nombre.toLowerCase().includes(k))
-        );
-        const resultado = filtrados.length > 0 ? filtrados : d.archivos;
-        setArchivosEncontrados(resultado);
-        setSeleccionados(resultado.map((a) => a.id));
-        setMsg(`✅ ${resultado.length} archivo(s) de liquidación encontrados`);
+      if (d.ok && d.archivos && d.archivos.length > 0) {
+        setArchivosEncontrados(d.archivos);
+        setSeleccionados(d.archivos.map((a) => a.id));
+        setMsg(`✅ ${d.archivos.length} liquidación(es) encontrada(s). Revisá la selección y procesá.`);
       } else {
-        setMsg('⚠️ No se encontraron PDFs. Verificar que la carpeta sea correcta y esté compartida.');
+        // Fallback: extraer IDs del link de Drive compartido no funciona sin API key de Google.
+        // Mostrar instrucción para usar Opción B con el folder ID extraído.
+        setMsg(`⚠️ No se pudo listar la carpeta automáticamente (requiere Google API Key en el servidor). Usá la Opción B pegando los IDs de los PDFs directamente.`);
+        // Pre-rellenar el campo de Opción B con el folder ID para orientar al usuario
+        setFileIdsManual(`# Folder ID detectado: ${folderId}\n# Pegá aquí los IDs de los PDFs de Drive (uno por línea)\n# Los IDs se encuentran en la URL de cada archivo:\n# drive.google.com/file/d/ID_AQUI/view`);
       }
     } catch (e) {
-      setMsg(`❌ Error: ${e.message}`);
+      setMsg(`❌ Error al conectar con el servidor: ${e.message}. Usá la Opción B.`);
     } finally { setLoading(false); }
   };
 
@@ -7310,7 +7309,7 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
           <div style={card}>
             <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>🔗 Opción A — URL de carpeta Drive</h3>
             <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 12px' }}>
-              Pegá la URL de la carpeta del edificio. El sistema detecta automáticamente los PDFs de liquidaciones.
+              Pegá la URL de la carpeta del edificio. Si la carpeta tiene configurada la Google API Key en el servidor, detecta PDFs automáticamente. De lo contrario, copiá los IDs de los PDFs en la Opción B.
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               <input style={{ ...inputSt, flex: 1 }} placeholder="https://drive.google.com/drive/folders/..."
