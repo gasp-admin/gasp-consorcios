@@ -11982,11 +11982,11 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
       supabase.from('con_expensas_detalle').select('monto,saldo_anterior,interes_mora,pagos_periodo,estado')
         .eq('consorcio_id', consorcioId),
       supabase.from('con_cobranzas').select('monto,fecha,medio_pago')
-        .eq('consorcio_id', consorcioId).eq('estado','vigente')
+        .eq('consorcio_id', consorcioId).in('estado',['vigente','acreditado','cobrado'])
         .gte('fecha', desde).lte('fecha', hasta),
       supabase.from('con_gastos').select('monto,categoria,fecha')
         .eq('consorcio_id', consorcioId)
-        .gte('created_at', desde).lte('created_at', hasta),
+        .gte('fecha', desde).lte('fecha', hasta),
       supabase.from('con_pagos_proveedor').select('monto,fecha')
         .eq('consorcio_id', consorcioId)
         .gte('fecha', desde).lte('fecha', hasta),
@@ -11996,18 +11996,23 @@ function EstadoFinanciero({ session, consorcioId, consorcioActivo }) {
         .eq('consorcio_id', consorcioId).in('estado',['pendiente','pagado_parcial']),
       // Últimas expensas cerradas para mostrar saldos reales migrados
       supabase.from('con_expensas').select('periodo,saldo_caja_final,total_cobrado,total_gastos,total_expensa')
-        .eq('consorcio_id', consorcioId).eq('estado','cerrada')
-        .order('periodo', { ascending: false }).limit(6),
+        .eq('consorcio_id', consorcioId).in('estado',['cerrado','cerrada'])
+        .order('periodo', { ascending: false }).limit(13),
     ])
 
     // Deudores — saldo pendiente según la última expensa abierta
     // Se toma de con_expensas_detalle filtrado a la expensa abierta actual
     // Si no hay expensa abierta, se toma la última cerrada
     // Fórmula por UF: MAX(0, saldo_anterior + monto + interes - pagos)
+    // Deudores: usar el estado del detalle como fuente de verdad
+    // 'pagada' = sin deuda | 'parcial' = debe parte | 'pendiente' = debe todo
     const deudores = (detalles||[]).reduce((a,d) => {
-      const saldo = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0)
-        + (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)
-      return a + Math.max(0, saldo)
+      if (d.estado === 'pagada') return a  // Sin deuda
+      if (d.estado === 'pendiente') return a + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0)
+      // parcial: debe la diferencia
+      const pagado = parseFloat(d.pagos_periodo)||0
+      const cargo  = (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0)
+      return a + Math.max(0, cargo - pagado)
     }, 0)
 
     // Acreedores (facturas pendientes de pagar a proveedores)
