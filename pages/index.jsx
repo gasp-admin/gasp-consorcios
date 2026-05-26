@@ -14475,10 +14475,18 @@ function CtaCorriente({ session, consorcioId, unidades, copropietarios }) {
     ])
 
     // Construir líneas de cuenta corriente
-    const lineas = []
 
     // Expensas (débitos automáticos) — leídas de con_expensas_detalle
-    for (const d of (dets||[])) {
+    // Para registros históricos (DET-HIST-*): el saldo_anterior solo se muestra
+    // en el primer período (el más antiguo) para reflejar el saldo inicial real.
+    // En los demás períodos históricos el saldo_anterior ya está incluido en el
+    // crédito del período anterior, por lo que mostrarlo duplicaría el débito.
+    const detsOrdenados = [...(dets||[])].sort((a,b) =>
+      (a.con_expensas?.periodo||'').localeCompare(b.con_expensas?.periodo||''))
+    const primerDetHistId = detsOrdenados.find(d => d.id?.startsWith('DET-HIST-'))?.id
+
+    const lineas = []
+    for (const d of detsOrdenados) {
       const periodo = d.con_expensas?.periodo || ''
       const [y,m] = (periodo||'').split('-')
       const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
@@ -14488,19 +14496,26 @@ function CtaCorriente({ session, consorcioId, unidades, copropietarios }) {
       const intMora      = parseFloat(d.interes_mora)||0
 
       // Saldo anterior arrastrado del período previo
-      if (saldoAnt > 0) {
+      // Para datos históricos: solo en el PRIMER período (refleja el saldo inicial real)
+      // Para datos normales: siempre mostrar
+      const esHistorico = d.id?.startsWith('DET-HIST-')
+      const mostrarSaldoAnt = saldoAnt > 0 && (!esHistorico || d.id === primerDetHistId)
+      if (mostrarSaldoAnt) {
         lineas.push({
-          fecha:   d.con_expensas?.fecha_vencimiento || d.created_at?.split('T')[0],
+          fecha:   d.con_expensas?.fecha_vencimiento || (d.con_expensas?.periodo ? d.con_expensas.periodo + '-01' : d.created_at?.split('T')[0]),
           tipo:    'debito',
-          concepto:`Saldo anterior al ${perLabel}`,
+          concepto: esHistorico ? `Saldo al inicio del período histórico` : `Saldo anterior al ${perLabel}`,
           monto:   saldoAnt,
           origen:  'saldo_ant'
         })
       }
       // Expensa del período — solo si tiene monto (si está liquidada)
       if (montoExpensa > 0) {
+        // Usar fecha_vencimiento si está disponible; para históricos usar inicio del período
+        const fechaDebito = d.con_expensas?.fecha_vencimiento ||
+          (d.con_expensas?.periodo ? d.con_expensas.periodo + '-10' : d.created_at?.split('T')[0])
         lineas.push({
-          fecha:   d.con_expensas?.fecha_vencimiento || d.created_at?.split('T')[0],
+          fecha:   fechaDebito,
           tipo:    'debito',
           concepto:`Expensa ${perLabel}`,
           monto:   montoExpensa,
@@ -16131,7 +16146,7 @@ export default function App() {
     switch(pagina) {
       case 'dashboard':      return <Dashboard consorcios={consorcios} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} formCon={formCon} setFormCon={setFormCon} msgCon={msgCon} guardarConsorcio={guardarConsorcio} setConsorcioActivo={setConsorcioActivo} cargarConsorcio={cargarConsorcio} setPagina={setPagina} />
       case 'listado_consorcios': return <ListadoConsorcios session={session} consorcios={consorcios} />
-      case 'unidades':       return <Unidades session={session} consorcioId={cid} copropietarios={copropietarios} columnasLiq={columnasLiq||[]} />
+      case 'unidades':       return <Unidades session={session} consorcioId={cid} copropietarios={copropietarios} columnasLiq={[]} />
       case 'copropietarios': return <Copropietarios session={session} consorcioId={cid} onUpdate={setCopropietarios} />
       case 'sueldos':        return <Sueldos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} />
       case 'liquidacion':    return <LiquidacionPeriodo session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} adminPerfil={adminPerfil} expensas={expensas} setExpensas={setExpensas} cargar={()=>cargarConsorcio(cid, session?.user?.id)} setPagina={setPagina} />
