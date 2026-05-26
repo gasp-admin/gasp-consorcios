@@ -3077,21 +3077,24 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios, adminPerfil
   async function registrarPago() {
     if (!form?.unidad_id || !form?.monto || !form?.fecha)
       return setMsg({ tipo:'warn', texto:'Unidad, fecha y monto son obligatorios' })
-    const monto = parseFloat(form.monto)
+    const monto = Math.round(parseFloat(form.monto) * 100) / 100
+    if (isNaN(monto) || monto <= 0)
+      return setMsg({ tipo:'warn', texto:'El monto debe ser un número mayor a cero' })
     const { error } = await supabase.from('con_cobranzas').insert([{
       id: 'COB-' + Date.now(),
       admin_id: session.user.id, consorcio_id: consorcioId, expensa_id: expSel.id,
       unidad_id: form.unidad_id, fecha: form.fecha, monto,
       medio_pago: form.medio_pago || 'transferencia',
       recibo_numero: form.recibo_numero || '',
-      observaciones: form.observaciones || ''
+      observaciones: form.observaciones || '',
+      estado: 'acreditado'
     }])
     if (error) return setMsg({ tipo:'error', texto: error.message })
     const det = detalles.find(d => d.unidad_id === form.unidad_id)
     if (det) {
-      const nuevoPago = (parseFloat(det.pagos_periodo) || 0) + monto
-      const deudaTotal = (parseFloat(det.saldo_anterior)||0) + (parseFloat(det.monto)||0) + (parseFloat(det.interes_mora)||0)
-      const estado = nuevoPago >= deudaTotal ? 'pagada' : 'pendiente'
+      const nuevoPago = Math.round(((parseFloat(det.pagos_periodo) || 0) + monto) * 100) / 100
+      const deudaTotal = Math.round(((parseFloat(det.saldo_anterior)||0) + (parseFloat(det.monto)||0) + (parseFloat(det.interes_mora)||0)) * 100) / 100
+      const estado = nuevoPago >= deudaTotal ? 'pagada' : 'parcial'
       await supabase.from('con_expensas_detalle')
         .update({ pagos_periodo: nuevoPago, estado, fecha_pago: estado==='pagada' ? form.fecha : null })
         .eq('id', det.id)
@@ -3314,9 +3317,10 @@ function Cobranzas({ session, consorcioId, unidades, copropietarios, adminPerfil
                     {detalles.map(d => {
                       const u  = unidades.find(x=>x.id===d.unidad_id)
                       const cp = u ? copropietarios.find(c=>c.id===u.propietario_id) : null
-                      const saldo = Math.max(0,
+                      const saldo = Math.round(Math.max(0,
                         (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) +
-                        (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0))
+                        (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)
+                      ) * 100) / 100
                       return (
                         <option key={d.unidad_id} value={d.unidad_id}>
                           {u?.numero||d.unidad_id} — {cp?.apellido_nombre||'Sin propietario'} (Saldo: {fmt(saldo)})
