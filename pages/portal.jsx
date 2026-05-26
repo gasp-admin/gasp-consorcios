@@ -228,6 +228,12 @@ export default function Portal() {
   const [periodoExpandido, setPeriodoExpandido] = useState(null)
   const [gastosPeriodo, setGastosPeriodo]       = useState([])
   const [loadingGastos, setLoadingGastos]       = useState(false)
+  // Cta cte y pago
+  const [movsCta, setMovsCta]             = useState([])
+  const [loadingCta, setLoadingCta]       = useState(false)
+  const [formPago, setFormPago]           = useState(null)
+  const [msgPago, setMsgPago]             = useState(null)
+  const [enviandoPago, setEnviandoPago]   = useState(false)
 
   useEffect(() => { if (token) cargar(token) }, [token])
 
@@ -269,7 +275,7 @@ export default function Portal() {
         supabase.from('con_cobranzas').select(`
           id, monto, fecha, medio_pago, recibo_numero, observaciones,
           con_expensas:expensa_id (periodo)
-        `).eq('unidad_id', uf.id).order('fecha', { ascending: false }).limit(30),
+        `).eq('unidad_id', uf.id).in('estado',['vigente','acreditado','cobrado']).order('fecha', { ascending: false }).limit(30),
       ])
 
       setCoprop(cp); setConsorcio(con); setAdminPerfil(adm)
@@ -334,6 +340,69 @@ export default function Portal() {
     } catch(e) { alert('Error al generar PDF: ' + e.message) }
     setGenerandoPDF(false)
   }
+
+  async function cargarCtaCte(ufId, consorcioId) {
+    setLoadingCta(true)
+    const [{ data: dets2 }, { data: cobs2 }] = await Promise.all([
+      supabase.from('con_expensas_detalle').select('*,con_expensas:expensa_id(periodo,fecha_vencimiento)')
+        .eq('unidad_id', ufId).order('created_at', { ascending: true }),
+      supabase.from('con_cobranzas').select('*,con_expensas:expensa_id(periodo)')
+        .eq('unidad_id', ufId).in('estado',['vigente','acreditado','cobrado']).order('fecha', { ascending: true }),
+    ])
+    const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    const pl = (per) => { if(!per) return ''; const [y,m]=per.split('-'); return `${meses[parseInt(m)-1]} ${y}` }
+    const lineas = []
+    const detsOrd = [...(dets2||[])].sort((a,b)=>(a.con_expensas?.periodo||'').localeCompare(b.con_expensas?.periodo||''))
+    const primerHistId = detsOrd.find(d=>d.id?.startsWith('DET-HIST-'))?.id
+    for (const d of detsOrd) {
+      const per=d.con_expensas?.periodo||''; const saldoAnt=parseFloat(d.saldo_anterior)||0
+      const monto=parseFloat(d.monto)||0; const intMora=parseFloat(d.interes_mora)||0
+      const esHist=d.id?.startsWith('DET-HIST-')
+      const fechaDeb=d.con_expensas?.fecha_vencimiento||(per?per+'-10':d.created_at?.split('T')[0])
+      const mostrarAnt=saldoAnt>0&&(!esHist||d.id===primerHistId)
+      if(mostrarAnt) lineas.push({fecha:per?per+'-01':fechaDeb,tipo:'debito',concepto:esHist?'Saldo al inicio del período histórico':`Saldo anterior ${pl(per)}`,monto:saldoAnt})
+      if(monto>0) lineas.push({fecha:fechaDeb,tipo:'debito',concepto:`Expensa ${pl(per)}`,monto,vto:d.con_expensas?.fecha_vencimiento})
+      if(intMora>0) lineas.push({fecha:fechaDeb,tipo:'debito',concepto:`Interés mora ${pl(per)}`,monto:intMora})
+    }
+    for (const c of (cobs2||[])) {
+      lineas.push({fecha:c.fecha,tipo:'credito',concepto:`Pago ${pl(c.con_expensas?.periodo)}${c.medio_pago?' ('+c.medio_pago+')':''}`,monto:parseFloat(c.monto)||0,nro:c.recibo_numero})
+    }
+    lineas.sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))
+    let acc=0
+    const conSaldo=lineas.map(l=>{ if(l.tipo==='debito') acc+=l.monto; else acc-=l.monto; return{...l,saldo:acc}})
+    setMovsCta(conSaldo)
+    setLoadingCta(false)
+  }
+
+  async function enviarNotificacionPago() {
+    if (!formPago || !formPago.monto || !formPago.fecha) {
+      return setMsgPago({ tipo:'warn', texto:'Complete monto y fecha del pago.' })
+    }
+    setEnviandoPago(true)
+    try {
+      // Insertar aviso en con_reclamos (con tipo especial de pago)
+      const { error } = await supabase.from('con_reclamos').insert([{
+        id: 'PAY-' + Date.now(),
+        admin_id: unidad?.admin_id,
+        consorcio_id: unidad?.consorcio_id,
+        unidad_id: unidad?.id,
+        copropietario_id: coprop?.id,
+        tipo: 'pago_informado',
+        asunto: `Aviso de pago — ${coprop?.apellido_nombre}`,
+        descripcion: `PAGO INFORMADO POR PROPIETARIO:\nMonto: $${formPago.monto}\nFecha: ${formPago.fecha}\nMedio: ${formPago.medio||'No especificado'}\nComprobante: ${formPago.comprobante||'Sin comprobante adjunto'}\nObservaciones: ${formPago.obs||'—'}`,
+        estado: 'abierto',
+        prioridad: 'normal',
+      }])
+      if (error) throw error
+      setMsgPago({ tipo:'ok', texto:'✓ Aviso enviado al administrador. Se verificará su pago a la brevedad.' })
+      setFormPago(null)
+    } catch(e) {
+      setMsgPago({ tipo:'error', texto:'Error al enviar: ' + e.message })
+    }
+    setEnviandoPago(false)
+  }
+
+  const fmtD2 = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
 
   const detOrdenados = [...detalles].sort((a,b) =>
     (b.con_expensas?.periodo||'').localeCompare(a.con_expensas?.periodo||'')
@@ -702,7 +771,9 @@ export default function Portal() {
           overflowX:'auto' }}>
           {[
             { id:'cuenta',    label:'📋 Expensas' },
+            { id:'ctacte',    label:'📊 Cta. corriente' },
             { id:'pagos',     label:'💳 Pagos' },
+            { id:'informar',  label:'📤 Informar pago' },
             ...(driveFolderUrl ? [{ id:'documentos', label:'📁 Documentos' }] : []),
             { id:'reclamos',  label:'🎫 Reclamos' },
             { id:'contacto',  label:'📞 Contacto' },
@@ -807,6 +878,162 @@ export default function Portal() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB: CUENTA CORRIENTE */}
+        {tab === 'ctacte' && (
+          <div id="cta-corriente">
+            {loadingCta ? (
+              <div style={{ textAlign:'center', padding:32, color:GR }}>⏳ Cargando...</div>
+            ) : movsCta.length === 0 ? (
+              <div style={{ background:'#fff', borderRadius:14, padding:32, textAlign:'center', color:GR }}>
+                <div style={{ fontSize:28, marginBottom:8 }}>📊</div>
+                <button onClick={() => cargarCtaCte(unidad.id, unidad.consorcio_id)}
+                  style={{ background:AZ, color:'#fff', border:'none', borderRadius:9,
+                    padding:'10px 20px', fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                  Cargar cuenta corriente
+                </button>
+              </div>
+            ) : (
+              <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px', boxShadow:'0 2px 12px #0001' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+                  <div style={{ fontWeight:700, fontSize:14 }}>📊 Cuenta corriente</div>
+                  <div style={{ fontWeight:800, fontSize:15,
+                    color: movsCta[movsCta.length-1]?.saldo > 0 ? RJ : VD }}>
+                    Saldo: {movsCta[movsCta.length-1]?.saldo > 0
+                      ? `Debe ${fmt(movsCta[movsCta.length-1].saldo)}`
+                      : movsCta[movsCta.length-1]?.saldo < 0
+                        ? `A favor ${fmt(Math.abs(movsCta[movsCta.length-1].saldo))}`
+                        : 'Al día ✓'}
+                  </div>
+                </div>
+                <div style={{ overflowX:'auto' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                    <thead>
+                      <tr style={{ background:'#f3f4f6', textAlign:'left' }}>
+                        <th style={{ padding:'7px 10px', fontWeight:600 }}>Fecha</th>
+                        <th style={{ padding:'7px 10px', fontWeight:600 }}>Concepto</th>
+                        <th style={{ padding:'7px 10px', textAlign:'right', fontWeight:600 }}>Débito</th>
+                        <th style={{ padding:'7px 10px', textAlign:'right', fontWeight:600 }}>Crédito</th>
+                        <th style={{ padding:'7px 10px', textAlign:'right', fontWeight:600 }}>Saldo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {movsCta.map((m,i) => (
+                        <tr key={i} style={{ borderBottom:'1px solid #f3f4f6',
+                          background: m.tipo==='credito' ? '#f0fdf4' : '#fff' }}>
+                          <td style={{ padding:'7px 10px', whiteSpace:'nowrap' }}>{fmtD2(m.fecha)}</td>
+                          <td style={{ padding:'7px 10px' }}>{m.concepto}{m.nro ? ` — N° ${m.nro}` : ''}</td>
+                          <td style={{ padding:'7px 10px', textAlign:'right', color:RJ, fontWeight:600 }}>
+                            {m.tipo==='debito' ? fmt(m.monto) : ''}
+                          </td>
+                          <td style={{ padding:'7px 10px', textAlign:'right', color:VD, fontWeight:600 }}>
+                            {m.tipo==='credito' ? fmt(m.monto) : ''}
+                          </td>
+                          <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:700,
+                            color: m.saldo > 0 ? RJ : m.saldo < 0 ? VD : GR }}>
+                            {fmt(Math.abs(m.saldo))}{m.saldo < 0 ? ' CR' : ''}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {movsCta.length === 0 && !loadingCta && unidad && (
+              <div style={{ marginTop:10 }}>
+                <button onClick={() => cargarCtaCte(unidad.id, unidad.consorcio_id)}
+                  style={{ width:'100%', background:AZ, color:'#fff', border:'none',
+                    borderRadius:10, padding:'12px', fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                  Cargar cuenta corriente
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: INFORMAR PAGO */}
+        {tab === 'informar' && (
+          <div id="informar-pago">
+            <div style={{ background:'#fff', borderRadius:14, padding:'20px', boxShadow:'0 2px 12px #0001' }}>
+              <div style={{ fontWeight:700, fontSize:14, color:AZ, marginBottom:4 }}>📤 Informar pago de expensas</div>
+              <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
+                Complete el formulario para notificar al administrador sobre un pago realizado.
+                El administrador verificará y acreditará el pago en su cuenta.
+              </div>
+              {msgPago && (
+                <div style={{ padding:'12px', borderRadius:9, marginBottom:14, fontSize:13,
+                  background: msgPago.tipo==='ok' ? '#f0fdf4' : msgPago.tipo==='warn' ? '#fffbeb' : '#fff1f2',
+                  color: msgPago.tipo==='ok' ? VD : msgPago.tipo==='warn' ? AM : RJ,
+                  border: '1px solid ' + (msgPago.tipo==='ok' ? '#86efac' : msgPago.tipo==='warn' ? '#fde68a' : '#fca5a5') }}>
+                  {msgPago.texto}
+                </div>
+              )}
+              {!msgPago && (
+                <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                  <div>
+                    <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Monto pagado *</div>
+                    <input type="number" placeholder="Ej: 150000.00"
+                      value={formPago?.monto||''} onChange={e=>setFormPago(f=>({...f,monto:e.target.value}))}
+                      style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db',
+                        borderRadius:9, fontSize:13, boxSizing:'border-box' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Fecha del pago *</div>
+                    <input type="date" value={formPago?.fecha||''}
+                      onChange={e=>setFormPago(f=>({...f,fecha:e.target.value}))}
+                      style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db',
+                        borderRadius:9, fontSize:13, boxSizing:'border-box' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Medio de pago</div>
+                    <select value={formPago?.medio||'transferencia'}
+                      onChange={e=>setFormPago(f=>({...f,medio:e.target.value}))}
+                      style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db',
+                        borderRadius:9, fontSize:13, boxSizing:'border-box', background:'#fff' }}>
+                      <option value="transferencia">Transferencia bancaria</option>
+                      <option value="efectivo">Efectivo</option>
+                      <option value="cheque_propio">Cheque propio</option>
+                      <option value="plataforma">Plataforma de pagos (EP / SIRO)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>N° de comprobante / referencia</div>
+                    <input type="text" placeholder="Número de transferencia, recibo, etc."
+                      value={formPago?.comprobante||''}
+                      onChange={e=>setFormPago(f=>({...f,comprobante:e.target.value}))}
+                      style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db',
+                        borderRadius:9, fontSize:13, boxSizing:'border-box' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Observaciones</div>
+                    <textarea placeholder="Aclaraciones adicionales..." rows={3}
+                      value={formPago?.obs||''}
+                      onChange={e=>setFormPago(f=>({...f,obs:e.target.value}))}
+                      style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db',
+                        borderRadius:9, fontSize:13, boxSizing:'border-box', resize:'vertical' }} />
+                  </div>
+                  <div style={{ padding:'10px 12px', background:'#eff6ff', borderRadius:8, fontSize:11, color:'#1e40af' }}>
+                    ℹ️ Los pagos realizados por Expensas Pagas o SIRO se acreditan automáticamente y no requieren aviso.
+                  </div>
+                  <button onClick={enviarNotificacionPago} disabled={enviandoPago}
+                    style={{ background: enviandoPago ? GR : AZ, color:'#fff', border:'none',
+                      borderRadius:10, padding:'13px', fontSize:14, fontWeight:700,
+                      cursor: enviandoPago ? 'default' : 'pointer' }}>
+                    {enviandoPago ? '⏳ Enviando...' : '📤 Enviar aviso de pago'}
+                  </button>
+                </div>
+              )}
+              {msgPago?.tipo === 'ok' && (
+                <button onClick={() => { setMsgPago(null); setFormPago({}) }}
+                  style={{ width:'100%', marginTop:12, background:'#f3f4f6', color:'#374151',
+                    border:'none', borderRadius:10, padding:'12px', fontSize:13, cursor:'pointer' }}>
+                  Informar otro pago
+                </button>
+              )}
+            </div>
           </div>
         )}
 
