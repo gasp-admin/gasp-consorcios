@@ -8074,7 +8074,29 @@ No incluyas texto fuera del JSON.`
             <div style={{background:'#f8fafc',borderRadius:8,padding:'14px',fontSize:13}}>
               <div style={{marginBottom:6}}>Total UFs: <strong>{unidades.length}</strong></div>
               <div style={{marginBottom:6}}>Presentes: <strong>{presentes.split(',').filter(p=>p.trim()).length}</strong></div>
-              <div style={{marginBottom:12}}>%: <strong style={{color:presentes.split(',').filter(p=>p.trim()).length/Math.max(unidades.length,1)>=0.5?VD:RJ}}>{(presentes.split(',').filter(p=>p.trim()).length/Math.max(unidades.length,1)*100).toFixed(1)}%</strong></div>
+              <div style={{marginBottom:6}}>% por unidades: <strong style={{color:presentes.split(',').filter(p=>p.trim()).length/Math.max(unidades.length,1)>=0.5?VD:RJ}}>{(presentes.split(',').filter(p=>p.trim()).length/Math.max(unidades.length,1)*100).toFixed(1)}%</strong></div>
+              {(() => {
+                // Calcular % por coeficiente de las UFs presentes
+                const presLista = presentes.split(',').map(p=>p.trim()).filter(Boolean)
+                const coefTotal = unidades.reduce((a,u)=>a+(parseFloat(u.coeficiente)||0),0)||100
+                const coefPresentes = unidades
+                  .filter(u => presLista.some(p =>
+                    p === String(u.numero) ||
+                    p.toLowerCase() === (u.piso||'').toLowerCase() + (u.letra||'').toLowerCase() ||
+                    p.toLowerCase().includes(String(u.numero))
+                  ))
+                  .reduce((a,u)=>a+(parseFloat(u.coeficiente)||0),0)
+                const pctCoef = (coefPresentes/coefTotal*100)
+                return (
+                  <div style={{marginBottom:12}}>
+                    % por coeficiente: <strong style={{color:pctCoef>=50?VD:RJ}}>{pctCoef.toFixed(2)}%</strong>
+                    <span style={{fontSize:11,color:GR,marginLeft:6}}>({coefPresentes.toFixed(2)} / {coefTotal.toFixed(2)})</span>
+                    {pctCoef>=50&&presentes.split(',').filter(p=>p.trim()).length/Math.max(unidades.length,1)>=0.5&&(
+                      <span style={{marginLeft:8,background:VD,color:'#fff',borderRadius:5,padding:'2px 7px',fontSize:11,fontWeight:700}}>✓ Quórum doble mayoría</span>
+                    )}
+                  </div>
+                )
+              })()}
               <div style={{fontSize:12,color:GR,marginBottom:4}}>Hora fin</div>
               <input type="time" value={horaFin} onChange={e=>setHoraFin(e.target.value)} style={{padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:7,fontSize:13}}/>
             </div>
