@@ -8082,19 +8082,18 @@ No incluyas texto fuera del JSON.`
                 const coefTotal = unidades.reduce((a,u)=>a+(parseFloat(u.porcentaje_fiscal)||0),0)||100
                 const coefPresentes = unidades
                   .filter(u => presLista.some(p => {
-                    const pl = p.toLowerCase()
-                    const num = String(u.numero||'')
-                    const desc = (u.descripcion||'').toLowerCase()
-                    const numInt = (u.numero_interno||'').toLowerCase()
-                    const piso = (u.piso||'').toLowerCase()
+                    const pl      = p.toLowerCase().trim()
+                    const plNoSp  = pl.replace(/\s/g,'')
+                    const num     = String(u.numero||'').toLowerCase().trim()
+                    const numNoSp = num.replace(/\s/g,'')
+                    const numInt  = (u.numero_interno||'').toLowerCase().trim()
+                    const desc    = (u.descripcion||'').toLowerCase().trim()
                     return (
-                      pl === num ||                          // coincidencia exacta por número
-                      pl.includes(num) && num.length > 1 || // número largo incluido en el texto
-                      pl === desc ||                         // coincidencia exacta con descripción
-                      desc && desc.includes(pl) ||           // descripción incluye lo escrito
-                      pl.includes(desc) && desc.length > 2 ||// lo escrito incluye la descripción
-                      numInt && (pl === numInt || pl.includes(numInt)) || // número interno
-                      piso && pl.includes(piso) && pl.length <= piso.length + 3 // piso corto
+                      pl === num         ||   // 'pb a' === 'pb a'  ó  '1 c' === '1 c'
+                      plNoSp === numNoSp ||   // 'pba' === 'pba'    ó  '1c' === '1c'
+                      pl === numInt      ||   // 'pba' === 'pba'
+                      plNoSp === numInt  ||   // 'pba' === 'pba'
+                      (desc.length > 2 && (pl.includes(desc) || desc.includes(pl)))
                     )
                   }))
                   .reduce((a,u)=>a+(parseFloat(u.porcentaje_fiscal)||0),0)
