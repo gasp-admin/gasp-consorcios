@@ -8078,14 +8078,26 @@ No incluyas texto fuera del JSON.`
               {(() => {
                 // Calcular % por coeficiente de las UFs presentes
                 const presLista = presentes.split(',').map(p=>p.trim()).filter(Boolean)
-                const coefTotal = unidades.reduce((a,u)=>a+(parseFloat(u.coeficiente)||0),0)||100
+                // coefTotal: usar porcentaje_fiscal (campo real en con_unidades)
+                const coefTotal = unidades.reduce((a,u)=>a+(parseFloat(u.porcentaje_fiscal)||0),0)||100
                 const coefPresentes = unidades
-                  .filter(u => presLista.some(p =>
-                    p === String(u.numero) ||
-                    p.toLowerCase() === (u.piso||'').toLowerCase() + (u.letra||'').toLowerCase() ||
-                    p.toLowerCase().includes(String(u.numero))
-                  ))
-                  .reduce((a,u)=>a+(parseFloat(u.coeficiente)||0),0)
+                  .filter(u => presLista.some(p => {
+                    const pl = p.toLowerCase()
+                    const num = String(u.numero||'')
+                    const desc = (u.descripcion||'').toLowerCase()
+                    const numInt = (u.numero_interno||'').toLowerCase()
+                    const piso = (u.piso||'').toLowerCase()
+                    return (
+                      pl === num ||                          // coincidencia exacta por número
+                      pl.includes(num) && num.length > 1 || // número largo incluido en el texto
+                      pl === desc ||                         // coincidencia exacta con descripción
+                      desc && desc.includes(pl) ||           // descripción incluye lo escrito
+                      pl.includes(desc) && desc.length > 2 ||// lo escrito incluye la descripción
+                      numInt && (pl === numInt || pl.includes(numInt)) || // número interno
+                      piso && pl.includes(piso) && pl.length <= piso.length + 3 // piso corto
+                    )
+                  }))
+                  .reduce((a,u)=>a+(parseFloat(u.porcentaje_fiscal)||0),0)
                 const pctCoef = (coefPresentes/coefTotal*100)
                 return (
                   <div style={{marginBottom:12}}>
@@ -14528,9 +14540,12 @@ function CtaCorriente({ session, consorcioId, unidades, copropietarios }) {
 
       // Saldo anterior arrastrado del período previo
       // Para datos históricos: solo en el PRIMER período (refleja el saldo inicial real)
+      // EXCEPCIÓN: si la expensa del período es $0 (ej: cierres de año sin nueva cuota),
+      // SÍ mostrar el saldo_anterior — es el único débito de ese período
       // Para datos normales: siempre mostrar
       const esHistorico = d.id?.startsWith('DET-HIST-')
-      const mostrarSaldoAnt = saldoAnt > 0 && (!esHistorico || d.id === primerDetHistId)
+      const periodoSinCuota = esHistorico && (parseFloat(d.monto)||0) === 0
+      const mostrarSaldoAnt = saldoAnt > 0 && (!esHistorico || d.id === primerDetHistId || periodoSinCuota)
       if (mostrarSaldoAnt) {
         lineas.push({
           fecha:   d.con_expensas?.fecha_vencimiento || (d.con_expensas?.periodo ? d.con_expensas.periodo + '-01' : d.created_at?.split('T')[0]),
