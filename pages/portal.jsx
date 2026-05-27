@@ -343,30 +343,88 @@ export default function Portal() {
 
   async function cargarCtaCte(ufId, consorcioId) {
     setLoadingCta(true)
-    const [{ data: dets2 }, { data: cobs2 }] = await Promise.all([
+    const [{ data: dets2 }, { data: cobs2 }, { data: lufs }] = await Promise.all([
       supabase.from('con_expensas_detalle').select('*,con_expensas:expensa_id(periodo,fecha_vencimiento)')
         .eq('unidad_id', ufId).order('created_at', { ascending: true }),
       supabase.from('con_cobranzas').select('*,con_expensas:expensa_id(periodo)')
         .eq('unidad_id', ufId).in('estado',['vigente','acreditado','cobrado']).order('fecha', { ascending: true }),
+      supabase.from('con_liquidacion_uf').select('*')
+        .eq('unidad_id', ufId).order('periodo', { ascending: true }),
     ])
     const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
     const pl = (per) => { if(!per) return ''; const [y,m]=per.split('-'); return `${meses[parseInt(m)-1]} ${y}` }
     const lineas = []
-    const detsOrd = [...(dets2||[])].sort((a,b)=>(a.con_expensas?.periodo||'').localeCompare(b.con_expensas?.periodo||''))
-    const primerHistId = detsOrd.find(d=>d.id?.startsWith('DET-HIST-'))?.id
-    for (const d of detsOrd) {
-      const per=d.con_expensas?.periodo||''; const saldoAnt=parseFloat(d.saldo_anterior)||0
-      const monto=parseFloat(d.monto)||0; const intMora=parseFloat(d.interes_mora)||0
-      const esHist=d.id?.startsWith('DET-HIST-')
-      const fechaDeb=d.con_expensas?.fecha_vencimiento||(per?per+'-10':d.created_at?.split('T')[0])
-      const mostrarAnt=saldoAnt>0&&(!esHist||d.id===primerHistId)
-      if(mostrarAnt) lineas.push({fecha:per?per+'-01':fechaDeb,tipo:'debito',concepto:esHist?'Saldo al inicio del período histórico':`Saldo anterior ${pl(per)}`,monto:saldoAnt})
-      if(monto>0) lineas.push({fecha:fechaDeb,tipo:'debito',concepto:`Expensa ${pl(per)}`,monto,vto:d.con_expensas?.fecha_vencimiento})
-      if(intMora>0) lineas.push({fecha:fechaDeb,tipo:'debito',concepto:`Interés mora ${pl(per)}`,monto:intMora})
+
+    const tieneHistoricos = (dets2||[]).some(d => d.id?.startsWith('DET-HIST-'))
+    const lufsOrd = [...(lufs||[])].sort((a,b)=>(a.periodo||'').localeCompare(b.periodo||''))
+
+    if (tieneHistoricos && lufsOrd.length > 0) {
+      // Modelo histórico: ajuste de convergencia para que el saldo coincida
+      // exactamente con total_uf del PDF en cada período
+      const primerLuf = lufsOrd[0]
+      if ((parseFloat(primerLuf.saldo_anterior)||0) > 0) {
+        lineas.push({ fecha: primerLuf.periodo+'-01', tipo:'debito',
+          concepto:'Saldo al inicio del período histórico',
+          monto: parseFloat(primerLuf.saldo_anterior)||0 })
+      }
+      let accHist = parseFloat(primerLuf.saldo_anterior)||0
+      for (const luf of lufsOrd) {
+        const per    = luf.periodo||''
+        const exp    = parseFloat(luf.expensa_calculada)||0
+        const intM   = parseFloat(luf.interes)||0
+        const pagos  = parseFloat(luf.pagos)||0
+        const tuf    = parseFloat(luf.total_uf)
+        const fDeb   = per ? per+'-10' : ''
+        const fCob   = per ? per+'-28' : ''
+        if (exp > 0)  { lineas.push({fecha:fDeb,tipo:'debito', concepto:`Expensa ${pl(per)}`,monto:exp}); accHist+=exp }
+        if (intM > 0) { lineas.push({fecha:fDeb,tipo:'debito', concepto:`Interés mora — ${pl(per)}`,monto:intM}); accHist+=intM }
+        if (pagos > 0){ lineas.push({fecha:fCob,tipo:'credito',concepto:`Pago ${pl(per)}`,monto:pagos}); accHist-=pagos }
+        // Ajuste de convergencia: forzar saldo = total_uf del PDF
+        const conv = tuf - accHist
+        if (Math.abs(conv) > 0.04) {
+          lineas.push({ fecha:fDeb, tipo: conv>0?'debito':'credito',
+            concepto:`Ajuste liquidación ${pl(per)}`, monto:Math.abs(conv) })
+          accHist = tuf
+        }
+      }
+      // Cobranzas no-históricas (período abierto)
+      for (const c of (cobs2||[])) {
+        if (!c.id?.startsWith('COB-HIST-')) {
+          lineas.push({fecha:c.fecha,tipo:'credito',
+            concepto:`Pago ${pl(c.con_expensas?.periodo)}${c.medio_pago?' ('+c.medio_pago+')':''}`,
+            monto:parseFloat(c.monto)||0,nro:c.recibo_numero})
+        }
+      }
+      // Expensas del período abierto (DET no históricos)
+      const detsOrd2 = [...(dets2||[])].sort((a,b)=>(a.con_expensas?.periodo||'').localeCompare(b.con_expensas?.periodo||''))
+      for (const d of detsOrd2) {
+        if (d.id?.startsWith('DET-HIST-')) continue
+        const per   = d.con_expensas?.periodo||''
+        const monto = parseFloat(d.monto)||0
+        const intM2 = parseFloat(d.interes_mora)||0
+        const fDeb2 = d.con_expensas?.fecha_vencimiento||(per?per+'-10':d.created_at?.split('T')[0])
+        if (monto > 0)  lineas.push({fecha:fDeb2,tipo:'debito',concepto:`Expensa ${pl(per)}`,monto})
+        if (intM2 > 0)  lineas.push({fecha:fDeb2,tipo:'debito',concepto:`Interés mora — ${pl(per)}`,monto:intM2})
+      }
+    } else {
+      // Modelo normal (sin históricos)
+      const detsOrd = [...(dets2||[])].sort((a,b)=>(a.con_expensas?.periodo||'').localeCompare(b.con_expensas?.periodo||''))
+      const primerHistId = detsOrd.find(d=>d.id?.startsWith('DET-HIST-'))?.id
+      for (const d of detsOrd) {
+        const per=d.con_expensas?.periodo||''; const saldoAnt=parseFloat(d.saldo_anterior)||0
+        const monto=parseFloat(d.monto)||0; const intMora=parseFloat(d.interes_mora)||0
+        const esHist=d.id?.startsWith('DET-HIST-')
+        const fechaDeb=d.con_expensas?.fecha_vencimiento||(per?per+'-10':d.created_at?.split('T')[0])
+        const mostrarAnt=saldoAnt>0&&(!esHist||d.id===primerHistId)
+        if(mostrarAnt) lineas.push({fecha:per?per+'-01':fechaDeb,tipo:'debito',concepto:esHist?'Saldo al inicio del período histórico':`Saldo anterior ${pl(per)}`,monto:saldoAnt})
+        if(monto>0) lineas.push({fecha:fechaDeb,tipo:'debito',concepto:`Expensa ${pl(per)}`,monto,vto:d.con_expensas?.fecha_vencimiento})
+        if(intMora>0) lineas.push({fecha:fechaDeb,tipo:'debito',concepto:`Interés mora ${pl(per)}`,monto:intMora})
+      }
+      for (const c of (cobs2||[])) {
+        lineas.push({fecha:c.fecha,tipo:'credito',concepto:`Pago ${pl(c.con_expensas?.periodo)}${c.medio_pago?' ('+c.medio_pago+')':''}`,monto:parseFloat(c.monto)||0,nro:c.recibo_numero})
+      }
     }
-    for (const c of (cobs2||[])) {
-      lineas.push({fecha:c.fecha,tipo:'credito',concepto:`Pago ${pl(c.con_expensas?.periodo)}${c.medio_pago?' ('+c.medio_pago+')':''}`,monto:parseFloat(c.monto)||0,nro:c.recibo_numero})
-    }
+
     lineas.sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))
     let acc=0
     const conSaldo=lineas.map(l=>{ if(l.tipo==='debito') acc+=l.monto; else acc-=l.monto; return{...l,saldo:acc}})
