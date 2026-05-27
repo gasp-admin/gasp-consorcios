@@ -8078,7 +8078,6 @@ No incluyas texto fuera del JSON.`
               {(() => {
                 // Calcular % por coeficiente de las UFs presentes
                 const presLista = presentes.split(',').map(p=>p.trim()).filter(Boolean)
-                // coefTotal: usar porcentaje_fiscal (campo real en con_unidades)
                 const coefTotal = unidades.reduce((a,u)=>a+(parseFloat(u.porcentaje_fiscal)||0),0)||100
                 const coefPresentes = unidades
                   .filter(u => presLista.some(p => {
@@ -8089,10 +8088,10 @@ No incluyas texto fuera del JSON.`
                     const numInt  = (u.numero_interno||'').toLowerCase().trim()
                     const desc    = (u.descripcion||'').toLowerCase().trim()
                     return (
-                      pl === num         ||   // 'pb a' === 'pb a'  ó  '1 c' === '1 c'
-                      plNoSp === numNoSp ||   // 'pba' === 'pba'    ó  '1c' === '1c'
-                      pl === numInt      ||   // 'pba' === 'pba'
-                      plNoSp === numInt  ||   // 'pba' === 'pba'
+                      pl === num         ||
+                      plNoSp === numNoSp ||
+                      pl === numInt      ||
+                      plNoSp === numInt  ||
                       (desc.length > 2 && (pl.includes(desc) || desc.includes(pl)))
                     )
                   }))
@@ -14514,7 +14513,7 @@ function CtaCorriente({ session, consorcioId, unidades, copropietarios }) {
         .eq('unidad_id', uid).in('estado', ['vigente','acreditado','cobrado']).order('fecha', { ascending: true }),
       supabase.from('con_movimientos_unidad').select('*')
         .eq('unidad_id', uid).in('estado', ['vigente','acreditado','cobrado']).order('fecha', { ascending: true }),
-      supabase.from('con_liquidacion_uf').select('*, con_expensas:expensa_id(periodo,fecha_vencimiento)')
+      supabase.from('con_liquidacion_uf').select('*')
         .eq('unidad_id', uid).order('periodo', { ascending: true }),
     ])
 
@@ -14556,14 +14555,14 @@ function CtaCorriente({ session, consorcioId, unidades, copropietarios }) {
         const per      = luf.periodo || ''
         const expensa  = parseFloat(luf.expensa_calculada)||0
         const intMora  = parseFloat(luf.interes)||0
-        const fechaDeb = luf.con_expensas?.fecha_vencimiento || (per ? per + '-10' : '')
+        const fechaDeb = (per ? per + '-10' : '')
         const fechaCob = per ? per + '-28' : ''
         const pagos    = parseFloat(luf.pagos)||0
         const totalUf  = parseFloat(luf.total_uf)
 
         if (expensa > 0) {
           lineas.push({ fecha: fechaDeb, tipo: 'debito',
-            concepto: `Expensa ${pl(per)}`, monto: expensa, origen: 'expensa', vto: luf.con_expensas?.fecha_vencimiento })
+            concepto: `Expensa ${pl(per)}`, monto: expensa, origen: 'expensa' })
           accHist += expensa
         }
         if (intMora > 0) {
