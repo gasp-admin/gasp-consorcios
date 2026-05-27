@@ -14508,100 +14508,174 @@ function CtaCorriente({ session, consorcioId, unidades, copropietarios }) {
   async function cargarMovimientos(uid) {
     if (!uid) return
     setCargando(true)
-    const [{ data: dets }, { data: cobs }, { data: movUnit }] = await Promise.all([
+    const [{ data: dets }, { data: cobs }, { data: movUnit }, { data: lufs }] = await Promise.all([
       supabase.from('con_expensas_detalle').select('*, con_expensas(periodo,fecha_vencimiento,tipo)')
         .eq('unidad_id', uid).order('created_at', { ascending: true }),
       supabase.from('con_cobranzas').select('*, con_expensas(periodo)')
         .eq('unidad_id', uid).in('estado', ['vigente','acreditado','cobrado']).order('fecha', { ascending: true }),
       supabase.from('con_movimientos_unidad').select('*')
         .eq('unidad_id', uid).in('estado', ['vigente','acreditado','cobrado']).order('fecha', { ascending: true }),
+      supabase.from('con_liquidacion_uf').select('*, con_expensas:expensa_id(periodo,fecha_vencimiento)')
+        .eq('unidad_id', uid).order('periodo', { ascending: true }),
     ])
 
-    // Construir líneas de cuenta corriente
+    const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    const pl = per => { if (!per) return ''; const [y,m] = per.split('-'); return `${meses[parseInt(m)-1]} ${y}` }
 
-    // Expensas (débitos automáticos) — leídas de con_expensas_detalle
-    // Para registros históricos (DET-HIST-*): el saldo_anterior solo se muestra
-    // en el primer período (el más antiguo) para reflejar el saldo inicial real.
-    // En los demás períodos históricos el saldo_anterior ya está incluido en el
-    // crédito del período anterior, por lo que mostrarlo duplicaría el débito.
-    const detsOrdenados = [...(dets||[])].sort((a,b) =>
-      (a.con_expensas?.periodo||'').localeCompare(b.con_expensas?.periodo||''))
-    const primerDetHistId = detsOrdenados.find(d => d.id?.startsWith('DET-HIST-'))?.id
+    // ══════════════════════════════════════════════════════════════════
+    // Para registros HISTÓRICOS (DET-HIST-*): usar con_liquidacion_uf
+    // como fuente de verdad. El total_uf de cada período viene directo
+    // del PDF — no se reconstruye para evitar errores de ajustes/redondeo.
+    // ══════════════════════════════════════════════════════════════════
+    const tieneHistoricos = (dets||[]).some(d => d.id?.startsWith('DET-HIST-'))
+    const lufsOrdenados   = [...(lufs||[])].sort((a,b) => (a.periodo||'').localeCompare(b.periodo||''))
 
     const lineas = []
-    for (const d of detsOrdenados) {
-      const periodo = d.con_expensas?.periodo || ''
-      const [y,m] = (periodo||'').split('-')
-      const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-      const perLabel = m ? `${meses[parseInt(m)-1]} ${y}` : periodo
-      const montoExpensa = parseFloat(d.monto)||0
-      const saldoAnt     = parseFloat(d.saldo_anterior)||0
-      const intMora      = parseFloat(d.interes_mora)||0
 
-      // Saldo anterior arrastrado del período previo
-      // Para datos históricos: solo en el PRIMER período (refleja el saldo inicial real)
-      // EXCEPCIÓN: si la expensa del período es $0 (ej: cierres de año sin nueva cuota),
-      // SÍ mostrar el saldo_anterior — es el único débito de ese período
-      // Para datos normales: siempre mostrar
-      const esHistorico = d.id?.startsWith('DET-HIST-')
-      const periodoSinCuota = esHistorico && (parseFloat(d.monto)||0) === 0
-      const mostrarSaldoAnt = saldoAnt > 0 && (!esHistorico || d.id === primerDetHistId || periodoSinCuota)
-      if (mostrarSaldoAnt) {
+    if (tieneHistoricos && lufsOrdenados.length > 0) {
+      // Modelo histórico: cada período usa total_uf del PDF como saldo de referencia.
+      // Al final de cada período se inserta un ajuste de convergencia (si es necesario)
+      // para que el saldo acumulado coincida exactamente con el total_uf del PDF.
+      // Esto garantiza que el saldo final siempre sea el total_uf del último período,
+      // independientemente de ajustes de liquidación, saltos en saldo_ant o centavos.
+      const primerLuf = lufsOrdenados[0]
+
+      // Línea de apertura: saldo anterior al inicio del historial
+      if ((parseFloat(primerLuf.saldo_anterior)||0) > 0) {
         lineas.push({
-          fecha:   d.con_expensas?.fecha_vencimiento || (d.con_expensas?.periodo ? d.con_expensas.periodo + '-01' : d.created_at?.split('T')[0]),
+          fecha:   primerLuf.periodo + '-01',
           tipo:    'debito',
-          concepto: esHistorico ? `Saldo al inicio del período histórico` : `Saldo anterior al ${perLabel}`,
-          monto:   saldoAnt,
+          concepto:`Saldo al inicio del período histórico`,
+          monto:   parseFloat(primerLuf.saldo_anterior)||0,
           origen:  'saldo_ant'
         })
       }
-      // Expensa del período — solo si tiene monto (si está liquidada)
-      if (montoExpensa > 0) {
-        // Usar fecha_vencimiento si está disponible; para históricos usar inicio del período
-        const fechaDebito = d.con_expensas?.fecha_vencimiento ||
-          (d.con_expensas?.periodo ? d.con_expensas.periodo + '-10' : d.created_at?.split('T')[0])
-        lineas.push({
-          fecha:   fechaDebito,
-          tipo:    'debito',
-          concepto:`Expensa ${perLabel}`,
-          monto:   montoExpensa,
-          origen:  'expensa',
-          vto:     d.con_expensas?.fecha_vencimiento
-        })
+
+      let accHist = parseFloat(primerLuf.saldo_anterior)||0
+
+      for (const luf of lufsOrdenados) {
+        const per      = luf.periodo || ''
+        const expensa  = parseFloat(luf.expensa_calculada)||0
+        const intMora  = parseFloat(luf.interes)||0
+        const fechaDeb = luf.con_expensas?.fecha_vencimiento || (per ? per + '-10' : '')
+        const fechaCob = per ? per + '-28' : ''
+        const pagos    = parseFloat(luf.pagos)||0
+        const totalUf  = parseFloat(luf.total_uf)
+
+        if (expensa > 0) {
+          lineas.push({ fecha: fechaDeb, tipo: 'debito',
+            concepto: `Expensa ${pl(per)}`, monto: expensa, origen: 'expensa', vto: luf.con_expensas?.fecha_vencimiento })
+          accHist += expensa
+        }
+        if (intMora > 0) {
+          lineas.push({ fecha: fechaDeb, tipo: 'debito',
+            concepto: `Interés mora — ${pl(per)}`, monto: intMora, origen: 'mora' })
+          accHist += intMora
+        }
+        if (pagos > 0) {
+          lineas.push({ fecha: fechaCob, tipo: 'credito',
+            concepto: `Pago ${pl(per)} (transferencia)`, monto: pagos, origen: 'cobranza_hist' })
+          accHist -= pagos
+        }
+        // Ajuste de convergencia: forzar que el saldo coincida con total_uf del PDF.
+        // Cubre ajustes de liquidación (RED./AJUSTES), errores de redondeo,
+        // y cualquier diferencia entre saldo_ant del período siguiente y total_uf.
+        const conv = totalUf - accHist
+        if (Math.abs(conv) > 0.04) {
+          lineas.push({ fecha: fechaDeb, tipo: conv > 0 ? 'debito' : 'credito',
+            concepto: `Ajuste liquidación ${pl(per)}`, monto: Math.abs(conv), origen: 'ajuste' })
+          accHist = totalUf
+        }
       }
-      // Interés de mora
-      if (intMora > 0) {
-        lineas.push({
-          fecha:   d.created_at?.split('T')[0],
-          tipo:    'debito',
-          concepto:`Interés mora — ${perLabel}`,
-          monto:   intMora,
-          origen:  'mora'
-        })
+
+      // Movimientos manuales no-históricos sobre períodos abiertos
+      for (const m of (movUnit||[])) {
+        if (!m.id?.startsWith('MOV-HIST-')) {
+          lineas.push({ fecha: m.fecha, tipo: m.tipo,
+            concepto: m.concepto, monto: parseFloat(m.monto)||0,
+            nro: m.numero_comprobante, origen: 'manual' })
+        }
+      }
+
+      // Cobranzas no-históricas (pagos manuales del período abierto)
+      for (const c of (cobs||[])) {
+        if (!c.id?.startsWith('COB-HIST-')) {
+          lineas.push({ fecha: c.fecha, tipo: 'credito',
+            concepto: `Pago expensas ${pl(c.con_expensas?.periodo)}${c.medio_pago?' ('+c.medio_pago+')':''}`,
+            monto: parseFloat(c.monto)||0, nro: c.recibo_numero, origen: 'cobranza' })
+        }
+      }
+
+      // Expensas del período abierto (DET no históricos)
+      const detsOrdenados = [...(dets||[])].sort((a,b) =>
+        (a.con_expensas?.periodo||'').localeCompare(b.con_expensas?.periodo||''))
+      for (const d of detsOrdenados) {
+        if (d.id?.startsWith('DET-HIST-')) continue  // ya procesados via luf
+        const per      = d.con_expensas?.periodo || ''
+        const expensa  = parseFloat(d.monto)||0
+        const intMora  = parseFloat(d.interes_mora)||0
+        const fechaDeb = d.con_expensas?.fecha_vencimiento ||
+          (per ? per + '-10' : d.created_at?.split('T')[0])
+        if (expensa > 0) {
+          lineas.push({ fecha: fechaDeb, tipo: 'debito',
+            concepto: `Expensa ${pl(per)}`, monto: expensa, origen: 'expensa', vto: d.con_expensas?.fecha_vencimiento })
+        }
+        if (intMora > 0) {
+          lineas.push({ fecha: fechaDeb, tipo: 'debito',
+            concepto: `Interés mora — ${pl(per)}`, monto: intMora, origen: 'mora' })
+        }
+      }
+
+    } else {
+      // ══════════════════════════════════════════════════════════════
+      // Modelo normal (sin históricos): lógica original
+      // ══════════════════════════════════════════════════════════════
+      const detsOrdenados = [...(dets||[])].sort((a,b) =>
+        (a.con_expensas?.periodo||'').localeCompare(b.con_expensas?.periodo||''))
+      const primerDetHistId = detsOrdenados.find(d => d.id?.startsWith('DET-HIST-'))?.id
+
+      for (const d of detsOrdenados) {
+        const per          = d.con_expensas?.periodo || ''
+        const perLabel     = pl(per)
+        const montoExpensa = parseFloat(d.monto)||0
+        const saldoAnt     = parseFloat(d.saldo_anterior)||0
+        const intMora      = parseFloat(d.interes_mora)||0
+        const esHistorico  = d.id?.startsWith('DET-HIST-')
+        const mostrarSaldoAnt = saldoAnt > 0 && (!esHistorico || d.id === primerDetHistId)
+        if (mostrarSaldoAnt) {
+          lineas.push({
+            fecha:   d.con_expensas?.periodo ? d.con_expensas.periodo + '-01' : d.created_at?.split('T')[0],
+            tipo:    'debito',
+            concepto: esHistorico ? `Saldo al inicio del período histórico` : `Saldo anterior al ${perLabel}`,
+            monto:   saldoAnt, origen: 'saldo_ant'
+          })
+        }
+        if (montoExpensa > 0) {
+          const fechaDebito = d.con_expensas?.fecha_vencimiento ||
+            (d.con_expensas?.periodo ? d.con_expensas.periodo + '-10' : d.created_at?.split('T')[0])
+          lineas.push({ fecha: fechaDebito, tipo: 'debito',
+            concepto: `Expensa ${perLabel}`, monto: montoExpensa, origen: 'expensa', vto: d.con_expensas?.fecha_vencimiento })
+        }
+        if (intMora > 0) {
+          lineas.push({ fecha: d.created_at?.split('T')[0], tipo: 'debito',
+            concepto: `Interés mora — ${perLabel}`, monto: intMora, origen: 'mora' })
+        }
+      }
+      for (const m of (movUnit||[])) {
+        lineas.push({ fecha: m.fecha, tipo: m.tipo,
+          concepto: m.concepto, monto: parseFloat(m.monto)||0,
+          nro: m.numero_comprobante, origen: 'manual' })
+      }
+      for (const c of (cobs||[])) {
+        const perLabel = pl(c.con_expensas?.periodo||'')
+        lineas.push({ fecha: c.fecha, tipo: 'credito',
+          concepto: `Pago expensas ${perLabel}${c.medio_pago?' ('+c.medio_pago+')':''}`,
+          monto: parseFloat(c.monto)||0, nro: c.recibo_numero, origen: 'cobranza' })
       }
     }
 
-    // Notas de débito/crédito manuales
-    for (const m of (movUnit||[])) {
-      lineas.push({ fecha: m.fecha, tipo: m.tipo,
-        concepto: m.concepto, monto: parseFloat(m.monto)||0,
-        nro: m.numero_comprobante, origen: 'manual' })
-    }
-
-    // Cobranzas (créditos)
-    for (const c of (cobs||[])) {
-      const [y,m2] = (c.con_expensas?.periodo||'').split('-')
-      const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-      const perLabel = m2 ? `${meses[parseInt(m2)-1]} ${y}` : ''
-      lineas.push({ fecha: c.fecha, tipo:'credito',
-        concepto: `Pago expensas ${perLabel}${c.medio_pago?' ('+c.medio_pago+')':''}`,
-        monto: parseFloat(c.monto)||0, nro: c.recibo_numero, origen: 'cobranza' })
-    }
-
-    // Ordenar por fecha
+    // Ordenar por fecha y calcular saldo acumulado
     lineas.sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
-
-    // Calcular saldo acumulado
     let acc = 0
     const conSaldo = lineas.map(l => {
       if (l.tipo === 'debito')  acc += l.monto
