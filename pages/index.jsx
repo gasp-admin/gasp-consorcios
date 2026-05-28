@@ -7410,6 +7410,102 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
             </div>
           </div>
 
+          {/* Opción C: Subida manual — para consorcios grandes (Torre, etc.) */}
+          {unidades.length > 80 && (
+            <div style={{...card, border:'2px solid #f59e0b', background:'#fffbeb'}}>
+              <h3 style={{margin:'0 0 6px',fontSize:15,color:'#92400e'}}>
+                📤 Opción C — Subir PDF desde tu PC
+                <span style={{marginLeft:8,fontSize:11,fontWeight:400,color:'#b45309',
+                  background:'#fef3c7',padding:'2px 8px',borderRadius:10}}>
+                  ✅ Recomendado para {consorcioActivo?.nombre||'consorcios grandes'}
+                </span>
+              </h3>
+              <p style={{fontSize:12,color:'#92400e',margin:'0 0 12px',lineHeight:1.5}}>
+                Para consorcios con más de 80 unidades, Google Drive bloquea la descarga automática.
+                Descargá los PDFs a tu PC y subílos uno por vez desde acá.
+              </p>
+              <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+                <label style={{
+                  padding:'9px 18px',background:'#f59e0b',color:'#fff',borderRadius:6,
+                  fontSize:13,fontWeight:600,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:6
+                }}>
+                  📁 Elegir PDF
+                  <input type="file" accept=".pdf" style={{display:'none'}}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      if (!file.name.toLowerCase().endsWith('.pdf')) {
+                        setMsg('❌ El archivo debe ser un PDF'); return
+                      }
+                      if (!consorcioActivo?.id) { setMsg('⚠️ Seleccioná un consorcio activo'); return }
+                      setProcesando(true)
+                      setMsg(`⚙️ Leyendo ${file.name}...`)
+                      try {
+                        // Leer PDF como base64 directamente del sistema de archivos local
+                        const base64 = await new Promise((res, rej) => {
+                          const reader = new FileReader()
+                          reader.onload = () => res(reader.result.split(',')[1])
+                          reader.onerror = rej
+                          reader.readAsDataURL(file)
+                        })
+                        // Validar magic bytes %PDF
+                        const header = atob(base64.slice(0,8))
+                        if (!header.startsWith('%PDF')) {
+                          setMsg('❌ El archivo no parece ser un PDF válido'); setProcesando(false); return
+                        }
+                        // Generar un drive_file_id ficticio basado en nombre para el ID de cola
+                        const fakeId = 'LOCAL-' + file.name.replace(/[^a-zA-Z0-9]/g,'').slice(0,20) + '-' + Date.now()
+                        const colaId = `COLA-${consorcioActivo.id}-${fakeId}`
+                        setMsg(`⚙️ Encolando ${file.name}...`)
+                        await fetch(EF_URL, {
+                          method:'POST',
+                          headers:{'Content-Type':'application/json', Authorization:`Bearer ${tok}`},
+                          body: JSON.stringify({
+                            accion:'encolar_lote',
+                            archivos:[{
+                              drive_file_id: fakeId,
+                              drive_file_nombre: file.name,
+                              consorcio_id: consorcioActivo.id,
+                              consorcio_nombre: consorcioActivo.nombre
+                            }]
+                          })
+                        })
+                        setMsg(`⚙️ Procesando con IA: ${file.name}...`)
+                        const r = await fetch(EF_URL, {
+                          method:'POST',
+                          headers:{'Content-Type':'application/json', Authorization:`Bearer ${tok}`},
+                          body: JSON.stringify({
+                            accion:'procesar_pdf',
+                            cola_id: colaId,
+                            pdf_id: fakeId,
+                            pdf_url: '',
+                            pdf_base64: base64,
+                            consorcio_id: consorcioActivo.id,
+                            consorcio_nombre: consorcioActivo.nombre
+                          })
+                        })
+                        const res = await r.json()
+                        if (res.ok) {
+                          setMsg(`✅ ${file.name} procesado — período ${res.periodo} — ${res.ufs} UFs`)
+                        } else {
+                          setMsg(`❌ Error: ${res.error||'desconocido'}`)
+                        }
+                      } catch (err) {
+                        setMsg(`❌ Error: ${err.message}`)
+                      }
+                      setProcesando(false)
+                      e.target.value = ''
+                      setTimeout(() => cargarTodo(), 1500)
+                    }}
+                  />
+                </label>
+                <span style={{fontSize:12,color:'#92400e'}}>
+                  Seleccioná el PDF de la liquidación. Se procesa directamente sin pasar por Drive.
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Info */}
           <div style={{ ...card, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, color: '#166534' }}>✅ ¿Qué genera la importación?</h4>
