@@ -11977,8 +11977,109 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
     html += '<td></td><td></td><td></td></tr>'
     html += '</tbody></table>'
 
-    // Resumen
+    // Resumen pie
     html += `<div class="foot">Ingresos: $${f2(d.totalIngresos)} &nbsp;|&nbsp; Egresos: $${f2(d.totalAnual)} &nbsp;|&nbsp; Resultado neto: $${f2(d.resultadoNeto)} &nbsp;|&nbsp; Meses con saldo positivo: ${d.mesesPositivo}/${d.periodos.length}</div>`
+
+    // ── PÁGINA 2: ANÁLISIS EJECUTIVO ──────────────────────────────────────
+    html += `<div style="page-break-before:always"></div>`
+    html += `<h2>ANÁLISIS EJECUTIVO — ${d.periodos[0]} / ${d.periodos[d.periodos.length-1]}</h2>`
+    html += `<div class="sub">${consorcioActivo?consorcioActivo.nombre:''} &nbsp;·&nbsp; Javier García Pérez · RPAC N° 83 &nbsp;·&nbsp; ${hoy}</div>`
+
+    // KPIs
+    html += `<table style="margin-bottom:8px"><tr>
+      <th class="l" style="background:#0f2d7a">Indicador</th><th style="background:#0f2d7a">Valor</th></tr>
+      <tr><td class="l">Total ingresos anual</td><td class="pos"><b>$${f2(d.totalIngresos)}</b></td></tr>
+      <tr><td class="l">Total egresos anual</td><td class="neg"><b>$${f2(d.totalAnual)}</b></td></tr>
+      <tr><td class="l">Resultado neto</td><td class="${d.resultadoNeto>=0?'pos':'neg'}"><b>${d.resultadoNeto>=0?'+':''}$${f2(Math.abs(d.resultadoNeto))}</b></td></tr>
+      <tr><td class="l">Promedio mensual ingresos</td><td>$${f2(d.promedioIngresos)}</td></tr>
+      <tr><td class="l">Promedio mensual egresos</td><td>$${f2(d.promedioEgresos)}</td></tr>
+      <tr><td class="l">Meses con saldo positivo</td><td>${d.mesesPositivo} / ${d.periodos.length}</td></tr>
+    </table>`
+
+    // Hallazgos
+    const topCats3pct = (d.topCats||[]).length>=3
+      ? ((d.topCats.slice(0,3).reduce((a,c)=>a+parseFloat(c.pct||0),0)).toFixed(1))
+      : '—'
+    const hallazgos = [
+      `El período cierra con un resultado neto de ${d.resultadoNeto>=0?'superávit':'déficit'} de $${f2(Math.abs(d.resultadoNeto))} (${d.totalIngresos>0?(Math.abs(d.resultadoNeto)/d.totalIngresos*100).toFixed(1):'0'}% de los ingresos).`,
+      `${d.mesMayorIngreso?.mes||'—'} fue el mes de mayor ingreso ($${f2(d.mesMayorIngreso?.ingresos||0)}).`,
+      `${d.mesMayorEgreso?.mes||'—'} registró el mayor egreso ($${f2(d.mesMayorEgreso?.egresos||0)}).`,
+      `El saldo final tocó su mínimo en ${d.saldoMinimo?.mes||'—'} ($${f2(d.saldoMinimo?.saldo||0)}) y su máximo en ${d.saldoMaximo?.mes||'—'} ($${f2(d.saldoMaximo?.saldo||0)}).`,
+      `Las 3 categorías más grandes concentran ${topCats3pct}% del gasto: ${(d.topCats||[]).slice(0,3).map(c=>c.label).join(', ')}.`,
+      `La mejor diferencia mensual fue ${d.mesMejorDif?.mes||'—'} ($${f2(d.mesMejorDif?.diferencia||0)}) y la peor fue ${d.mesPeorDif?.mes||'—'} ($${f2(d.mesPeorDif?.diferencia||0)}).`,
+      `Hubo ${d.mesesPositivo} ${d.mesesPositivo!==1?'meses':'mes'} con saldo final positivo y ${d.periodos.length-d.mesesPositivo} con saldo negativo.`,
+      `Mayor concentración de gasto: ${(d.topCats||[])[0]?.label||'—'} ($${f2((d.topCats||[])[0]?.total||0)}, ${(d.topCats||[])[0]?.pct||0}%).`,
+    ]
+    html += `<div style="margin-bottom:8px;padding:6px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px">
+      <div style="font-weight:700;font-size:9px;margin-bottom:5px;color:#1A3FA0">🧠 Hallazgos del período</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+        ${hallazgos.map(t=>`<div style="font-size:7.5px;padding:3px 5px;background:#fff;border:1px solid #e5e7eb;border-radius:3px;line-height:1.4"><span style="color:#1A3FA0;margin-right:3px">•</span>${t}</div>`).join('')}
+      </div>
+    </div>`
+
+    // Tabla de 3 columnas
+    html += `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">`
+
+    // Col 1: Top categorías
+    html += `<table><thead><tr>
+      <th class="l" colspan="3">Top categorías de egresos</th></tr>
+      <tr style="background:#f8fafc"><th class="l" style="background:#f8fafc;color:#555;font-size:7px">Categoría</th>
+      <th style="background:#f8fafc;color:#555;font-size:7px">Total</th>
+      <th style="background:#f8fafc;color:#555;font-size:7px">%</th></tr>
+    </thead><tbody>`
+    ;(d.topCats||[]).forEach(c => {
+      html += `<tr><td class="l">${c.label}</td><td><b>$${f2(c.total)}</b></td><td style="color:#4338ca">${c.pct}%</td></tr>`
+    })
+    html += `<tr class="sub-cat"><td class="l">TOTAL</td><td><b>$${f2(d.totalAnual)}</b></td><td>100%</td></tr>`
+    html += `</tbody></table>`
+
+    // Col 2: Ingresos vs egresos por mes
+    html += `<table><thead><tr>
+      <th class="l" colspan="4">Ingresos vs Egresos por mes</th></tr>
+      <tr style="background:#f8fafc">
+      <th class="l" style="background:#f8fafc;color:#555;font-size:7px">Mes</th>
+      <th style="background:#f8fafc;color:#15803d;font-size:7px">Ingresos</th>
+      <th style="background:#f8fafc;color:#dc2626;font-size:7px">Egresos</th>
+      <th style="background:#f8fafc;color:#555;font-size:7px">Diferencia</th></tr>
+    </thead><tbody>`
+    ;(d.evolucion||[]).forEach(e => {
+      const dif = e.diferencia||0
+      html += `<tr><td class="l">${e.mes}</td><td class="pos">$${f2(e.ingresos)}</td><td class="neg">$${f2(e.egresos)}</td><td class="${dif>=0?'pos':'neg'}">${dif>=0?'+':''}$${f2(dif)}</td></tr>`
+    })
+    html += `<tr class="sub-cat"><td class="l">TOTAL</td><td class="pos"><b>$${f2(d.totalIngresos)}</b></td><td class="neg"><b>$${f2(d.totalAnual)}</b></td><td class="${d.resultadoNeto>=0?'pos':'neg'}"><b>${d.resultadoNeto>=0?'+':''}$${f2(d.resultadoNeto)}</b></td></tr>`
+    html += `</tbody></table>`
+
+    // Col 3: Evolución saldo final
+    html += `<table><thead><tr>
+      <th class="l" colspan="2">Evolución del saldo final</th></tr>
+      <tr style="background:#f8fafc">
+      <th class="l" style="background:#f8fafc;color:#555;font-size:7px">Mes</th>
+      <th style="background:#f8fafc;color:#555;font-size:7px">Saldo final</th></tr>
+    </thead><tbody>`
+    ;(d.evolucion||[]).forEach(e => {
+      const sf = e.saldo||0
+      html += `<tr${sf<0?' style="background:#fff5f5"':''}><td class="l">${e.mes}</td><td class="${sf<0?'neg':'pos'}"><b>${sf!==0?(sf>0?'+':'')+'$'+f2(sf):'—'}</b></td></tr>`
+    })
+    html += `</tbody></table>`
+    html += `</div>` // cierra grid 3 columnas
+
+    // Detalle bloque mayor
+    if ((d.detalleTopCat||[]).length > 0) {
+      html += `<table style="margin-top:4px"><thead><tr>
+        <th class="l" colspan="3">Detalle de ${d.topCatLabel||''} — mayor concentración de gasto</th></tr>
+        <tr style="background:#f8fafc">
+        <th class="l" style="background:#f8fafc;color:#555;font-size:7px">Concepto</th>
+        <th style="background:#f8fafc;color:#555;font-size:7px">Total anual</th>
+        <th style="background:#f8fafc;color:#555;font-size:7px">% del total</th></tr>
+      </thead><tbody>`
+      ;(d.detalleTopCat||[]).forEach(dt => {
+        html += `<tr><td class="l">${dt.concepto||''}</td><td><b>$${f2(dt.total)}</b></td><td style="color:#4338ca">${dt.pct}%</td></tr>`
+      })
+      html += `<tr class="sub-cat"><td class="l">TOTAL ${d.topCatLabel||''}</td><td><b>$${f2(d.topCatTotal)}</b></td><td>100%</td></tr>`
+      html += `</tbody></table>`
+    }
+
+    html += `<div class="foot" style="margin-top:6px">Rendición de cuentas generada por GASP Consorcios · administracionpinamar.com · ${hoy}</div>`
     html += '</body></html>'
     w.document.write(html); w.document.close(); w.focus()
     setTimeout(()=>{try{w.print()}catch(e){}},600)
