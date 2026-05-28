@@ -7368,6 +7368,61 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
               </button>
             </div>
           </div>
+          {/* Opción C — subida manual para consorcios grandes (>80 UFs) */}
+          <div style={{ background:'#fffbeb', border:'2px solid #f59e0b', borderRadius:8, padding:16, marginBottom:16 }}>
+            <h3 style={{ margin:'0 0 6px', fontSize:15, color:'#92400e' }}>
+              📤 Opción C — Subir PDF desde tu PC
+              <span style={{ marginLeft:8, fontSize:11, fontWeight:400, color:'#b45309', background:'#fef3c7', padding:'2px 8px', borderRadius:10 }}>
+                Para Torre Punta Medanos y consorcios de más de 80 UFs
+              </span>
+            </h3>
+            <p style={{ fontSize:12, color:'#92400e', margin:'0 0 10px' }}>
+              Descargá el PDF de Drive a tu PC y seleccionalo acá. Se procesa con IA directamente, sin pasar por Drive. Un PDF por vez (~60 segundos).
+            </p>
+            <label style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'9px 20px',
+              background:'#f59e0b', color:'#fff', borderRadius:6, fontSize:13, fontWeight:700, cursor:'pointer' }}>
+              📁 Elegir PDF
+              <input
+                type="file"
+                accept=".pdf,application/pdf"
+                style={{ display:'none' }}
+                onChange={(e) => {
+                  const file = e.target.files && e.target.files[0]
+                  if (!file) return
+                  if (!consorcioActivo || !consorcioActivo.id) { setMsg('Seleccionar un consorcio activo'); return }
+                  setProcesando(true)
+                  setMsg('Leyendo PDF...')
+                  const reader = new FileReader()
+                  reader.onerror = () => { setMsg('Error al leer el archivo'); setProcesando(false) }
+                  reader.onload = async () => {
+                    try {
+                      const base64 = reader.result.split(',')[1]
+                      const h = atob(base64.slice(0, 8))
+                      if (!h.startsWith('%PDF')) { setMsg('El archivo no es un PDF valido'); setProcesando(false); e.target.value = ''; return }
+                      const fakeId = 'LOCAL-' + Date.now()
+                      const colaId = 'COLA-' + consorcioActivo.id + '-' + fakeId
+                      setMsg('Enviando a IA: ' + file.name)
+                      await fetch(EF_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+                        body: JSON.stringify({ accion: 'encolar_lote', archivos: [{ drive_file_id: fakeId, drive_file_nombre: file.name, consorcio_id: consorcioActivo.id, consorcio_nombre: consorcioActivo.nombre }] })
+                      })
+                      const r = await fetch(EF_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+                        body: JSON.stringify({ accion: 'procesar_pdf', cola_id: colaId, pdf_id: fakeId, pdf_url: '', pdf_base64: base64, consorcio_id: consorcioActivo.id, consorcio_nombre: consorcioActivo.nombre })
+                      })
+                      const res = await r.json()
+                      if (res.ok) { setMsg('OK: ' + file.name + ' periodo ' + res.periodo + ' UFs: ' + res.ufs) }
+                      else { setMsg('Error: ' + (res.error || 'desconocido')) }
+                    } catch (err) { setMsg('Error: ' + err.message) }
+                    setProcesando(false); e.target.value = ''; setTimeout(() => cargarTodo(), 1500)
+                  }
+                  reader.readAsDataURL(file)
+                }}
+              />
+            </label>
+          </div>
+
+
 {/* Info */}
           <div style={{ ...card, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, color: '#166534' }}>✅ ¿Qué genera la importación?</h4>
