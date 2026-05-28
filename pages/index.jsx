@@ -7080,8 +7080,8 @@ function CertificadoLibreDeuda({ session, consorcioId, consorcioActivo, unidades
 // OpcionCSubida: componente separado para evitar hydration mismatch
 // Solo se renderiza en el cliente gracias al useState mounted
 function OpcionCSubida({ totalUFs, consorcioActivo, procesando, setProcesando, setMsg, cargarTodo, EF_URL, tok }) {
-  const [mounted, setMounted] = React.useState(false)
-  React.useEffect(() => { setMounted(true) }, [])
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
   if (!mounted || totalUFs <= 80) return null
   const card = { background:'#fff', border:'1px solid #e5e7eb', borderRadius:8, padding:16, marginBottom:16 }
   return (
