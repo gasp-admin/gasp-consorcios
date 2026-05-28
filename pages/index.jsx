@@ -11602,7 +11602,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
     try {
       // 1) Expensas del rango
       const {data: expensas, error: errExp} = await supabase.from('con_expensas')
-        .select('id,periodo,total_cobrado,saldo_caja_final,ingresos_extras,ingresos_intereses,ingresos_adeudados')
+        .select('id,periodo,total_cobrado,saldo_caja_final,ingresos_termino,ingresos_adeudados,ingresos_intereses')
         .eq('consorcio_id', consorcioId)
         .gte('periodo', periodoDesde).lte('periodo', periodoHasta)
         .order('periodo')
@@ -11643,13 +11643,13 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
       for (let i = 0; i < expensas.length; i++) {
         const p  = expensas[i].periodo
         const sf = parseFloat(expensas[i].saldo_caja_final)||0
-        const tc = parseFloat(expensas[i].total_cobrado)||0
-        const iv = parseFloat(expensas[i].ingresos_extras)||0
+        const tc = parseFloat(expensas[i].ingresos_termino) || parseFloat(expensas[i].total_cobrado)||0
+        const iv = parseFloat(expensas[i].ingresos_adeudados)||0
         const ii = parseFloat(expensas[i].ingresos_intereses)||0
         saldoInicialPorPeriodo[p] = i===0 ? saldoInicial0 : (parseFloat(expensas[i-1].saldo_caja_final)||0)
         saldoFinalPorPeriodo[p]   = sf
         ingExpensasPorPeriodo[p]  = tc
-        ingVariosPorPeriodo[p]    = iv
+        ingVariosPorPeriodo[p]    = iv    // adeudadas (morosos que pagaron tarde)
         ingInteresesPorPeriodo[p] = ii
         totalIngExpensas += tc; totalIngVarios += iv
         totalIngresos    += tc + iv + ii
@@ -11808,7 +11808,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
     html += `<tr class="ing-h"><td class="l" colspan="${nCols}">INGRESOS</td></tr>`
     if (Object.values(d.ingVariosPorPeriodo).some(v=>v>0)) {
       const totV = Object.values(d.ingVariosPorPeriodo).reduce((a,b)=>a+b,0)
-      html += '<tr class="ing-row"><td class="l" style="padding-left:10px">Ingresos varios</td>'
+      html += '<tr class="ing-row"><td class="l" style="padding-left:10px">Expensas adeudadas cobradas</td>'
       html += d.periodos.map(p=>'<td class="pos">'+f2(d.ingVariosPorPeriodo[p])+'</td>').join('')
       html += `<td class="pos"><b>${f2(totV)}</b></td><td>—</td><td>${f2(totV/d.periodos.length)}</td></tr>`
     }
@@ -11877,7 +11877,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
     ]
     if (Object.values(d.ingVariosPorPeriodo).some(v=>v>0)) {
       const totV = Object.values(d.ingVariosPorPeriodo).reduce((a,b)=>a+b,0)
-      rows.push(['  Ingresos varios',...d.periodos.map(p=>fv(d.ingVariosPorPeriodo[p])),totV,'',totV/d.periodos.length])
+      rows.push(['  Expensas adeudadas cobradas',...d.periodos.map(p=>fv(d.ingVariosPorPeriodo[p])),totV,'',totV/d.periodos.length])
     }
     rows.push(['  Expensas',...d.periodos.map(p=>fv(d.ingExpensasPorPeriodo[p])),d.totalIngExpensas,'Incidencia','Promedio'])
     rows.push(['Total ingresos',...d.periodos.map(p=>(fv(d.ingExpensasPorPeriodo[p])+fv(d.ingVariosPorPeriodo[p]))),d.totalIngresos,'',d.promedioIngresos])
@@ -11932,7 +11932,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
       const totV = Object.values(d.ingVariosPorPeriodo).reduce((a,b)=>a+b,0)
       rows.push(
         <tr key="ing-varios">
-          <td style={{padding:'4px 10px',paddingLeft:18,fontSize:9,position:'sticky',left:0,background:'#fff'}}>Ingresos varios</td>
+          <td style={{padding:'4px 10px',paddingLeft:18,fontSize:9,position:'sticky',left:0,background:'#fff'}}>Expensas adeudadas cobradas</td>
           {d.periodos.map(p=>(
             <td key={p} style={{padding:'4px 6px',textAlign:'right',color:VD,fontSize:9}}>
               {d.ingVariosPorPeriodo[p]>0?'$'+fmt(d.ingVariosPorPeriodo[p]):'—'}
