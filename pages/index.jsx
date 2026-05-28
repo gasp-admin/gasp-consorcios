@@ -11740,6 +11740,20 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
       const saldoMinimo     = evolucion.reduce((a,b)=>b.saldo<a.saldo?b:a, evolucion[0]||{})
       const saldoMaximo     = evolucion.reduce((a,b)=>b.saldo>a.saldo?b:a, evolucion[0]||{})
 
+      // Cargar recharts para los gráficos (una sola vez)
+      let rechartsLib = null
+      if (typeof window !== 'undefined') {
+        try {
+          if (window.__RECHARTS__) {
+            rechartsLib = window.__RECHARTS__
+          } else {
+            const mod = await import('recharts')
+            window.__RECHARTS__ = mod
+            rechartsLib = mod
+          }
+        } catch(e) { /* recharts no disponible */ }
+      }
+
       setDatos({
         periodos, mapa, totalsCat, totalsGlobal, totalAnual, totalIngresos,
         totalIngExpensas, totalIngVarios,
@@ -11750,6 +11764,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
         resultadoNeto, mesesPositivo, evolucion, topCats, topCatLabel, topCatTotal,
         detalleTopCat, mesMayorIngreso, mesMayorEgreso, mesMejorDif, mesPeorDif,
         saldoMinimo, saldoMaximo,
+        _recharts: rechartsLib,
       })
     } catch (err) {
       setMsg({tipo:'error', texto:'Error al generar: ' + (err.message || String(err))})
@@ -12297,6 +12312,114 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
                   </table>
                 </Card>
               )}
+
+              {/* ── GRÁFICOS (Recharts cargado dinámicamente) ── */}
+              {datos._recharts && (() => {
+                const { BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
+                        LineChart, Line, CartesianGrid, ReferenceLine,
+                        ResponsiveContainer, Cell } = datos._recharts
+                const COLORS = ['#1A3FA0','#1B6B35','#B91C1C','#C07D10','#6B21A8','#0891B2','#B45309','#0F766E','#7C3AED']
+                const fmtM   = v => v >= 1e6 ? '$'+( v/1e6).toFixed(1)+'M' : v >= 1e3 ? '$'+(v/1e3).toFixed(0)+'K' : '$'+v
+                const fmtMN  = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : String(v)
+
+                // Dataset gráfico 1: top categorías (barras horizontales)
+                const dataTopCats = datos.topCats.map(c=>({name:c.label.replace(/ /g,'\n'), total:Math.round(c.total)}))
+
+                // Dataset gráfico 2: ingresos vs egresos por mes
+                const dataEvolMes = datos.evolucion.map(e=>({
+                  mes: e.mes, ingresos:Math.round(e.ingresos), egresos:Math.round(e.egresos)
+                }))
+
+                // Dataset gráfico 3: evolución saldo
+                const dataSaldo = datos.evolucion.map(e=>({mes:e.mes, saldo:Math.round(e.saldo)}))
+
+                // Dataset gráfico 4: desglose bloque mayor
+                const dataDetalle = datos.detalleTopCat.slice(0,10).map(d=>({
+                  name: d.concepto.length>22 ? d.concepto.slice(0,22)+'…' : d.concepto,
+                  total: Math.round(d.total)
+                }))
+
+                return (
+                  <div style={{marginBottom:16}}>
+                    <div style={{fontWeight:700,fontSize:13,marginBottom:12,color:AZ}}>📈 Gráficos</div>
+
+                    {/* Fila 1: Top categorías + Ingresos vs Egresos */}
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+
+                      {/* G1 — Barras horizontales top categorías */}
+                      <Card style={{padding:'12px 8px'}}>
+                        <div style={{fontWeight:700,fontSize:11,marginBottom:8,color:AZ}}>Distribución de egresos por categoría</div>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <BarChart data={dataTopCats} layout="vertical" margin={{left:8,right:40,top:2,bottom:2}}>
+                            <XAxis type="number" tickFormatter={fmtMN} tick={{fontSize:8}} />
+                            <YAxis type="category" dataKey="name" width={110} tick={{fontSize:8,fill:'#374151'}} />
+                            <Tooltip formatter={v=>'$'+Number(v).toLocaleString('es-AR')} />
+                            <Bar dataKey="total" radius={[0,3,3,0]} label={{position:'right',fontSize:7,formatter:fmtM}}>
+                              {dataTopCats.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </Card>
+
+                      {/* G2 — Barras dobles ingresos vs egresos */}
+                      <Card style={{padding:'12px 8px'}}>
+                        <div style={{fontWeight:700,fontSize:11,marginBottom:8,color:AZ}}>Ingresos vs Egresos Mensuales</div>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <BarChart data={dataEvolMes} margin={{left:4,right:8,top:2,bottom:2}}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
+                            <XAxis dataKey="mes" tick={{fontSize:7}} />
+                            <YAxis tickFormatter={fmtMN} tick={{fontSize:7}} />
+                            <Tooltip formatter={v=>'$'+Number(v).toLocaleString('es-AR')} />
+                            <Legend wrapperStyle={{fontSize:9}} />
+                            <Bar dataKey="ingresos" fill="#1B6B35" name="Ingresos" radius={[2,2,0,0]} />
+                            <Bar dataKey="egresos"  fill="#B91C1C" name="Egresos"  radius={[2,2,0,0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </Card>
+                    </div>
+
+                    {/* Fila 2: Evolución saldo + Desglose bloque mayor */}
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+
+                      {/* G3 — Línea evolución saldo */}
+                      <Card style={{padding:'12px 8px'}}>
+                        <div style={{fontWeight:700,fontSize:11,marginBottom:8,color:AZ}}>Evolución del Saldo Final</div>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <LineChart data={dataSaldo} margin={{left:4,right:16,top:4,bottom:2}}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
+                            <XAxis dataKey="mes" tick={{fontSize:7}} />
+                            <YAxis tickFormatter={fmtMN} tick={{fontSize:7}} />
+                            <Tooltip formatter={v=>'$'+Number(v).toLocaleString('es-AR')} />
+                            <ReferenceLine y={0} stroke="#999" strokeDasharray="4 2"/>
+                            <Line type="monotone" dataKey="saldo" name="Saldo final"
+                              stroke="#1A3FA0" strokeWidth={2} dot={{r:3,fill:'#1A3FA0'}}
+                              activeDot={{r:5}} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </Card>
+
+                      {/* G4 — Barras horizontales desglose bloque mayor */}
+                      {dataDetalle.length > 0 && (
+                        <Card style={{padding:'12px 8px'}}>
+                          <div style={{fontWeight:700,fontSize:11,marginBottom:8,color:'#0f2d7a'}}>
+                            Desglose de {datos.topCatLabel}
+                          </div>
+                          <ResponsiveContainer width="100%" height={200}>
+                            <BarChart data={dataDetalle} layout="vertical" margin={{left:8,right:40,top:2,bottom:2}}>
+                              <XAxis type="number" tickFormatter={fmtMN} tick={{fontSize:8}} />
+                              <YAxis type="category" dataKey="name" width={120} tick={{fontSize:8,fill:'#374151'}} />
+                              <Tooltip formatter={v=>'$'+Number(v).toLocaleString('es-AR')} />
+                              <Bar dataKey="total" radius={[0,3,3,0]} label={{position:'right',fontSize:7,formatter:fmtM}}>
+                                {dataDetalle.map((_,i)=><Cell key={i} fill={COLORS[(i+2)%COLORS.length]}/>)}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </Card>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
 
               {/* Indicadores clave — 6 KPIs en grilla */}
               <Card style={{background:'#f8fafc',border:'1px solid #e2e8f0'}}>
