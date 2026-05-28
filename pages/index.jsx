@@ -7077,6 +7077,68 @@ function CertificadoLibreDeuda({ session, consorcioId, consorcioActivo, unidades
 // ═══════════════════════════════════════════════════════════════════
 // HISTORIAL DE LIQUIDACIONES — Importador masivo desde Drive
 // ═══════════════════════════════════════════════════════════════════
+// OpcionCSubida: componente separado para evitar hydration mismatch
+// Solo se renderiza en el cliente gracias al useState mounted
+function OpcionCSubida({ totalUFs, consorcioActivo, procesando, setProcesando, setMsg, cargarTodo, EF_URL, tok }) {
+  const [mounted, setMounted] = React.useState(false)
+  React.useEffect(() => { setMounted(true) }, [])
+  if (!mounted || totalUFs <= 80) return null
+  const card = { background:'#fff', border:'1px solid #e5e7eb', borderRadius:8, padding:16, marginBottom:16 }
+  return (
+    <div style={{...card, border:'2px solid #f59e0b', background:'#fffbeb'}}>
+      <h3 style={{margin:'0 0 6px',fontSize:15,color:'#92400e'}}>
+        📤 Opción C — Subir PDF desde tu PC
+        <span style={{marginLeft:8,fontSize:11,fontWeight:400,background:'#fef3c7',color:'#b45309',padding:'2px 8px',borderRadius:10}}>
+          Recomendado para consorcios con +80 UFs ({totalUFs} UFs)
+        </span>
+      </h3>
+      <p style={{fontSize:12,color:'#92400e',margin:'0 0 10px'}}>
+        Descargá el PDF a tu PC y subílo directamente. Se procesa con IA sin pasar por Drive.
+      </p>
+      <label style={{display:'inline-flex',alignItems:'center',gap:8,padding:'9px 20px',
+        background: procesando ? '#d97706' : '#f59e0b',color:'#fff',borderRadius:6,
+        fontSize:13,fontWeight:700,cursor: procesando ? 'not-allowed' : 'pointer'}}>
+        📁 Elegir PDF
+        <input type="file" accept=".pdf,application/pdf" style={{display:'none'}}
+          disabled={procesando}
+          onChange={async (e) => {
+            const file = e.target.files?.[0]
+            if (!file || !consorcioActivo?.id) return
+            setProcesando(true)
+            setMsg('⚙️ Leyendo PDF...')
+            try {
+              const base64 = await new Promise((res, rej) => {
+                const reader = new FileReader()
+                reader.onload  = () => res(reader.result.split(',')[1])
+                reader.onerror = rej
+                reader.readAsDataURL(file)
+              })
+              const h = atob(base64.slice(0,8))
+              if (!h.startsWith('%PDF')) { setMsg('❌ No es un PDF válido'); setProcesando(false); e.target.value=''; return }
+              const fakeId = 'LOCAL-' + Date.now()
+              const colaId = `COLA-${consorcioActivo.id}-${fakeId}`
+              setMsg(`⚙️ Enviando a IA: ${file.name}...`)
+              await fetch(EF_URL, { method:'POST',
+                headers:{'Content-Type':'application/json',Authorization:`Bearer ${tok}`},
+                body:JSON.stringify({accion:'encolar_lote',archivos:[{drive_file_id:fakeId,
+                  drive_file_nombre:file.name,consorcio_id:consorcioActivo.id,consorcio_nombre:consorcioActivo.nombre}]})})
+              const r = await fetch(EF_URL, { method:'POST',
+                headers:{'Content-Type':'application/json',Authorization:`Bearer ${tok}`},
+                body:JSON.stringify({accion:'procesar_pdf',cola_id:colaId,pdf_id:fakeId,
+                  pdf_url:'',pdf_base64:base64,consorcio_id:consorcioActivo.id,consorcio_nombre:consorcioActivo.nombre})})
+              const res = await r.json()
+              setMsg(res.ok ? `✅ ${file.name} — período ${res.periodo} — ${res.ufs} UFs` : `❌ ${res.error||'Error'}`)
+            } catch(err) { setMsg(`❌ ${err.message}`) }
+            setProcesando(false); e.target.value=''; setTimeout(()=>cargarTodo(),1500)
+          }}
+        />
+      </label>
+      <span style={{fontSize:12,color:'#92400e',marginLeft:10}}>1 PDF por vez · ~60s por PDF</span>
+    </div>
+  )
+}
+
+
 function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorcios, totalUFs = 0 }) {
   const SB = 'https://payzqbkydmvovjxlznuq.supabase.co';
   const AK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBheXpxYmt5ZG12b3ZqeGx6bnVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0OTg0ODAsImV4cCI6MjA5MTA3NDQ4MH0.ut-cHjkd1oztZa-W3uYRbHDScEB4RLg55WtfIcBidm8';
@@ -7095,8 +7157,6 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
   const [detalle, setDetalle]                 = useState(null);
   const [filtroCon, setFiltroCon]             = useState('todos');
   const [fileIdsManual, setFileIdsManual]     = useState('');
-  const [mounted, setMounted]                 = useState(false);
-  useEffect(() => { setMounted(true); }, []);
 
   const tok = session?.access_token;
 
@@ -7172,39 +7232,6 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
     setProcesando(true);
     setProgreso({ actual: 0, total: ids.length });
     let ok = 0, err = 0;
-    const esConsorciGrande = totalUFs > 80;
-
-    // Descarga el PDF en el browser y valida magic bytes %PDF.
-    // Usa UUID para forzar descarga directa (bypasea confirmación antivirus de Drive).
-    // Retorna null si no es un PDF válido → la EF lo descargará como fallback.
-    const descargarPdfBase64 = async (fileId) => {
-      const uuid = Math.random().toString(36).slice(2)
-      const urls = [
-        `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t&uuid=${uuid}`,
-        `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`,
-      ]
-      for (const url of urls) {
-        try {
-          const r = await fetch(url, { redirect: 'follow' })
-          if (!r.ok) continue
-          const buf = await r.arrayBuffer()
-          const bytes = new Uint8Array(buf)
-          // Validar magic bytes: PDF empieza con %PDF (0x25 0x50 0x44 0x46)
-          if (bytes.length > 4 &&
-              bytes[0] === 0x25 && bytes[1] === 0x50 &&
-              bytes[2] === 0x44 && bytes[3] === 0x46) {
-            let binary = ''
-            const chunk = 65536
-            for (let i = 0; i < bytes.byteLength; i += chunk)
-              binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
-            return btoa(binary)
-          }
-          // No es PDF (HTML de confirmación) — intentar siguiente URL
-        } catch (_) {}
-      }
-      return null
-    }
-
     for (let i = 0; i < ids.length; i++) {
       const fileId = ids[i];
       const nombre = nombresMap[fileId] || fileId;
@@ -7220,14 +7247,6 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
             archivos: [{ drive_file_id: fileId, drive_file_nombre: nombre, consorcio_id: consorcioActivo.id, consorcio_nombre: consorcioActivo.nombre }]
           })
         });
-
-        let pdfBase64 = null
-        if (esConsorciGrande) {
-          setMsg(`⚙️ Descargando PDF ${i + 1}/${ids.length}: ${nombre}...`)
-          pdfBase64 = await descargarPdfBase64(fileId)
-          if (!pdfBase64) setMsg(`⚙️ Procesando vía servidor: ${nombre}...`)
-        }
-
         const r = await fetch(EF_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
@@ -7236,7 +7255,6 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
             cola_id: colaId,
             pdf_id: fileId,
             pdf_url: `https://drive.google.com/file/d/${fileId}/view`,
-            pdf_base64: pdfBase64,
             consorcio_id: consorcioActivo.id,
             consorcio_nombre: consorcioActivo.nombre
           })
@@ -7412,88 +7430,18 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
             </div>
           </div>
 
-          {/* Opción C: Subida manual — solo se muestra en cliente (evita hydration mismatch) */}
-          {mounted && totalUFs > 80 && (
-            <div style={{...card, border:'2px solid #f59e0b', background:'#fffbeb'}}>
-              <h3 style={{margin:'0 0 6px',fontSize:15,color:'#92400e'}}>
-                📤 Opción C — Subir PDF desde tu PC
-                <span style={{marginLeft:8,fontSize:11,fontWeight:400,color:'#b45309',
-                  background:'#fef3c7',padding:'2px 8px',borderRadius:10}}>
-                  ✅ Recomendado para {consorcioActivo?.nombre||'consorcios grandes'} ({totalUFs} UFs)
-                </span>
-              </h3>
-              <p style={{fontSize:12,color:'#92400e',margin:'0 0 12px',lineHeight:1.5}}>
-                Para consorcios con más de 80 unidades, Google Drive bloquea la descarga automática.
-                Descargá cada PDF a tu PC y subílo desde acá. Se procesa directamente con IA.
-              </p>
-              <label style={{
-                display:'inline-flex',alignItems:'center',gap:8,cursor:'pointer',
-                padding:'9px 20px',background:'#f59e0b',color:'#fff',
-                borderRadius:6,fontSize:13,fontWeight:700,
-                opacity: procesando ? 0.5 : 1,
-                pointerEvents: procesando ? 'none' : 'auto'
-              }}>
-                📁 Elegir PDF a procesar
-                <input type="file" accept=".pdf,application/pdf" style={{display:'none'}}
-                  disabled={procesando}
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0]
-                    if (!file) return
-                    if (!consorcioActivo?.id) { setMsg('⚠️ Seleccioná un consorcio activo'); return }
-                    setProcesando(true)
-                    setMsg(`⚙️ Leyendo ${file.name}...`)
-                    try {
-                      const base64 = await new Promise((res, rej) => {
-                        const reader = new FileReader()
-                        reader.onload  = () => res(reader.result.split(',')[1])
-                        reader.onerror = rej
-                        reader.readAsDataURL(file)
-                      })
-                      const header = atob(base64.slice(0, 8))
-                      if (!header.startsWith('%PDF')) {
-                        setMsg('❌ El archivo no es un PDF válido')
-                        setProcesando(false); e.target.value = ''; return
-                      }
-                      const fakeId  = 'LOCAL-' + file.name.replace(/[^a-zA-Z0-9]/g,'').slice(0,20) + '-' + Date.now()
-                      const colaId  = `COLA-${consorcioActivo.id}-${fakeId}`
-                      setMsg(`⚙️ Enviando a IA: ${file.name}...`)
-                      await fetch(EF_URL, {
-                        method:'POST',
-                        headers:{'Content-Type':'application/json', Authorization:`Bearer ${tok}`},
-                        body: JSON.stringify({ accion:'encolar_lote', archivos:[{
-                          drive_file_id:fakeId, drive_file_nombre:file.name,
-                          consorcio_id:consorcioActivo.id, consorcio_nombre:consorcioActivo.nombre
-                        }]})
-                      })
-                      const r = await fetch(EF_URL, {
-                        method:'POST',
-                        headers:{'Content-Type':'application/json', Authorization:`Bearer ${tok}`},
-                        body: JSON.stringify({
-                          accion:'procesar_pdf', cola_id:colaId,
-                          pdf_id:fakeId, pdf_url:'', pdf_base64:base64,
-                          consorcio_id:consorcioActivo.id, consorcio_nombre:consorcioActivo.nombre
-                        })
-                      })
-                      const res = await r.json()
-                      if (res.ok) {
-                        setMsg(`✅ ${file.name} — período ${res.periodo} — ${res.ufs} UFs procesadas`)
-                      } else {
-                        setMsg(`❌ Error: ${res.error || 'desconocido'}`)
-                      }
-                    } catch (err) {
-                      setMsg(`❌ Error: ${err.message}`)
-                    }
-                    setProcesando(false)
-                    e.target.value = ''
-                    setTimeout(() => cargarTodo(), 1500)
-                  }}
-                />
-              </label>
-              <span style={{fontSize:12,color:'#92400e',marginLeft:10}}>
-                Procesar de a 1 PDF por vez. Cada uno tarda ~60 segundos.
-              </span>
-            </div>
-          )}
+          {/* Opción C — subida manual para consorcios grandes */}
+          <OpcionCSubida
+            totalUFs={totalUFs}
+            consorcioActivo={consorcioActivo}
+            procesando={procesando}
+            setProcesando={setProcesando}
+            setMsg={setMsg}
+            cargarTodo={cargarTodo}
+            EF_URL={EF_URL}
+            tok={tok}
+          />
+
 
           {/* Info */}
           <div style={{ ...card, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
