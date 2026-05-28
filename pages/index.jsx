@@ -12273,7 +12273,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
               {/* Hallazgos en texto */}
               <Card style={{marginBottom:16,background:'#f8fafc',border:'1px solid #e2e8f0'}}>
                 <div style={{fontWeight:700,fontSize:13,marginBottom:12,color:AZ}}>🧠 Hallazgos del período</div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,fontSize:12,color:DKGRAY}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,fontSize:12,color:GR}}>
                   {[
                     `El período cierra con un resultado neto de ${datos.resultadoNeto>=0?'superávit':'déficit'} de $${fmt(Math.abs(datos.resultadoNeto))} (${datos.totalIngresos>0?(Math.abs(datos.resultadoNeto)/datos.totalIngresos*100).toFixed(1):'0'}% de los ingresos).`,
                     `${datos.mesMayorIngreso?.mes||'—'} fue el mes de mayor ingreso ($${fmt(datos.mesMayorIngreso?.ingresos||0)}).`,
