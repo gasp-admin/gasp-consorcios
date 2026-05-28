@@ -7077,69 +7077,8 @@ function CertificadoLibreDeuda({ session, consorcioId, consorcioActivo, unidades
 // ═══════════════════════════════════════════════════════════════════
 // HISTORIAL DE LIQUIDACIONES — Importador masivo desde Drive
 // ═══════════════════════════════════════════════════════════════════
-// OpcionCSubida: componente separado para evitar hydration mismatch
-// Solo se renderiza en el cliente gracias al useState mounted
-function OpcionCSubida({ totalUFs, consorcioActivo, procesando, setProcesando, setMsg, cargarTodo, EF_URL, tok }) {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => { setMounted(true) }, [])
-  if (!mounted || totalUFs <= 80) return null
-  const card = { background:'#fff', border:'1px solid #e5e7eb', borderRadius:8, padding:16, marginBottom:16 }
-  return (
-    <div style={{...card, border:'2px solid #f59e0b', background:'#fffbeb'}}>
-      <h3 style={{margin:'0 0 6px',fontSize:15,color:'#92400e'}}>
-        📤 Opción C — Subir PDF desde tu PC
-        <span style={{marginLeft:8,fontSize:11,fontWeight:400,background:'#fef3c7',color:'#b45309',padding:'2px 8px',borderRadius:10}}>
-          Recomendado para consorcios con +80 UFs ({totalUFs} UFs)
-        </span>
-      </h3>
-      <p style={{fontSize:12,color:'#92400e',margin:'0 0 10px'}}>
-        Descargá el PDF a tu PC y subílo directamente. Se procesa con IA sin pasar por Drive.
-      </p>
-      <label style={{display:'inline-flex',alignItems:'center',gap:8,padding:'9px 20px',
-        background: procesando ? '#d97706' : '#f59e0b',color:'#fff',borderRadius:6,
-        fontSize:13,fontWeight:700,cursor: procesando ? 'not-allowed' : 'pointer'}}>
-        📁 Elegir PDF
-        <input type="file" accept=".pdf,application/pdf" style={{display:'none'}}
-          disabled={procesando}
-          onChange={async (e) => {
-            const file = e.target.files?.[0]
-            if (!file || !consorcioActivo?.id) return
-            setProcesando(true)
-            setMsg('⚙️ Leyendo PDF...')
-            try {
-              const base64 = await new Promise((res, rej) => {
-                const reader = new FileReader()
-                reader.onload  = () => res(reader.result.split(',')[1])
-                reader.onerror = rej
-                reader.readAsDataURL(file)
-              })
-              const h = atob(base64.slice(0,8))
-              if (!h.startsWith('%PDF')) { setMsg('❌ No es un PDF válido'); setProcesando(false); e.target.value=''; return }
-              const fakeId = 'LOCAL-' + Date.now()
-              const colaId = `COLA-${consorcioActivo.id}-${fakeId}`
-              setMsg(`⚙️ Enviando a IA: ${file.name}...`)
-              await fetch(EF_URL, { method:'POST',
-                headers:{'Content-Type':'application/json',Authorization:`Bearer ${tok}`},
-                body:JSON.stringify({accion:'encolar_lote',archivos:[{drive_file_id:fakeId,
-                  drive_file_nombre:file.name,consorcio_id:consorcioActivo.id,consorcio_nombre:consorcioActivo.nombre}]})})
-              const r = await fetch(EF_URL, { method:'POST',
-                headers:{'Content-Type':'application/json',Authorization:`Bearer ${tok}`},
-                body:JSON.stringify({accion:'procesar_pdf',cola_id:colaId,pdf_id:fakeId,
-                  pdf_url:'',pdf_base64:base64,consorcio_id:consorcioActivo.id,consorcio_nombre:consorcioActivo.nombre})})
-              const res = await r.json()
-              setMsg(res.ok ? `✅ ${file.name} — período ${res.periodo} — ${res.ufs} UFs` : `❌ ${res.error||'Error'}`)
-            } catch(err) { setMsg(`❌ ${err.message}`) }
-            setProcesando(false); e.target.value=''; setTimeout(()=>cargarTodo(),1500)
-          }}
-        />
-      </label>
-      <span style={{fontSize:12,color:'#92400e',marginLeft:10}}>1 PDF por vez · ~60s por PDF</span>
-    </div>
-  )
-}
 
-
-function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorcios, totalUFs = 0 }) {
+function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorcios }) {
   const SB = 'https://payzqbkydmvovjxlznuq.supabase.co';
   const AK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBheXpxYmt5ZG12b3ZqeGx6bnVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0OTg0ODAsImV4cCI6MjA5MTA3NDQ4MH0.ut-cHjkd1oztZa-W3uYRbHDScEB4RLg55WtfIcBidm8';
   const EF_URL = `${SB}/functions/v1/importar-liquidacion-historica`;
@@ -7429,21 +7368,7 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
               </button>
             </div>
           </div>
-
-          {/* Opción C — subida manual para consorcios grandes */}
-          <OpcionCSubida
-            totalUFs={totalUFs}
-            consorcioActivo={consorcioActivo}
-            procesando={procesando}
-            setProcesando={setProcesando}
-            setMsg={setMsg}
-            cargarTodo={cargarTodo}
-            EF_URL={EF_URL}
-            tok={tok}
-          />
-
-
-          {/* Info */}
+{/* Info */}
           <div style={{ ...card, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, color: '#166534' }}>✅ ¿Qué genera la importación?</h4>
             <ul style={{ margin: '0', paddingLeft: 20, fontSize: 12, color: '#166534', lineHeight: 1.8 }}>
@@ -17471,7 +17396,7 @@ export default function App() {
       case 'proveedores':    return <Proveedores session={session} consorcioId={cid} />
       case 'asambleas':        return <Asambleas session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
       case 'reclamos':          return <Reclamos session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} />
-      case 'historial_liquidaciones': return <HistorialLiquidaciones session={session} consorcioId={cid} consorcioActivo={consorcioActivo} consorcios={consorcios} totalUFs={totalUFs} />;
+      case 'historial_liquidaciones': return <HistorialLiquidaciones session={session} consorcioId={cid} consorcioActivo={consorcioActivo} consorcios={consorcios} />;
       case 'agenda_venc':        return <AgendaVencimientos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} proveedores={proveedores} />
       case 'rendicion_cuentas':  return <RendicionCuentas session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} copropietarios={copropietarios} unidades={unidades} />
       case 'cert_libre_deuda':  return <CertificadoLibreDeuda session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} expensas={expensas} />
