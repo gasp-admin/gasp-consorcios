@@ -7095,6 +7095,8 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
   const [detalle, setDetalle]                 = useState(null);
   const [filtroCon, setFiltroCon]             = useState('todos');
   const [fileIdsManual, setFileIdsManual]     = useState('');
+  const [mounted, setMounted]                 = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const tok = session?.access_token;
 
@@ -7410,8 +7412,8 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
             </div>
           </div>
 
-          {/* Opción C: Subida manual — para consorcios grandes (Torre Punta Medanos, etc.) */}
-          {totalUFs > 80 && (
+          {/* Opción C: Subida manual — solo se muestra en cliente (evita hydration mismatch) */}
+          {mounted && totalUFs > 80 && (
             <div style={{...card, border:'2px solid #f59e0b', background:'#fffbeb'}}>
               <h3 style={{margin:'0 0 6px',fontSize:15,color:'#92400e'}}>
                 📤 Opción C — Subir PDF desde tu PC
