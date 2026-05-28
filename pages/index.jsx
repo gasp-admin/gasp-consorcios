@@ -11649,7 +11649,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
         saldoInicialPorPeriodo[p] = i===0 ? saldoInicial0 : (parseFloat(expensas[i-1].saldo_caja_final)||0)
         saldoFinalPorPeriodo[p]   = sf
         ingExpensasPorPeriodo[p]  = tc
-        ingVariosPorPeriodo[p]    = iv    // adeudadas (morosos que pagaron tarde)
+        ingVariosPorPeriodo[p]    = iv
         ingInteresesPorPeriodo[p] = ii
         totalIngExpensas += tc; totalIngVarios += iv
         totalIngresos    += tc + iv + ii
@@ -11740,18 +11740,22 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
       const saldoMinimo     = evolucion.reduce((a,b)=>b.saldo<a.saldo?b:a, evolucion[0]||{})
       const saldoMaximo     = evolucion.reduce((a,b)=>b.saldo>a.saldo?b:a, evolucion[0]||{})
 
-      // Cargar recharts para los gráficos (una sola vez)
+      // Cargar Recharts via CDN para los gráficos (sin import estático)
       let rechartsLib = null
       if (typeof window !== 'undefined') {
         try {
-          if (window.__RECHARTS__) {
-            rechartsLib = window.__RECHARTS__
+          if (window.Recharts) {
+            rechartsLib = window.Recharts
           } else {
-            const mod = await import('recharts')
-            window.__RECHARTS__ = mod
-            rechartsLib = mod
+            await new Promise((res, rej) => {
+              const s = document.createElement('script')
+              s.src = 'https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.7/Recharts.min.js'
+              s.onload = () => { rechartsLib = window.Recharts; res() }
+              s.onerror = rej
+              document.head.appendChild(s)
+            })
           }
-        } catch(e) { /* recharts no disponible */ }
+        } catch(e) { /* gráficos no disponibles */ }
       }
 
       setDatos({
@@ -11823,7 +11827,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
     html += `<tr class="ing-h"><td class="l" colspan="${nCols}">INGRESOS</td></tr>`
     if (Object.values(d.ingVariosPorPeriodo).some(v=>v>0)) {
       const totV = Object.values(d.ingVariosPorPeriodo).reduce((a,b)=>a+b,0)
-      html += '<tr class="ing-row"><td class="l" style="padding-left:10px">Expensas adeudadas cobradas</td>'
+      html += '<tr class="ing-row"><td class="l" style="padding-left:10px">Ingresos varios</td>'
       html += d.periodos.map(p=>'<td class="pos">'+f2(d.ingVariosPorPeriodo[p])+'</td>').join('')
       html += `<td class="pos"><b>${f2(totV)}</b></td><td>—</td><td>${f2(totV/d.periodos.length)}</td></tr>`
     }
@@ -11892,7 +11896,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
     ]
     if (Object.values(d.ingVariosPorPeriodo).some(v=>v>0)) {
       const totV = Object.values(d.ingVariosPorPeriodo).reduce((a,b)=>a+b,0)
-      rows.push(['  Expensas adeudadas cobradas',...d.periodos.map(p=>fv(d.ingVariosPorPeriodo[p])),totV,'',totV/d.periodos.length])
+      rows.push(['  Ingresos varios',...d.periodos.map(p=>fv(d.ingVariosPorPeriodo[p])),totV,'',totV/d.periodos.length])
     }
     rows.push(['  Expensas',...d.periodos.map(p=>fv(d.ingExpensasPorPeriodo[p])),d.totalIngExpensas,'Incidencia','Promedio'])
     rows.push(['Total ingresos',...d.periodos.map(p=>(fv(d.ingExpensasPorPeriodo[p])+fv(d.ingVariosPorPeriodo[p]))),d.totalIngresos,'',d.promedioIngresos])
@@ -11947,7 +11951,7 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
       const totV = Object.values(d.ingVariosPorPeriodo).reduce((a,b)=>a+b,0)
       rows.push(
         <tr key="ing-varios">
-          <td style={{padding:'4px 10px',paddingLeft:18,fontSize:9,position:'sticky',left:0,background:'#fff'}}>Expensas adeudadas cobradas</td>
+          <td style={{padding:'4px 10px',paddingLeft:18,fontSize:9,position:'sticky',left:0,background:'#fff'}}>Ingresos varios</td>
           {d.periodos.map(p=>(
             <td key={p} style={{padding:'4px 6px',textAlign:'right',color:VD,fontSize:9}}>
               {d.ingVariosPorPeriodo[p]>0?'$'+fmt(d.ingVariosPorPeriodo[p]):'—'}
@@ -12313,48 +12317,39 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
                 </Card>
               )}
 
-              {/* ── GRÁFICOS (Recharts cargado dinámicamente) ── */}
+              {/* ── GRÁFICOS (Recharts cargado via CDN) ── */}
               {datos._recharts && (() => {
+                const RC = datos._recharts
                 const { BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
                         LineChart, Line, CartesianGrid, ReferenceLine,
-                        ResponsiveContainer, Cell } = datos._recharts
+                        ResponsiveContainer, Cell } = RC
                 const COLORS = ['#1A3FA0','#1B6B35','#B91C1C','#C07D10','#6B21A8','#0891B2','#B45309','#0F766E','#7C3AED']
-                const fmtM   = v => v >= 1e6 ? '$'+( v/1e6).toFixed(1)+'M' : v >= 1e3 ? '$'+(v/1e3).toFixed(0)+'K' : '$'+v
-                const fmtMN  = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : String(v)
+                const fmtM  = v => v >= 1e6 ? '$'+(v/1e6).toFixed(1)+'M' : v >= 1e3 ? '$'+(v/1e3).toFixed(0)+'K' : '$'+v
+                const fmtMN = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : String(v)
 
-                // Dataset gráfico 1: top categorías (barras horizontales)
-                const dataTopCats = datos.topCats.map(c=>({name:c.label.replace(/ /g,'\n'), total:Math.round(c.total)}))
-
-                // Dataset gráfico 2: ingresos vs egresos por mes
-                const dataEvolMes = datos.evolucion.map(e=>({
-                  mes: e.mes, ingresos:Math.round(e.ingresos), egresos:Math.round(e.egresos)
-                }))
-
-                // Dataset gráfico 3: evolución saldo
-                const dataSaldo = datos.evolucion.map(e=>({mes:e.mes, saldo:Math.round(e.saldo)}))
-
-                // Dataset gráfico 4: desglose bloque mayor
+                const dataTopCats = datos.topCats.map(c=>({name:c.label, total:Math.round(c.total)}))
+                const dataEvolMes = datos.evolucion.map(e=>({mes:e.mes, ingresos:Math.round(e.ingresos), egresos:Math.round(e.egresos)}))
+                const dataSaldo   = datos.evolucion.map(e=>({mes:e.mes, saldo:Math.round(e.saldo)}))
                 const dataDetalle = datos.detalleTopCat.slice(0,10).map(d=>({
-                  name: d.concepto.length>22 ? d.concepto.slice(0,22)+'…' : d.concepto,
+                  name: d.concepto.length>24 ? d.concepto.slice(0,24)+'…' : d.concepto,
                   total: Math.round(d.total)
                 }))
 
                 return (
                   <div style={{marginBottom:16}}>
                     <div style={{fontWeight:700,fontSize:13,marginBottom:12,color:AZ}}>📈 Gráficos</div>
-
-                    {/* Fila 1: Top categorías + Ingresos vs Egresos */}
                     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
 
                       {/* G1 — Barras horizontales top categorías */}
                       <Card style={{padding:'12px 8px'}}>
                         <div style={{fontWeight:700,fontSize:11,marginBottom:8,color:AZ}}>Distribución de egresos por categoría</div>
-                        <ResponsiveContainer width="100%" height={220}>
-                          <BarChart data={dataTopCats} layout="vertical" margin={{left:8,right:40,top:2,bottom:2}}>
-                            <XAxis type="number" tickFormatter={fmtMN} tick={{fontSize:8}} />
-                            <YAxis type="category" dataKey="name" width={110} tick={{fontSize:8,fill:'#374151'}} />
-                            <Tooltip formatter={v=>'$'+Number(v).toLocaleString('es-AR')} />
-                            <Bar dataKey="total" radius={[0,3,3,0]} label={{position:'right',fontSize:7,formatter:fmtM}}>
+                        <ResponsiveContainer width="100%" height={230}>
+                          <BarChart data={dataTopCats} layout="vertical" margin={{left:8,right:44,top:2,bottom:2}}>
+                            <XAxis type="number" tickFormatter={fmtMN} tick={{fontSize:8}}/>
+                            <YAxis type="category" dataKey="name" width={120} tick={{fontSize:8,fill:'#374151'}} interval={0}/>
+                            <Tooltip formatter={v=>['$'+Number(v).toLocaleString('es-AR'),'Total']}/>
+                            <Bar dataKey="total" radius={[0,3,3,0]}
+                              label={{position:'right',fontSize:7,fill:'#374151',formatter:fmtM}}>
                               {dataTopCats.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
                             </Bar>
                           </BarChart>
@@ -12364,21 +12359,20 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
                       {/* G2 — Barras dobles ingresos vs egresos */}
                       <Card style={{padding:'12px 8px'}}>
                         <div style={{fontWeight:700,fontSize:11,marginBottom:8,color:AZ}}>Ingresos vs Egresos Mensuales</div>
-                        <ResponsiveContainer width="100%" height={220}>
+                        <ResponsiveContainer width="100%" height={230}>
                           <BarChart data={dataEvolMes} margin={{left:4,right:8,top:2,bottom:2}}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
-                            <XAxis dataKey="mes" tick={{fontSize:7}} />
-                            <YAxis tickFormatter={fmtMN} tick={{fontSize:7}} />
-                            <Tooltip formatter={v=>'$'+Number(v).toLocaleString('es-AR')} />
-                            <Legend wrapperStyle={{fontSize:9}} />
-                            <Bar dataKey="ingresos" fill="#1B6B35" name="Ingresos" radius={[2,2,0,0]} />
-                            <Bar dataKey="egresos"  fill="#B91C1C" name="Egresos"  radius={[2,2,0,0]} />
+                            <XAxis dataKey="mes" tick={{fontSize:7}}/>
+                            <YAxis tickFormatter={fmtMN} tick={{fontSize:7}}/>
+                            <Tooltip formatter={v=>['$'+Number(v).toLocaleString('es-AR')]}/>
+                            <Legend wrapperStyle={{fontSize:9}}/>
+                            <Bar dataKey="ingresos" fill="#1B6B35" name="Ingresos" radius={[2,2,0,0]}/>
+                            <Bar dataKey="egresos"  fill="#B91C1C" name="Egresos"  radius={[2,2,0,0]}/>
                           </BarChart>
                         </ResponsiveContainer>
                       </Card>
                     </div>
 
-                    {/* Fila 2: Evolución saldo + Desglose bloque mayor */}
                     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
 
                       {/* G3 — Línea evolución saldo */}
@@ -12387,13 +12381,12 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
                         <ResponsiveContainer width="100%" height={200}>
                           <LineChart data={dataSaldo} margin={{left:4,right:16,top:4,bottom:2}}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
-                            <XAxis dataKey="mes" tick={{fontSize:7}} />
-                            <YAxis tickFormatter={fmtMN} tick={{fontSize:7}} />
-                            <Tooltip formatter={v=>'$'+Number(v).toLocaleString('es-AR')} />
+                            <XAxis dataKey="mes" tick={{fontSize:7}}/>
+                            <YAxis tickFormatter={fmtMN} tick={{fontSize:7}}/>
+                            <Tooltip formatter={v=>['$'+Number(v).toLocaleString('es-AR'),'Saldo']}/>
                             <ReferenceLine y={0} stroke="#999" strokeDasharray="4 2"/>
                             <Line type="monotone" dataKey="saldo" name="Saldo final"
-                              stroke="#1A3FA0" strokeWidth={2} dot={{r:3,fill:'#1A3FA0'}}
-                              activeDot={{r:5}} />
+                              stroke="#1A3FA0" strokeWidth={2} dot={{r:3,fill:'#1A3FA0'}} activeDot={{r:5}}/>
                           </LineChart>
                         </ResponsiveContainer>
                       </Card>
@@ -12405,11 +12398,12 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
                             Desglose de {datos.topCatLabel}
                           </div>
                           <ResponsiveContainer width="100%" height={200}>
-                            <BarChart data={dataDetalle} layout="vertical" margin={{left:8,right:40,top:2,bottom:2}}>
-                              <XAxis type="number" tickFormatter={fmtMN} tick={{fontSize:8}} />
-                              <YAxis type="category" dataKey="name" width={120} tick={{fontSize:8,fill:'#374151'}} />
-                              <Tooltip formatter={v=>'$'+Number(v).toLocaleString('es-AR')} />
-                              <Bar dataKey="total" radius={[0,3,3,0]} label={{position:'right',fontSize:7,formatter:fmtM}}>
+                            <BarChart data={dataDetalle} layout="vertical" margin={{left:8,right:44,top:2,bottom:2}}>
+                              <XAxis type="number" tickFormatter={fmtMN} tick={{fontSize:8}}/>
+                              <YAxis type="category" dataKey="name" width={120} tick={{fontSize:8,fill:'#374151'}} interval={0}/>
+                              <Tooltip formatter={v=>['$'+Number(v).toLocaleString('es-AR'),'Total']}/>
+                              <Bar dataKey="total" radius={[0,3,3,0]}
+                                label={{position:'right',fontSize:7,fill:'#374151',formatter:fmtM}}>
                                 {dataDetalle.map((_,i)=><Cell key={i} fill={COLORS[(i+2)%COLORS.length]}/>)}
                               </Bar>
                             </BarChart>
