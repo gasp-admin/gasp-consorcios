@@ -7170,6 +7170,36 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
     setProcesando(true);
     setProgreso({ actual: 0, total: ids.length });
     let ok = 0, err = 0;
+
+    // Para consorcios grandes (>80 UFs) el browser descarga el PDF y lo envía
+    // como base64 directamente, evitando que la EF tenga que descargarlo
+    // (la descarga desde los servidores de Supabase puede tardar 30-60s en PDFs grandes).
+    const esConsorciGrande = unidades.length > 80;
+
+    const descargarPdfBase64 = async (fileId) => {
+      const GOOGLE_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_API_KEY || ''
+      // Intentar descarga pública via Drive usercontent
+      for (const url of [
+        `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`,
+        `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`,
+      ]) {
+        try {
+          const r = await fetch(url)
+          if (r.ok) {
+            const ct = r.headers.get('content-type') || ''
+            if (ct.includes('pdf') || ct.includes('octet')) {
+              const buf = await r.arrayBuffer()
+              const bytes = new Uint8Array(buf)
+              let binary = ''
+              for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+              return btoa(binary)
+            }
+          }
+        } catch (_) {}
+      }
+      return null // fallback: la EF lo descargará ella misma
+    }
+
     for (let i = 0; i < ids.length; i++) {
       const fileId = ids[i];
       const nombre = nombresMap[fileId] || fileId;
@@ -7185,6 +7215,14 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
             archivos: [{ drive_file_id: fileId, drive_file_nombre: nombre, consorcio_id: consorcioActivo.id, consorcio_nombre: consorcioActivo.nombre }]
           })
         });
+
+        // Para consorcios grandes: descargar el PDF en el browser antes de llamar a la EF
+        let pdfBase64 = null
+        if (esConsorciGrande) {
+          setMsg(`⚙️ Descargando PDF ${i + 1}/${ids.length}: ${nombre}...`)
+          pdfBase64 = await descargarPdfBase64(fileId)
+        }
+
         const r = await fetch(EF_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
@@ -7193,6 +7231,7 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
             cola_id: colaId,
             pdf_id: fileId,
             pdf_url: `https://drive.google.com/file/d/${fileId}/view`,
+            pdf_base64: pdfBase64,   // null para consorcios chicos → la EF lo descarga
             consorcio_id: consorcioActivo.id,
             consorcio_nombre: consorcioActivo.nombre
           })
