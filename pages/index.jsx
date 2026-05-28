@@ -7170,34 +7170,37 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
     setProcesando(true);
     setProgreso({ actual: 0, total: ids.length });
     let ok = 0, err = 0;
-
-    // Para consorcios grandes (>80 UFs) el browser descarga el PDF y lo envía
-    // como base64 directamente, evitando que la EF tenga que descargarlo
-    // (la descarga desde los servidores de Supabase puede tardar 30-60s en PDFs grandes).
     const esConsorciGrande = unidades.length > 80;
 
+    // Descarga el PDF en el browser y valida magic bytes %PDF.
+    // Usa UUID para forzar descarga directa (bypasea confirmación antivirus de Drive).
+    // Retorna null si no es un PDF válido → la EF lo descargará como fallback.
     const descargarPdfBase64 = async (fileId) => {
-      const GOOGLE_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_API_KEY || ''
-      // Intentar descarga pública via Drive usercontent
-      for (const url of [
-        `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`,
+      const uuid = Math.random().toString(36).slice(2)
+      const urls = [
+        `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t&uuid=${uuid}`,
         `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`,
-      ]) {
+      ]
+      for (const url of urls) {
         try {
-          const r = await fetch(url)
-          if (r.ok) {
-            const ct = r.headers.get('content-type') || ''
-            if (ct.includes('pdf') || ct.includes('octet')) {
-              const buf = await r.arrayBuffer()
-              const bytes = new Uint8Array(buf)
-              let binary = ''
-              for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
-              return btoa(binary)
-            }
+          const r = await fetch(url, { redirect: 'follow' })
+          if (!r.ok) continue
+          const buf = await r.arrayBuffer()
+          const bytes = new Uint8Array(buf)
+          // Validar magic bytes: PDF empieza con %PDF (0x25 0x50 0x44 0x46)
+          if (bytes.length > 4 &&
+              bytes[0] === 0x25 && bytes[1] === 0x50 &&
+              bytes[2] === 0x44 && bytes[3] === 0x46) {
+            let binary = ''
+            const chunk = 65536
+            for (let i = 0; i < bytes.byteLength; i += chunk)
+              binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+            return btoa(binary)
           }
+          // No es PDF (HTML de confirmación) — intentar siguiente URL
         } catch (_) {}
       }
-      return null // fallback: la EF lo descargará ella misma
+      return null
     }
 
     for (let i = 0; i < ids.length; i++) {
@@ -7216,11 +7219,11 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
           })
         });
 
-        // Para consorcios grandes: descargar el PDF en el browser antes de llamar a la EF
         let pdfBase64 = null
         if (esConsorciGrande) {
           setMsg(`⚙️ Descargando PDF ${i + 1}/${ids.length}: ${nombre}...`)
           pdfBase64 = await descargarPdfBase64(fileId)
+          if (!pdfBase64) setMsg(`⚙️ Procesando vía servidor: ${nombre}...`)
         }
 
         const r = await fetch(EF_URL, {
@@ -7231,7 +7234,7 @@ function HistorialLiquidaciones({ session, consorcioId, consorcioActivo, consorc
             cola_id: colaId,
             pdf_id: fileId,
             pdf_url: `https://drive.google.com/file/d/${fileId}/view`,
-            pdf_base64: pdfBase64,   // null para consorcios chicos → la EF lo descarga
+            pdf_base64: pdfBase64,
             consorcio_id: consorcioActivo.id,
             consorcio_nombre: consorcioActivo.nombre
           })
