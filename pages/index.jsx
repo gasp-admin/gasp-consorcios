@@ -11570,6 +11570,132 @@ function baNormCat(c) {
   return 'otros'
 }
 
+// ── GraficosBalance: función de módulo (fuera del componente) — sin IIFE en JSX ──
+function GraficosBalance(datos) {
+  if (!datos) return null
+  const topCats    = datos.topCats    || []
+  const evolucion  = datos.evolucion  || []
+  const detalleTop = datos.detalleTopCat || []
+  if (!topCats.length && !evolucion.length) return null
+
+  const SVG_W = 480, SVG_H = 220
+  const PAD   = { top:20, right:52, bottom:24, left:132 }
+  const IW    = SVG_W - PAD.left - PAD.right
+  const IH    = SVG_H - PAD.top  - PAD.bottom
+  const COLORS= ['#1A3FA0','#1B6B35','#B91C1C','#C07D10','#6B21A8','#0891B2','#B45309','#0F766E','#7C3AED']
+  const fmtM  = v => v >= 1e6 ? '$'+(v/1e6).toFixed(1)+'M' : v >= 1e3 ? '$'+(v/1e3).toFixed(0)+'K' : '$'+Math.round(v||0)
+  const abbr  = s => (s||'').replace('MANTENIMIENTO GENERAL','MANT. GENERAL').replace('SERVICIOS PÚBLICOS','SERV. PÚBLICOS').replace('CONTRATOS Y ABONOS','CONTR./ABONOS').replace('GASTOS DE ADMINISTRACIÓN','GASTOS ADMIN.').replace('GASTOS BANCARIOS','G. BANCARIOS').replace('IMPUESTO MUNICIPAL','IMP. MUNICIPAL')
+
+  const cats   = topCats.slice(0, 9)
+  const maxCat = Math.max(...cats.map(c => c.total || 0), 1)
+  const rowH1  = cats.length ? IH / cats.length : IH
+  const barH1  = Math.min(22, Math.floor(rowH1) - 4)
+
+  const maxEv  = Math.max(...evolucion.map(e => Math.max(e.ingresos||0, e.egresos||0)), 1)
+  const colW2  = evolucion.length ? IW / evolucion.length : IW
+  const barW2  = Math.max(3, Math.floor(colW2 / 2) - 1)
+
+  const saldos  = evolucion.map(e => e.saldo || 0)
+  const minS    = Math.min(...saldos, 0)
+  const maxS    = Math.max(...saldos, 0)
+  const rangeS  = (maxS - minS) || 1
+  const sxFn    = i => PAD.left + (evolucion.length > 1 ? i/(evolucion.length-1)*IW : IW/2)
+  const syFn    = s => PAD.top + (1 - (s - minS)/rangeS)*IH
+  const y0line  = Math.min(Math.max(syFn(0), PAD.top), PAD.top + IH)
+  const polyPts = evolucion.map((e,i) => sxFn(i).toFixed(1)+','+syFn(e.saldo||0).toFixed(1)).join(' ')
+  const areaPath = evolucion.length > 1
+    ? 'M '+evolucion.map((e,i)=>sxFn(i).toFixed(1)+' '+syFn(e.saldo||0).toFixed(1)).join(' L ')
+      +' L '+sxFn(evolucion.length-1).toFixed(1)+' '+y0line.toFixed(1)
+      +' L '+sxFn(0).toFixed(1)+' '+y0line.toFixed(1)+' Z'
+    : ''
+
+  const det    = detalleTop.slice(0, 8)
+  const maxDet = Math.max(...det.map(d => d.total||0), 1)
+  const rowH4  = det.length ? IH/det.length : IH
+  const barH4  = Math.min(22, Math.floor(rowH4) - 4)
+
+  const cardStyle = {background:'#fff', border:'1px solid #e5e7eb', borderRadius:8, padding:'12px 8px'}
+  const titleStyle = {fontWeight:700, fontSize:11, marginBottom:6}
+
+  return (
+    <div style={{marginBottom:16}}>
+      <div style={{fontWeight:700, fontSize:13, marginBottom:12, color:'#1A3FA0'}}>📈 Gráficos</div>
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12}}>
+
+        <div style={cardStyle}>
+          <div style={{...titleStyle, color:'#1A3FA0'}}>Distribución de egresos por categoría</div>
+          <svg width="100%" viewBox={'0 0 '+SVG_W+' '+SVG_H} style={{overflow:'visible'}}>
+            {cats.map((c,i) => {
+              const y = PAD.top + i*rowH1 + (rowH1-barH1)/2
+              const w = Math.max(2, (c.total/maxCat)*IW)
+              return <g key={i}>
+                <text x={PAD.left-4} y={y+barH1/2+4} textAnchor="end" fontSize={8} fill="#374151">{abbr(c.label)}</text>
+                <rect x={PAD.left} y={y} width={w} height={barH1} fill={COLORS[i%COLORS.length]} rx={2}/>
+                <text x={PAD.left+w+3} y={y+barH1/2+4} fontSize={7} fill="#374151">{fmtM(c.total)}</text>
+              </g>
+            })}
+            <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
+          </svg>
+        </div>
+
+        <div style={cardStyle}>
+          <div style={{...titleStyle, color:'#1A3FA0'}}>Ingresos vs Egresos Mensuales</div>
+          <svg width="100%" viewBox={'0 0 '+SVG_W+' '+SVG_H} style={{overflow:'visible'}}>
+            {evolucion.map((e,i) => {
+              const x  = PAD.left + i*colW2
+              const hI = Math.max(0, ((e.ingresos||0)/maxEv)*IH)
+              const hE = Math.max(0, ((e.egresos||0)/maxEv)*IH)
+              return <g key={i}>
+                <rect x={x+2}         y={PAD.top+IH-hI} width={barW2} height={hI} fill="#1B6B35" rx={1}/>
+                <rect x={x+barW2+3}   y={PAD.top+IH-hE} width={barW2} height={hE} fill="#B91C1C" rx={1}/>
+                <text x={x+barW2+1} y={PAD.top+IH+12} textAnchor="middle" fontSize={7} fill="#6B7280">{e.mes}</text>
+              </g>
+            })}
+            <line x1={PAD.left} y1={PAD.top+IH} x2={PAD.left+IW} y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
+            <line x1={PAD.left} y1={PAD.top}     x2={PAD.left}     y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
+            <rect x={PAD.left}      y={PAD.top-14} width={10} height={8} fill="#1B6B35" rx={1}/><text x={PAD.left+13} y={PAD.top-7} fontSize={8} fill="#374151">Ingresos</text>
+            <rect x={PAD.left+70}   y={PAD.top-14} width={10} height={8} fill="#B91C1C" rx={1}/><text x={PAD.left+83} y={PAD.top-7} fontSize={8} fill="#374151">Egresos</text>
+          </svg>
+        </div>
+      </div>
+
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+        <div style={cardStyle}>
+          <div style={{...titleStyle, color:'#1A3FA0'}}>Evolución del Saldo Final</div>
+          <svg width="100%" viewBox={'0 0 '+SVG_W+' '+SVG_H} style={{overflow:'visible'}}>
+            {areaPath && <path d={areaPath} fill="#1A3FA0" fillOpacity={0.12}/>}
+            {evolucion.length > 1 && <polyline points={polyPts} fill="none" stroke="#1A3FA0" strokeWidth={2}/>}
+            {evolucion.map((e,i) => <circle key={i} cx={sxFn(i)} cy={syFn(e.saldo||0)} r={3} fill="#1A3FA0"/>)}
+            {minS < 0 && maxS > 0 && <line x1={PAD.left} y1={y0line} x2={PAD.left+IW} y2={y0line} stroke="#999" strokeDasharray="4 3" strokeWidth={1}/>}
+            {evolucion.map((e,i) => <text key={i} x={sxFn(i)} y={PAD.top+IH+12} textAnchor="middle" fontSize={7} fill="#6B7280">{e.mes}</text>)}
+            <line x1={PAD.left} y1={PAD.top+IH} x2={PAD.left+IW} y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
+            <line x1={PAD.left} y1={PAD.top}     x2={PAD.left}     y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
+          </svg>
+        </div>
+
+        {det.length > 0 && (
+          <div style={cardStyle}>
+            <div style={{...titleStyle, color:'#0f2d7a'}}>Desglose de {datos.topCatLabel||''}</div>
+            <svg width="100%" viewBox={'0 0 '+SVG_W+' '+SVG_H} style={{overflow:'visible'}}>
+              {det.map((d,i) => {
+                const y   = PAD.top + i*rowH4 + (rowH4-barH4)/2
+                const w   = Math.max(2, (d.total/maxDet)*IW)
+                const lbl = (d.concepto||'').length>18 ? d.concepto.slice(0,18)+'…' : (d.concepto||'')
+                return <g key={i}>
+                  <text x={PAD.left-4} y={y+barH4/2+4} textAnchor="end" fontSize={8} fill="#374151">{lbl}</text>
+                  <rect x={PAD.left} y={y} width={w} height={barH4} fill={COLORS[(i+2)%COLORS.length]} rx={2}/>
+                  <text x={PAD.left+w+3} y={y+barH4/2+4} fontSize={7} fill="#374151">{fmtM(d.total)}</text>
+                </g>
+              })}
+              <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
+            </svg>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // BALANCE ANUAL — Rendición de cuentas | Estructura fiel al balance formal
 // ══════════════════════════════════════════════════════════════════════════════
@@ -12298,157 +12424,8 @@ function BalanceAnual({ session, consorcioId, consorcioActivo }) {
                 </Card>
               )}
 
-              {/* ── GRÁFICOS SVG NATIVOS ── */}
-              {(() => {
-                const SVG_W = 480, SVG_H = 220, PAD = { top:16, right:52, bottom:24, left:130 }
-                const IW = SVG_W - PAD.left - PAD.right
-                const IH = SVG_H - PAD.top  - PAD.bottom
-                const COLORS = ['#1A3FA0','#1B6B35','#B91C1C','#C07D10','#6B21A8','#0891B2','#B45309','#0F766E','#7C3AED']
-                const fmtM = v => v >= 1e6 ? '$'+(v/1e6).toFixed(1)+'M' : v >= 1e3 ? '$'+(v/1e3).toFixed(0)+'K' : '$'+Math.round(v)
-
-                // G1: barras horizontales — top categorías
-                const cats = datos.topCats.slice(0,9)
-                const maxCat = Math.max(...cats.map(c=>c.total), 1)
-                const barH = Math.min(22, Math.floor(IH / cats.length) - 4)
-
-                // G2: barras dobles — ingresos vs egresos
-                const ev = datos.evolucion
-                const maxEv = Math.max(...ev.map(e=>Math.max(e.ingresos,e.egresos)), 1)
-                const barW2 = Math.floor(IW / ev.length / 2) - 1
-
-                // G3: línea saldo
-                const saldos = datos.evolucion.map(e=>e.saldo)
-                const minS = Math.min(...saldos, 0)
-                const maxS = Math.max(...saldos, 0)
-                const rangeS = maxS - minS || 1
-                const ptsSaldo = ev.map((e,i) => {
-                  const x = PAD.left + i/(ev.length-1||1)*IW
-                  const y = PAD.top + (1 - (e.saldo - minS)/rangeS)*IH
-                  return `${x.toFixed(1)},${y.toFixed(1)}`
-                }).join(' ')
-                const y0 = PAD.top + (1 - (0 - minS)/rangeS)*IH
-
-                // G4: desglose bloque mayor
-                const det = datos.detalleTopCat.slice(0,8)
-                const maxDet = Math.max(...det.map(d=>d.total), 1)
-                const barH4 = Math.min(22, Math.floor(IH / (det.length||1)) - 4)
-
-                return (
-                  <div style={{marginBottom:16}}>
-                    <div style={{fontWeight:700,fontSize:13,marginBottom:12,color:AZ}}>📈 Gráficos</div>
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-
-                      {/* G1 — Barras horizontales top categorías */}
-                      <Card style={{padding:'12px 8px'}}>
-                        <div style={{fontWeight:700,fontSize:11,marginBottom:6,color:AZ}}>Distribución de egresos por categoría</div>
-                        <svg width="100%" viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:'visible'}}>
-                          {cats.map((c,i) => {
-                            const y = PAD.top + i * (IH / cats.length) + (IH/cats.length - barH)/2
-                            const w = Math.max(2, (c.total/maxCat)*IW)
-                            const label = c.label.replace('MANTENIMIENTO GENERAL','MANT. GENERAL').replace('SERVICIOS PÚBLICOS','SERV. PÚBLICOS').replace('CONTRATOS Y ABONOS','CONTRATOS/ABONOS').replace('GASTOS DE ADMINISTRACIÓN','GASTOS ADMIN.').replace('GASTOS BANCARIOS','G. BANCARIOS').replace('IMPUESTO MUNICIPAL','IMP. MUNICIPAL')
-                            return (
-                              <g key={i}>
-                                <text x={PAD.left-4} y={y+barH/2+4} textAnchor="end" fontSize={8} fill="#374151">{label}</text>
-                                <rect x={PAD.left} y={y} width={w} height={barH} fill={COLORS[i%COLORS.length]} rx={2}/>
-                                <text x={PAD.left+w+3} y={y+barH/2+4} fontSize={7} fill="#374151">{fmtM(c.total)}</text>
-                              </g>
-                            )
-                          })}
-                          <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
-                        </svg>
-                      </Card>
-
-                      {/* G2 — Barras dobles ingresos vs egresos */}
-                      <Card style={{padding:'12px 8px'}}>
-                        <div style={{fontWeight:700,fontSize:11,marginBottom:6,color:AZ}}>Ingresos vs Egresos Mensuales</div>
-                        <svg width="100%" viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:'visible'}}>
-                          {ev.map((e,i) => {
-                            const x = PAD.left + i*(IW/ev.length)
-                            const wB = Math.max(4, barW2)
-                            const hI = (e.ingresos/maxEv)*IH
-                            const hE = (e.egresos/maxEv)*IH
-                            const yI = PAD.top + IH - hI
-                            const yE = PAD.top + IH - hE
-                            return (
-                              <g key={i}>
-                                <rect x={x+2}    y={yI} width={wB} height={hI} fill="#1B6B35" rx={1}/>
-                                <rect x={x+wB+3} y={yE} width={wB} height={hE} fill="#B91C1C" rx={1}/>
-                                <text x={x+wB+1} y={PAD.top+IH+12} textAnchor="middle" fontSize={7} fill="#6B7280">{e.mes}</text>
-                              </g>
-                            )
-                          })}
-                          <line x1={PAD.left} y1={PAD.top+IH} x2={PAD.left+IW} y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
-                          <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
-                          <g><rect x={PAD.left} y={PAD.top-14} width={10} height={8} fill="#1B6B35" rx={1}/><text x={PAD.left+13} y={PAD.top-7} fontSize={8} fill="#374151">Ingresos</text></g>
-                          <g><rect x={PAD.left+70} y={PAD.top-14} width={10} height={8} fill="#B91C1C" rx={1}/><text x={PAD.left+83} y={PAD.top-7} fontSize={8} fill="#374151">Egresos</text></g>
-                        </svg>
-                      </Card>
-                    </div>
-
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-
-                      {/* G3 — Línea evolución saldo */}
-                      <Card style={{padding:'12px 8px'}}>
-                        <div style={{fontWeight:700,fontSize:11,marginBottom:6,color:AZ}}>Evolución del Saldo Final</div>
-                        <svg width="100%" viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:'visible'}}>
-                          {/* Área rellena */}
-                          {ev.length > 1 && (() => {
-                            const pts = ev.map((e,i) => {
-                              const x = PAD.left + i/(ev.length-1)*IW
-                              const y = PAD.top + (1-(e.saldo-minS)/rangeS)*IH
-                              return [x,y]
-                            })
-                            const path = `M ${pts[0][0]} ${pts[0][1]} ` + pts.slice(1).map(p=>`L ${p[0]} ${p[1]}`).join(' ')
-                            const y0c = Math.min(Math.max(PAD.top + (1-(0-minS)/rangeS)*IH, PAD.top), PAD.top+IH)
-                            const area = `${path} L ${pts[pts.length-1][0]} ${y0c} L ${pts[0][0]} ${y0c} Z`
-                            return (
-                              <g>
-                                <path d={area} fill="#1A3FA0" fillOpacity={0.12}/>
-                                <polyline points={ptsSaldo} fill="none" stroke="#1A3FA0" strokeWidth={2}/>
-                                {pts.map((p,i)=><circle key={i} cx={p[0]} cy={p[1]} r={3} fill="#1A3FA0"/>)}
-                              </g>
-                            )
-                          })()}
-                          {/* Línea de referencia en 0 */}
-                          {minS < 0 && maxS > 0 && (
-                            <line x1={PAD.left} y1={y0} x2={PAD.left+IW} y2={y0} stroke="#999" strokeDasharray="4 3" strokeWidth={1}/>
-                          )}
-                          {/* Eje X — etiquetas */}
-                          {ev.map((e,i) => (
-                            <text key={i} x={PAD.left + i/(ev.length-1||1)*IW} y={PAD.top+IH+12} textAnchor="middle" fontSize={7} fill="#6B7280">{e.mes}</text>
-                          ))}
-                          <line x1={PAD.left} y1={PAD.top+IH} x2={PAD.left+IW} y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
-                          <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
-                        </svg>
-                      </Card>
-
-                      {/* G4 — Barras horizontales desglose bloque mayor */}
-                      {det.length > 0 && (
-                        <Card style={{padding:'12px 8px'}}>
-                          <div style={{fontWeight:700,fontSize:11,marginBottom:6,color:'#0f2d7a'}}>
-                            Desglose de {datos.topCatLabel}
-                          </div>
-                          <svg width="100%" viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:'visible'}}>
-                            {det.map((d,i) => {
-                              const y = PAD.top + i*(IH/(det.length||1)) + (IH/(det.length||1)-barH4)/2
-                              const w = Math.max(2, (d.total/maxDet)*IW)
-                              const label = d.concepto.length > 18 ? d.concepto.slice(0,18)+'…' : d.concepto
-                              return (
-                                <g key={i}>
-                                  <text x={PAD.left-4} y={y+barH4/2+4} textAnchor="end" fontSize={8} fill="#374151">{label}</text>
-                                  <rect x={PAD.left} y={y} width={w} height={barH4} fill={COLORS[(i+2)%COLORS.length]} rx={2}/>
-                                  <text x={PAD.left+w+3} y={y+barH4/2+4} fontSize={7} fill="#374151">{fmtM(d.total)}</text>
-                                </g>
-                              )
-                            })}
-                            <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top+IH} stroke="#ccc" strokeWidth={1}/>
-                          </svg>
-                        </Card>
-                      )}
-                    </div>
-                  </div>
-                )
-              })()}
+              {/* ── GRÁFICOS SVG NATIVOS ── función separada, sin IIFE ── */}
+              {GraficosBalance(datos)}
 
 
               {/* Indicadores clave — 6 KPIs en grilla */}
