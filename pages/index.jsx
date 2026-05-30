@@ -9773,10 +9773,9 @@ Esta acción no se puede deshacer fácilmente.`)) return
         }])
       }
 
-      setAsignaciones({})
       setMsg({
         tipo: errs.length === 0 ? 'ok' : 'warn',
-        texto: `✓ Migración completada — ${ok} registros importados' + (errs.length>0?' · '+errs.length+' errores':'') + '`
+        texto: `✓ Migración completada — ${ok} registros importados${errs.length>0?' · '+errs.length+' errores':''}`
       })
       setPaso(4)
 
