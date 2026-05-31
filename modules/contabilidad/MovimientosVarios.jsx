@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function MovimientosVarios() {
-  const { session, consorcioId, expensas } = useApp()
+  const { session, expensas } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
