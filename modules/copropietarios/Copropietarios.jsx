@@ -26,7 +26,7 @@ export default function Copropietarios() {
   async function cargar() {
     const [{ data: cpData }, { data: ufData }] = await Promise.all([
       supabase.from('con_copropietarios').select('*')
-        .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId).order('apellido_nombre'),
+        .eq('admin_id', uid).eq('consorcio_id', consorcioId).order('apellido_nombre'),
       supabase.from('con_unidades').select('id, numero, propietario_id, tipo, piso')
         .eq('consorcio_id', consorcioId).eq('estado', 'ocupada').order('numero')
     ])
@@ -40,13 +40,13 @@ export default function Copropietarios() {
     }
     setLista(cps)
     setUfsMap(mapa)
-    if (onUpdate) onUpdate(cps)
+    if (false) (cps)
   }
   async function guardar() {
     if (!form.apellido_nombre) return setMsg({ tipo:'warn', texto:'Nombre obligatorio' })
     const id = form.id || nextId(lista, 'CP')
     const { error } = await supabase.from('con_copropietarios').upsert(
-      { ...form, id, admin_id:session.user.id, consorcio_id:consorcioId }, { onConflict:'id' })
+      { ...form, id, admin_id:uid, consorcio_id:consorcioId }, { onConflict:'id' })
     if (error) return setMsg({ tipo:'error', texto:error.message })
     setForm(null); setMsg({ tipo:'ok', texto:'✓ Guardado' }); cargar()
   }
@@ -71,7 +71,7 @@ export default function Copropietarios() {
       || cp.telefono?.toLowerCase().includes(q)
   })
   function handlePDF() {
-    exportarPDF({titulo:'Listado de Copropietarios',logoB64:LOGO_ADM_B64,
+    exportarPDF({titulo:'Listado de Copropietarios',logoB64:null /* null /* logo */ migrado a adminPerfil.sello_url */,
       columnas:[
         {key:'nombre',  label:'Apellido y Nombre'},
         {key:'ufs',     label:'UFs'},
