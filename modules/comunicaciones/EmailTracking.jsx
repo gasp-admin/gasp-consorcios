@@ -20,7 +20,6 @@ export default function EmailTracking() {
   const [cargando, setCargando]   = useState(true)
   const [filtroEstado, setFiltroEstado] = useState('')
   const [filtroExp, setFiltroExp] = useState('')
-  const [expensas, setExpensas2]  = useState([])
   const [stats, setStats]         = useState(null)
 
   const cargar = async () => {
