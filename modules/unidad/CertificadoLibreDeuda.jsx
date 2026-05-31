@@ -77,7 +77,7 @@ export default function CertificadoLibreDeuda() {
   // Cargar historial
   async function cargarCertificados() {
     const { data } = await supabase.from('con_certificados').select('*')
-      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
+      .eq('admin_id', uid).eq('consorcio_id', consorcioId)
       .order('created_at', { ascending:false }).limit(50)
     setCertificados(data || [])
   }
@@ -154,7 +154,7 @@ export default function CertificadoLibreDeuda() {
     try {
       const { data:{ session: sess } } = await supabase.auth.getSession()
       const payload = {
-        admin_id: session.user.id, consorcio_id: consorcioId,
+        admin_id: uid, consorcio_id: consorcioId,
         unidad_id: ufSel,
         numero_uf: ufObj?.numero || '',
         solicitante: solicitante.trim(),
