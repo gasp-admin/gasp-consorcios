@@ -50,7 +50,7 @@ export default function CobranzasAutomaticas() {
 
   async function guardarConfig() {
     if (!config) return
-    const payload = { ...config, admin_id: session.user.id, consorcio_id: consorcioId,
+    const payload = { ...config, admin_id: uid, consorcio_id: consorcioId,
       id: `CFG-${consorcioId}`, updated_at: new Date().toISOString() }
     const { error } = await supabase.from('con_config_cobranza').upsert([payload], { onConflict:'consorcio_id' })
     if (error) setMsg({ tipo:'error', texto: error.message })
@@ -271,7 +271,7 @@ export default function CobranzasAutomaticas() {
 
       const { error } = await supabase.from('con_cobranzas').insert([{
         id:`COB-AUTO2-${r.unidadId}-${Date.now()}-${ok}`,
-        admin_id:session.user.id, consorcio_id:r.consorcioId,
+        admin_id:uid, consorcio_id:r.consorcioId,
         expensa_id:expSel, unidad_id:r.unidadId,
         fecha:r.fechaAcred||r.fechaPago||hoy,
         monto:r.importe, medio_pago:'transferencia',
@@ -293,7 +293,7 @@ export default function CobranzasAutomaticas() {
 
     const pending = activos.filter(r=>r.confianza!=='alta'||!r.unidadId)
     await supabase.from('con_cobranzas_automaticas_log').insert([{
-      id:`LOG2-${Date.now()}`, admin_id:session.user.id,
+      id:`LOG2-${Date.now()}`, admin_id:uid,
       consorcio_id:consorcioId, expensa_id:expSel, sistema,
       archivo_nombre:archNom, fecha_proceso:hoy,
       total_registros:activos.length, registros_ok:ok,
@@ -315,7 +315,7 @@ export default function CobranzasAutomaticas() {
   useEffect(() => { if (consorcioId) { cargarConfig(); cargarHistorial() } }, [consorcioId])
   useEffect(() => {
     supabase.from('con_consorcios').select('id,nombre')
-      .eq('admin_id', session.user.id).order('nombre')
+      .eq('admin_id', uid).order('nombre')
       .then(({ data }) => setTodosConsorcios(data || []))
   }, [])
 
@@ -353,7 +353,7 @@ export default function CobranzasAutomaticas() {
         const fecha = pago.fecha_pago||hoy
         const { error } = await supabase.from('con_cobranzas').insert([{
           id:`COB-SIRO-API-${uf.id}-${Date.now()}-${ok}`,
-          admin_id:session.user.id, consorcio_id:consorcioId, expensa_id:expSel,
+          admin_id:uid, consorcio_id:consorcioId, expensa_id:expSel,
           unidad_id:uf.id, fecha, monto, medio_pago:'siro',
           canal_cobro:pago.canal||'SIRO API', estado:'vigente',
           notas:`SIRO API — ${pago.nro_comprobante||''}`,
