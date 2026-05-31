@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function BalanceAnual() {
-  const { session, consorcioId, consorcioActivo } = useApp()
+  const { session, consorcioActivo } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
