@@ -16,7 +16,6 @@ export default function Cobranzas() {
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
-  const [expensas, setExpensas]         = useState([])
   const [expSel, setExpSel]             = useState(null)
   const [detalles, setDetalles]         = useState([])
   const [cobranzas, setCobranzas]       = useState([])
