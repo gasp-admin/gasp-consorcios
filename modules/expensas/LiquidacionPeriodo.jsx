@@ -755,7 +755,7 @@ export default function LiquidacionPeriodo() {
 
     // ── Logo real de la administración ───────────────────────────────────────
     const logoHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:100px;padding:4px 6px;text-align:center">
-      <img src="${null /* null /* logo */ migrado a adminPerfil.sello_url */}" alt="Administración de Consorcios Pinamar" style="width:72px;height:auto;object-fit:contain"/>
+      <img src="${null}" alt="Administración de Consorcios Pinamar" style="width:72px;height:auto;object-fit:contain"/>
       <div style="font-size:6.5pt;color:#1A3FA0;font-weight:700;margin-top:3px;line-height:1.3">Administración de<br/>Consorcios Pinamar</div>
     </div>`
 
