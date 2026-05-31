@@ -62,7 +62,7 @@ export default function Unidades() {
         coef:u.porcentaje_fiscal?Number(u.porcentaje_fiscal).toFixed(4)+'%':'—',
         propietario:cp?.apellido_nombre||'—',estado:u.estado||'—'}
     })
-    exportarPDF({titulo:'Listado de Unidades Funcionales',columnas:cols,filas:rows,logoB64:null /* null /* logo */ migrado a adminPerfil.sello_url */,
+    exportarPDF({titulo:'Listado de Unidades Funcionales',columnas:cols,filas:rows,logoB64:null,
       totales:{uf:'TOTAL',tipo:'',piso:'',sup:'',coef:totalCoef.toFixed(4)+'%',propietario:`${filtradas.length} UFs`,estado:''}})
   }
   function handleExcel() {
