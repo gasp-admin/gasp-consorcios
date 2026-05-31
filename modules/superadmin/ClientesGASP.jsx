@@ -640,7 +640,7 @@ export default function App() {
 
   async function guardarConsorcio() {
     if (!formCon?.nombre) return setMsgCon({ tipo:'warn', texto:'El nombre es obligatorio' })
-    const uid=session.user.id
+    const uid=uid
     if (formCon.id) {
       await supabase.from('con_consorcios').update(formCon).eq('id',formCon.id)
     } else {
@@ -732,8 +732,8 @@ export default function App() {
     switch(pagina) {
       case 'dashboard':      return <Dashboard consorcios={consorcios} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} formCon={formCon} setFormCon={setFormCon} msgCon={msgCon} guardarConsorcio={guardarConsorcio} setConsorcioActivo={setConsorcioActivo} cargarConsorcio={cargarConsorcio} setPagina={setPagina} />
       case 'listado_consorcios': return <ListadoConsorcios session={session} consorcios={consorcios} />
-      case 'unidades':       return <Unidades session={session} consorcioId={cid} copropietarios={copropietarios} columnasLiq={[]} />
-      case 'copropietarios': return <Copropietarios session={session} consorcioId={cid} onUpdate={setCopropietarios} />
+      case 'unidades':       return <Unidades session={session} consorcioId={cid} copropietarios={copropietarios} []={[]} />
+      case 'copropietarios': return <Copropietarios session={session} consorcioId={cid} (() => {})={setCopropietarios} />
       case 'sueldos':        return <Sueldos session={session} consorcioId={cid} consorcioActivo={consorcioActivo} expensas={expensas} />
       case 'liquidacion':    return <LiquidacionPeriodo session={session} consorcioId={cid} consorcioActivo={consorcioActivo} unidades={unidades} copropietarios={copropietarios} adminPerfil={adminPerfil} expensas={expensas} setExpensas={setExpensas} cargar={()=>cargarConsorcio(cid, session?.user?.id)} setPagina={setPagina} />
       case 'expensas':       return <Expensas session={session} consorcioId={cid} unidades={unidades} copropietarios={copropietarios} adminPerfil={adminPerfil} />
