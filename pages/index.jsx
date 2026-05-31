@@ -9635,7 +9635,13 @@ Esta acción no se puede deshacer fácilmente.`)) return
       }
 
       // 2. Crear expensa de apertura/migración
-      const expId = `EXP-MIG-${consorcioId}-${Date.now()}`
+      const expId = `EXP-MIG-${cid}-${Date.now()}`
+      // Verificar si ya existe expensa migrada para este período
+      const { data: expExist } = await supabase.from('con_expensas')
+        .select('id').eq('consorcio_id', cid).eq('periodo', periodo).eq('tipo','migracion').limit(1)
+      if (expExist?.length > 0) {
+        throw new Error(`Ya existe una migración para el período ${periodo}. Eliminela antes de reimportar.`)
+      }
       await supabase.from('con_expensas').insert([{
         id: expId,
         admin_id: uid,
@@ -9685,10 +9691,9 @@ Esta acción no se puede deshacer fácilmente.`)) return
         const deudaTotal = parseFloat(u.total_deuda) || Math.max(0, saldoAnterior - pagadoPeriodoAnterior + expensaActual)
         const pagado     = 0  // No hay pagos de la expensa actual aún
 
-        // Encontrar la UF por número (aproximado)
-        const uf = ufsExistentes?.find(x =>
-          x.numero?.toLowerCase().trim() === u.numero?.toLowerCase().trim()
-        )
+        // Encontrar la UF por número — normalizar espacios internos ("1 A" = "1A")
+        const normNum = s => (s||'').toLowerCase().replace(/\s+/g,'')
+        const uf = ufsExistentes?.find(x => normNum(x.numero) === normNum(u.numero))
 
         if (!uf) {
           // Crear copropietario y UF si no existe
