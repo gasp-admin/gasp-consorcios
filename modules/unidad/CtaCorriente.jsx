@@ -83,7 +83,7 @@ export default function CtaCorriente() {
       titulo: `Cuenta Corriente UF — ${uf?.numero||''} — ${cp?.apellido_nombre||''}`,
       subtitulo: (fDesde||fHasta) ? `Período: ${fDesde?fmtD(fDesde):'inicio'} al ${fHasta?fmtD(fHasta):'hoy'}` : 'Historial completo',
       consorcioNombre: '',
-      logoB64: null /* null /* logo */ migrado a adminPerfil.sello_url */,
+      logoB64: null,
       columnas: [
         { key:'fecha',    label:'Fecha',   nowrap:true },
         { key:'concepto', label:'Concepto' },
