@@ -22,14 +22,14 @@ export default function Unidades() {
 
   async function cargar() {
     const { data } = await supabase.from('con_unidades').select('*')
-      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId).order('numero')
+      .eq('admin_id', uid).eq('consorcio_id', consorcioId).order('numero')
     setUnidades(data || [])
   }
   async function guardar() {
     if (!form.numero) return setMsg({ tipo:'warn', texto:'El número de UF es obligatorio' })
     const id = form.id || nextId(unidades, 'UF')
     const { error } = await supabase.from('con_unidades').upsert(
-      { ...form, id, admin_id:session.user.id, consorcio_id:consorcioId }, { onConflict:'id' })
+      { ...form, id, admin_id:uid, consorcio_id:consorcioId }, { onConflict:'id' })
     if (error) return setMsg({ tipo:'error', texto:'Error: '+error.message })
     setForm(null); setMsg({ tipo:'ok', texto:'✓ Unidad guardada' }); cargar()
   }
@@ -62,7 +62,7 @@ export default function Unidades() {
         coef:u.porcentaje_fiscal?Number(u.porcentaje_fiscal).toFixed(4)+'%':'—',
         propietario:cp?.apellido_nombre||'—',estado:u.estado||'—'}
     })
-    exportarPDF({titulo:'Listado de Unidades Funcionales',columnas:cols,filas:rows,logoB64:LOGO_ADM_B64,
+    exportarPDF({titulo:'Listado de Unidades Funcionales',columnas:cols,filas:rows,logoB64:null /* null /* logo */ migrado a adminPerfil.sello_url */,
       totales:{uf:'TOTAL',tipo:'',piso:'',sup:'',coef:totalCoef.toFixed(4)+'%',propietario:`${filtradas.length} UFs`,estado:''}})
   }
   function handleExcel() {
@@ -215,7 +215,7 @@ export default function Unidades() {
               // Mostrar el campo si: (a) el consorcio ya tiene UFs con ese coef > 0,
               // o (b) el consorcio tiene una columna de liquidación con ese campo
               unidades.some(u => parseFloat(u[cf.campo]) > 0) ||
-              columnasLiq.some(c => c.campo_coef === cf.campo)
+              [].some(c => c.campo_coef === cf.campo)
             )
             if (!camposExtra.length) return null
             return (
