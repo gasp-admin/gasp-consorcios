@@ -80,13 +80,13 @@ export default function Sueldos() {
   // ── Cargar datos ────────────────────────────────────────────────────
   async function cargarEmpleados() {
     const { data } = await supabase.from('con_empleados').select('*')
-      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
+      .eq('admin_id', uid).eq('consorcio_id', consorcioId)
       .order('apellido_nombre')
     setEmpleados(data || [])
   }
   async function cargarSueldos() {
     const { data } = await supabase.from('con_sueldos').select('*')
-      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
+      .eq('admin_id', uid).eq('consorcio_id', consorcioId)
       .order('periodo', { ascending:false }).order('apellido_nombre')
     setSueldos(data || [])
   }
@@ -272,7 +272,7 @@ export default function Sueldos() {
       const idSueldo = `GAS-SLD-${consorcioId}-${Date.now()}-${ok}`
       const { error } = await supabase.from('con_gastos').insert([{
         id:          idSueldo,
-        admin_id:    session.user.id,
+        admin_id:    uid,
         consorcio_id: consorcioId,
         expensa_id:  expSel,
         categoria:   'sueldos',
@@ -287,7 +287,7 @@ export default function Sueldos() {
         const sueldoId = `SLD-${consorcioId}-${Date.now()}-${ok}`
         await supabase.from('con_sueldos').insert([{
           id: sueldoId,
-          admin_id:    session.user.id,
+          admin_id:    uid,
           consorcio_id: consorcioId,
           expensa_id:  expSel,
           empleado_id: fila.empleado_id,
@@ -319,7 +319,7 @@ export default function Sueldos() {
     if (montoFateryh > 0) {
       const idFat = `GAS-FAT-${consorcioId}-${Date.now()}`
       const { error: ef } = await supabase.from('con_gastos').insert([{
-        id: idFat, admin_id: session.user.id, consorcio_id: consorcioId, expensa_id: expSel,
+        id: idFat, admin_id: uid, consorcio_id: consorcioId, expensa_id: expSel,
         categoria: 'fateryh', concepto: 'F.A.T.E.R.Y.H.',
         monto: montoFateryh, fecha: hoy,
       }])
@@ -333,7 +333,7 @@ export default function Sueldos() {
     if (montoVep > 0) {
       const idVep = `GAS-VEP-${consorcioId}-${Date.now()}`
       const { error: ev } = await supabase.from('con_gastos').insert([{
-        id: idVep, admin_id: session.user.id, consorcio_id: consorcioId, expensa_id: expSel,
+        id: idVep, admin_id: uid, consorcio_id: consorcioId, expensa_id: expSel,
         categoria: 'vep_931', concepto: 'VEP F.931 — Cargas sociales AFIP',
         monto: montoVep, fecha: hoy,
         notas: 'Aportes + contribuciones seguridad social y obra social',
@@ -356,7 +356,7 @@ export default function Sueldos() {
     if (!formEmp?.apellido_nombre) return setMsg({ tipo:'warn', texto:'El nombre es requerido' })
     const payload = {
       ...formEmp,
-      admin_id:     session.user.id,
+      admin_id:     uid,
       consorcio_id: consorcioId,
       id:           formEmp.id || `EMP-${consorcioId}-${Date.now()}`,
       updated_at:   new Date().toISOString(),
