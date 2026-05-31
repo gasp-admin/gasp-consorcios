@@ -63,7 +63,7 @@ export default function Asambleas() {
   const crearAlertaCalendario = async ({ cid, descripcion, fecha_vencimiento, fecha_aviso1, fecha_aviso2, tipo, notas }) => {
     const id = 'AGV-'+(cid||consorcioId)+'-'+tipo+'-'+Date.now()
     const { data } = await supabase.from('con_agenda_vencimientos').insert([{
-      id, admin_id: session.user.id, consorcio_id: cid||consorcioId,
+      id, admin_id: uid, consorcio_id: cid||consorcioId,
       tipo, descripcion, fecha_vencimiento, fecha_aviso1, fecha_aviso2,
       estado: 'pendiente', notas, created_at: new Date().toISOString()
     }]).select().single()
@@ -111,7 +111,7 @@ export default function Asambleas() {
 
   const cargar = async () => {
     const { data } = await supabase.from('con_asambleas').select('*')
-      .eq('admin_id', session.user.id)
+      .eq('admin_id', uid)
       .order('fecha', { ascending:false }).limit(100)
     setAsambleas(data || [])
   }
@@ -157,7 +157,7 @@ export default function Asambleas() {
     const newId = form.id || ('ASM-'+consorcioId+'-'+Date.now())
     const { error } = await supabase.from('con_asambleas').upsert([{
       ...form, id: newId,
-      admin_id: session.user.id, consorcio_id: consorcioId,
+      admin_id: uid, consorcio_id: consorcioId,
       orden_del_dia: od, updated_at: new Date().toISOString()
     }], { onConflict:'id' })
     if (error) return setMsg({ tipo:'error', texto:error.message })
@@ -252,7 +252,7 @@ export default function Asambleas() {
     if (!file || file.type !== 'application/pdf') { setMsg({ tipo:'warn', texto:'Solo se admiten archivos PDF' }); return }
     setSubiendo(true); setMsg(null)
     try {
-      const path = `asambleas/${session.user.id}/${cid}/${asmId}_${Date.now()}.pdf`
+      const path = `asambleas/${uid}/${cid}/${asmId}_${Date.now()}.pdf`
       const { error: upErr } = await supabase.storage.from('actas-pdf').upload(path, file, { upsert:true, contentType:'application/pdf' })
       if (upErr) throw upErr
       const { data: urlData } = supabase.storage.from('actas-pdf').getPublicUrl(path)
