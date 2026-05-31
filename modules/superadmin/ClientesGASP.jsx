@@ -571,7 +571,6 @@ export default function ClientesGASP() {
 
 
 export default function App() {
-  const [session, setSession]             = useState(null)
   const [cargando, setCargando]           = useState(true)
   const [pagina, setPagina]               = useState('dashboard')
   const [menuAbierto, setMenuAbierto]     = useState(false)
