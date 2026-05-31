@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function ReciboPago() {
-  const { session, consorcioId, unidades, copropietarios, expensas, consorcioActivo } = useApp()
+  const { session, unidades, copropietarios, expensas, consorcioActivo } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
