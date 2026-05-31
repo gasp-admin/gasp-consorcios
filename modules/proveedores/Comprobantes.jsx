@@ -131,7 +131,7 @@ export default function Comprobantes() {
       // Alta nueva
       const { error } = await supabase.from('con_comprobantes_proveedor').insert([{
         id: `COMP-${Date.now()}`,
-        admin_id: session.user.id,
+        admin_id: uid,
         consorcio_id: consorcioId,
         proveedor_id: form.proveedor_id,
         expensa_id: form.expensa_id || null,
@@ -173,7 +173,7 @@ export default function Comprobantes() {
     // Registrar pago
     const { error } = await supabase.from('con_pagos_proveedor').insert([{
       id: `PAG-${Date.now()}`,
-      admin_id: session.user.id,
+      admin_id: uid,
       consorcio_id: consorcioId,
       proveedor_id: comp.proveedor_id,
       comprobante_id: comp.id,
@@ -233,7 +233,7 @@ export default function Comprobantes() {
 
   const fmtD2 = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
   function handlePDFComp(){
-    exportarPDF({titulo:'Comprobantes de Proveedores',logoB64:LOGO_ADM_B64,
+    exportarPDF({titulo:'Comprobantes de Proveedores',logoB64:null /* null /* logo */ migrado a adminPerfil.sello_url */,
       columnas:[{key:'fecha',label:'Fecha',nowrap:true},{key:'vto',label:'Vto.',nowrap:true},
         {key:'prov',label:'Proveedor'},{key:'tipo',label:'Tipo'},{key:'nro',label:'N°'},
         {key:'concepto',label:'Concepto'},{key:'total',label:'Total',align:'right'},
@@ -290,7 +290,7 @@ export default function Comprobantes() {
   async function cargarGastosSueldos() {
     setCargandoSueldos(true)
     const { data } = await supabase.from('con_gastos').select('*')
-      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
+      .eq('admin_id', uid).eq('consorcio_id', consorcioId)
       .in('categoria', ['sueldos','fateryh','vep_931','cargas_sociales'])
       .order('fecha', { ascending:false }).limit(200)
     setGastosSueldos(data || [])
