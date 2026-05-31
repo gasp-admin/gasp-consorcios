@@ -906,8 +906,3 @@ export default function CobranzasAutomaticas() {
     </div>
   )
 }
-
-
-// ══════════════════════════════════════════════════════════════════════════════
-// GENERAR DÉBITO — generar archivos para Expensas Pagas y SIRO
-// ══════════════════════════════════════════════════════════════════════════════
