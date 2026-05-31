@@ -71,7 +71,7 @@ export default function Copropietarios() {
       || cp.telefono?.toLowerCase().includes(q)
   })
   function handlePDF() {
-    exportarPDF({titulo:'Listado de Copropietarios',logoB64:null /* null /* logo */ migrado a adminPerfil.sello_url */,
+    exportarPDF({titulo:'Listado de Copropietarios',logoB64:null,
       columnas:[
         {key:'nombre',  label:'Apellido y Nombre'},
         {key:'ufs',     label:'UFs'},
