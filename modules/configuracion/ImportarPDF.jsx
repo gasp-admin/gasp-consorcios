@@ -32,7 +32,7 @@ export default function ImportarPDF() {
   // Cargar lista de consorcios al montar
   useEffect(() => {
     supabase.from('con_consorcios').select('id,nombre')
-      .eq('admin_id', session.user.id).order('nombre')
+      .eq('admin_id', uid).order('nombre')
       .then(({ data }) => setConsorcios(data || []))
   }, [])
 
@@ -168,7 +168,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
 
     setImportando(true)
     setMsg(null)
-    const uid = session.user.id
+    const uid = uid
     const hoy = new Date().toISOString().split('T')[0]
     const periodo = datos.periodo || new Date().toISOString().slice(0,7)
     const cid = conIdDestino || consorcioId  // usar el consorcio seleccionado en paso 3
