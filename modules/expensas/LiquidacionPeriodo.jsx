@@ -45,7 +45,7 @@ export default function LiquidacionPeriodo() {
   const [cobradoActual, setCobradoActual]         = useState(0) // cobranzas del período en curso
   // Grupos y columnas de liquidación del consorcio activo
   const [gruposLiq, setGruposLiq]     = useState([])
-  const [columnasLiq, setColumnasLiq] = useState([])
+  const [[], setColumnasLiq] = useState([])
   const hoy = new Date().toISOString().split('T')[0]
 
   // Cargar grupos y columnas cuando cambia el consorcio
@@ -146,7 +146,7 @@ export default function LiquidacionPeriodo() {
       const prov = provMap[c.proveedor_id]
       return {
         id: `GAS-IMP-${c.id}`,
-        admin_id: session.user.id,
+        admin_id: uid,
         consorcio_id: consorcioId,
         expensa_id: expSel.id,
         comprobante_id: c.id,
@@ -203,7 +203,7 @@ export default function LiquidacionPeriodo() {
     const expId = `EXP-${consorcioId}-${Date.now()}`
     const { data, error } = await supabase.from('con_expensas').insert([{
       id: expId,
-      admin_id: session.user.id,
+      admin_id: uid,
       consorcio_id: consorcioId,
       periodo,
       tipo: 'ordinaria',
@@ -229,7 +229,7 @@ export default function LiquidacionPeriodo() {
     if (!formGasto?.monto || parseFloat(formGasto.monto) <= 0) return setMsg({ tipo:'warn', texto:'Ingresá el monto' })
 
     const payload = {
-      admin_id: session.user.id,
+      admin_id: uid,
       consorcio_id: consorcioId,
       expensa_id: expSel.id,
       fecha: formGasto.fecha || hoy,
@@ -267,7 +267,7 @@ export default function LiquidacionPeriodo() {
   // Inicializar importes por columna a partir de los gastos cargados
   // Se llama al hacer clic en "Continuar → Distribución"
   function inicializarImportesPorColumna() {
-    const colsActivas = columnasLiq.filter(c => c.activo)
+    const colsActivas = [].filter(c => c.activo)
     if (colsActivas.length === 0) return  // sin columnas → usa lógica global
 
     const gruposOrdenados = [...gruposLiq].sort((a,b) => a.numero - b.numero)
@@ -311,7 +311,7 @@ export default function LiquidacionPeriodo() {
     setSaldoCajaAnterior(0)
     setCobradoPeriodoAnt(0)
 
-    const colsActivas = columnasLiq.filter(c => c.activo)
+    const colsActivas = [].filter(c => c.activo)
     const tieneMultiCol = colsActivas.length > 1
 
     // Determinar el total a cobrar
@@ -604,7 +604,7 @@ export default function LiquidacionPeriodo() {
       catToLabel[cat] || RUBRO_LABELS_FALLBACK[cat] || '7 VARIOS'
 
     // Columnas activas del consorcio (para encabezados del PDF)
-    const colsActivas = columnasLiq.filter(c=>c.activo)
+    const colsActivas = [].filter(c=>c.activo)
     const tieneMulticol = colsActivas.length > 1
 
     const rubrosAgrup = {}
@@ -755,7 +755,7 @@ export default function LiquidacionPeriodo() {
 
     // ── Logo real de la administración ───────────────────────────────────────
     const logoHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:100px;padding:4px 6px;text-align:center">
-      <img src="${LOGO_ADM_B64}" alt="Administración de Consorcios Pinamar" style="width:72px;height:auto;object-fit:contain"/>
+      <img src="${null /* null /* logo */ migrado a adminPerfil.sello_url */}" alt="Administración de Consorcios Pinamar" style="width:72px;height:auto;object-fit:contain"/>
       <div style="font-size:6.5pt;color:#1A3FA0;font-weight:700;margin-top:3px;line-height:1.3">Administración de<br/>Consorcios Pinamar</div>
     </div>`
 
@@ -1088,7 +1088,7 @@ export default function LiquidacionPeriodo() {
       // 4. Insertar detalles por UF
       const detalles = distribucion.map(d => ({
         id: `DET-${expSel.id}-${d.unidad_id}`,
-        admin_id: session.user.id,
+        admin_id: uid,
         consorcio_id: consorcioId,
         expensa_id: expSel.id,
         unidad_id: d.unidad_id,
@@ -1591,7 +1591,7 @@ export default function LiquidacionPeriodo() {
 
             {/* Monto a cobrar — por columna si hay múltiples columnas configuradas */}
             {(() => {
-              const colsActivas = columnasLiq.filter(c => c.activo)
+              const colsActivas = [].filter(c => c.activo)
               const tieneMultiCol = colsActivas.length > 1
 
               if (tieneMultiCol && Object.keys(importesPorColumna).length > 0) {
@@ -1799,8 +1799,8 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                     <thead>
                       <tr style={{ background:'#2e4057' }}>
                         {['UF','Propietario','Sal. Ant.','Pagos Ant.','Deuda','Interés','%','1er Vto',
-                            ...(columnasLiq.filter(c=>c.activo).length > 1
-                              ? columnasLiq.filter(c=>c.activo).map(c=>c.nombre)
+                            ...([].filter(c=>c.activo).length > 1
+                              ? [].filter(c=>c.activo).map(c=>c.nombre)
                               : ['Expensa']),
                             'Redondeo','Total','2do Vto','Con Recargo'].map((h,i) => (
                           <th key={i} style={{ padding:'5px 8px', textAlign:i>=2&&i!==7?'right':'left',
@@ -1830,8 +1830,8 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                           </td>
                           <td style={{ padding:'5px 8px', textAlign:'right', color:GR, fontSize:10 }}>{d.pct}%</td>
                           <td style={{ padding:'5px 8px', fontSize:10, color:GR, whiteSpace:'nowrap' }}>{fmtD(d.vto1)}</td>
-                          {columnasLiq.filter(c=>c.activo).length > 1
-                            ? columnasLiq.filter(c=>c.activo).map(col => (
+                          {[].filter(c=>c.activo).length > 1
+                            ? [].filter(c=>c.activo).map(col => (
                                 <td key={col.codigo} style={{ padding:'5px 8px', textAlign:'right', fontWeight:600,
                                   color:d.aporte_por_columna?.[col.codigo]>0?AZ:GR }}>
                                   {d.aporte_por_columna?.[col.codigo] > 0 ? fmt(d.aporte_por_columna[col.codigo]) : '—'}
@@ -1865,8 +1865,8 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                         </td>
                         <td style={{ padding:'6px 8px', textAlign:'right', fontSize:10 }}>100%</td>
                         <td />
-                        {columnasLiq.filter(c=>c.activo).length > 1
-                          ? columnasLiq.filter(c=>c.activo).map(col => (
+                        {[].filter(c=>c.activo).length > 1
+                          ? [].filter(c=>c.activo).map(col => (
                               <td key={col.codigo} style={{ padding:'6px 8px', textAlign:'right', fontWeight:700, fontSize:12 }}>
                                 {fmt(distribucion.reduce((a,d)=>a+(d.aporte_por_columna?.[col.codigo]||0),0))}
                               </td>
