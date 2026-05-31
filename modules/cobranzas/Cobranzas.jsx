@@ -31,7 +31,7 @@ export default function Cobranzas() {
   async function cargarExpensas() {
     const [expRes, conRes] = await Promise.all([
       supabase.from('con_expensas').select('*')
-        .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
+        .eq('admin_id', uid).eq('consorcio_id', consorcioId)
         .order('periodo', { ascending: false }),
       supabase.from('con_consorcios').select('*').eq('id', consorcioId).single()
     ])
@@ -66,7 +66,7 @@ export default function Cobranzas() {
       return setMsg({ tipo:'warn', texto:'El monto debe ser un número mayor a cero' })
     const { error } = await supabase.from('con_cobranzas').insert([{
       id: 'COB-' + Date.now(),
-      admin_id: session.user.id, consorcio_id: consorcioId, expensa_id: expSel.id,
+      admin_id: uid, consorcio_id: consorcioId, expensa_id: expSel.id,
       unidad_id: form.unidad_id, fecha: form.fecha, monto,
       medio_pago: form.medio_pago || 'transferencia',
       recibo_numero: form.recibo_numero || '',
@@ -92,7 +92,7 @@ export default function Cobranzas() {
       const cp = copropietarios.find(c => c.id === uf?.propietario_id)
       if (cp?.email) {
         await supabase.rpc('registrar_notificacion_pago', {
-          p_cobranza_id: cobId, p_admin_id: session.user.id, p_consorcio_id: consorcioId
+          p_cobranza_id: cobId, p_admin_id: uid, p_consorcio_id: consorcioId
         })
       }
     } catch(e) { /* no crítico */ }
@@ -143,7 +143,7 @@ export default function Cobranzas() {
         .eq('expensa_id', expSel.id).eq('unidad_id', row.unidad_id)
       await supabase.from('con_mora_log').insert([{
         id: `MORA-${expSel.id}-${row.unidad_id}-${Date.now()}`,
-        admin_id: session.user.id, consorcio_id: consorcioId,
+        admin_id: uid, consorcio_id: consorcioId,
         expensa_id: expSel.id, unidad_id: row.unidad_id,
         periodo: expSel.periodo, deuda_base: row.deuda_base,
         porcentaje: row.porcentaje_mora, monto_interes: row.monto_interes,
@@ -505,7 +505,7 @@ export default function Cobranzas() {
                                   .eq('expensa_id', expSel.id).eq('unidad_id', row.unidad_id)
                                 await supabase.from('con_mora_log').insert([{
                                   id: `MORA-${expSel.id}-${row.unidad_id}-${Date.now()}`,
-                                  admin_id: session.user.id, consorcio_id: consorcioId,
+                                  admin_id: uid, consorcio_id: consorcioId,
                                   expensa_id: expSel.id, unidad_id: row.unidad_id,
                                   periodo: expSel.periodo, deuda_base: row.deuda_base,
                                   porcentaje: row.porcentaje_mora, monto_interes: row.monto_interes,
