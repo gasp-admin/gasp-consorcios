@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function GenerarDebito() {
-  const { session, consorcioId, consorcioActivo, unidades, copropietarios, expensas } = useApp()
+  const { session, consorcioActivo, unidades, copropietarios, expensas } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
