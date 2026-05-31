@@ -27,7 +27,7 @@ export default function Expensas() {
 
   async function cargar() {
     const { data } = await supabase.from('con_expensas').select('*')
-      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
+      .eq('admin_id', uid).eq('consorcio_id', consorcioId)
       .order('periodo', { ascending:false })
     setExpensas(data || [])
   }
@@ -51,7 +51,7 @@ export default function Expensas() {
     const detallesNuevos=unidades.map(u=>{
       const coef=Number(u.porcentaje_fiscal||0)
       const monto=Math.round((totalExpensa*(coef/coefTotal))*100)/100
-      return { id:`DET-${expensa.id}-${u.id}`, admin_id:session.user.id, expensa_id:expensa.id, unidad_id:u.id, consorcio_id:consorcioId, monto, estado:'pendiente', saldo_anterior:0, pagos_periodo:0 }
+      return { id:`DET-${expensa.id}-${u.id}`, admin_id:uid, expensa_id:expensa.id, unidad_id:u.id, consorcio_id:consorcioId, monto, estado:'pendiente', saldo_anterior:0, pagos_periodo:0 }
     })
     await supabase.from('con_expensas_detalle').insert(detallesNuevos)
     await cargarDetalle(expensa.id)
@@ -66,13 +66,13 @@ export default function Expensas() {
   async function guardarExpensa() {
     if (!form.periodo) return setMsg({ tipo:'warn', texto:'El período es obligatorio' })
     const id=form.id||nextId(expensas,'EXP')
-    const { error }=await supabase.from('con_expensas').upsert({ ...form, id, admin_id:session.user.id, consorcio_id:consorcioId }, { onConflict:'id' })
+    const { error }=await supabase.from('con_expensas').upsert({ ...form, id, admin_id:uid, consorcio_id:consorcioId }, { onConflict:'id' })
     if (error) return setMsg({ tipo:'error', texto:error.message })
     setForm(null); setMsg({ tipo:'ok', texto:'✓ Expensa guardada' }); cargar()
   }
   async function guardarGasto() {
     if (!formGasto.concepto||!formGasto.monto) return setMsg({ tipo:'warn', texto:'Concepto y monto obligatorios' })
-    const g={...formGasto, admin_id:session.user.id, consorcio_id:consorcioId, expensa_id:selected.id}
+    const g={...formGasto, admin_id:uid, consorcio_id:consorcioId, expensa_id:selected.id}
     if (formGasto.id) await supabase.from('con_gastos').update(g).eq('id', formGasto.id)
     else await supabase.from('con_gastos').insert([{...g, id:nextId(gastos,'GAS')}])
     setFormGasto(null); cargarDetalle(selected.id); setMsg({ tipo:'ok', texto:'✓ Gasto registrado' })
