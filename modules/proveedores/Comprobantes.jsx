@@ -233,7 +233,7 @@ export default function Comprobantes() {
 
   const fmtD2 = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
   function handlePDFComp(){
-    exportarPDF({titulo:'Comprobantes de Proveedores',logoB64:null /* null /* logo */ migrado a adminPerfil.sello_url */,
+    exportarPDF({titulo:'Comprobantes de Proveedores',logoB64:null,
       columnas:[{key:'fecha',label:'Fecha',nowrap:true},{key:'vto',label:'Vto.',nowrap:true},
         {key:'prov',label:'Proveedor'},{key:'tipo',label:'Tipo'},{key:'nro',label:'N°'},
         {key:'concepto',label:'Concepto'},{key:'total',label:'Total',align:'right'},
