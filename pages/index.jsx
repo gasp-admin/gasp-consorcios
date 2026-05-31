@@ -9531,7 +9531,7 @@ El JSON debe tener EXACTAMENTE esta estructura, sin texto adicional antes ni des
   ],
   "unidades": [
     {
-      "numero": "identificador de unidad ej: 1A, 2B, PB1",
+      "numero": "identificador COMPLETO de unidad TAL COMO aparece en el documento, incluyendo prefijo de edificio si lo tiene. Ej: 'XIII PBA', 'XIV 1A', '1 A', '2B', 'COC 37', 'LOC'. NO abreviar ni recortar.",
       "propietario": "apellido y nombre",
       "coeficiente": 0.0000,
       "expensa": 0,
@@ -9555,6 +9555,7 @@ INSTRUCCIONES IMPORTANTES:
 - Las categorías de gastos deben ser una de: sueldos, electricidad, contratos, mantenimiento, seguros, honorarios_admin, gastos_bancarios, impuesto_municipal, varios.
 - Para el estado de las unidades: "pagado" si pagó todo, "moroso" si tiene deuda del período anterior, "pendiente" si debe solo el período actual.
 - Extraé TODAS las unidades que aparezcan en la liquidación.
+- El campo "numero" DEBE contener el identificador completo incluyendo edificio si aplica (ej: "XIII PBA", "XIV 1A"). Si la unidad muestra "XIII PBA" en el documento, el numero debe ser "XIII PBA", NO "PBA".
 - Respondé ÚNICAMENTE con el JSON, sin explicaciones ni markdown.`
 
       setProgreso('Enviando a Edge Function...')
@@ -9691,9 +9692,26 @@ Esta acción no se puede deshacer fácilmente.`)) return
         const deudaTotal = parseFloat(u.total_deuda) || Math.max(0, saldoAnterior - pagadoPeriodoAnterior + expensaActual)
         const pagado     = 0  // No hay pagos de la expensa actual aún
 
-        // Encontrar la UF por número — normalizar espacios internos ("1 A" = "1A")
+        // Encontrar la UF — matching en 3 niveles
         const normNum = s => (s||'').toLowerCase().replace(/\s+/g,'')
-        const uf = ufsExistentes?.find(x => normNum(x.numero) === normNum(u.numero))
+        const normU = normNum(u.numero)
+        // Nivel 1: coincidencia exacta normalizada ("1 A" == "1A")
+        let uf = ufsExistentes?.find(x => normNum(x.numero) === normU)
+        // Nivel 2: sufijo — el PDF extrae "PBA" pero el sistema tiene "XIII PBA"
+        if (!uf) {
+          const bySuffix = ufsExistentes?.filter(x => normNum(x.numero).endsWith(normU))
+          if (bySuffix?.length === 1) {
+            uf = bySuffix[0]   // coincidencia única → usar
+          } else if (bySuffix?.length > 1 && u.propietario) {
+            // Múltiples candidatos → intentar por apellido del propietario
+            const propN = (u.propietario||'').toLowerCase().split(/[,\s]+/)[0]
+            const byProp = bySuffix.filter(x => {
+              const cp = ufsExistentes.find(y => y.id === x.id)
+              return cp?.propietario_nombre?.toLowerCase().includes(propN)
+            })
+            uf = byProp?.length === 1 ? byProp[0] : bySuffix[0]
+          }
+        }
 
         if (!uf) {
           // Crear copropietario y UF si no existe
