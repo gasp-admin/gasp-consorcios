@@ -73,8 +73,6 @@ export default function MovEntrecuentas() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
 
-  const fmt = n => '$' + Number(n||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
-  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
   const nombreCuenta = id => cuentas.find(c=>c.id===id)?.nombre || id
   const movsFiltr = movs.filter(m=>{
     const q=busqueda.toLowerCase()
