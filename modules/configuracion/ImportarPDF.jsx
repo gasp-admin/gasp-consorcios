@@ -337,7 +337,6 @@ Esta acción no se puede deshacer fácilmente.`)) return
     setImportando(false)
   }
 
-  const fmt = n => n ? '$' + Number(n).toLocaleString('es-AR', { minimumFractionDigits:2 }) : '—'
 
   return (
     <div>
