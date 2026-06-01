@@ -1,5 +1,3 @@
-// modules — HistorialLiquidaciones.jsx
-// Extraído del V59. Refactorizado: props → useApp(). Cero cambios de comportamiento.
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
@@ -12,4 +10,4 @@ import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../c
 
 export default function HistorialLiquidaciones({
   const { session, consorcioActivo, unidades, copropietarios, expensas, adminPerfil } = useApp()
-  const uid = session?.user?.id session, consorcioId, consorcioActivo, consorcios } session, consorcioId, consorcioActivo, consorcios }
+  const uid = session?.user?.id session, consorcioId, consorcioActivo, consorcios } session, consorcioId, consorcioActivo, consorcios } session, consorcioId, consorcioActivo, consorcios }
