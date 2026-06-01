@@ -24,13 +24,11 @@ export default function RendicionCuentas() {
   const [htmlVista, setHtmlVista]     = useState('')
   const [msg, setMsg]                 = useState(null)
 
-  const periodoLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const ms=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
     return m ? `${ms[parseInt(m)-1]} ${y}` : p
   }
-  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2})
 
   async function cargar() {
     const { data } = await supabase.from('con_rendicion_cuentas').select('*')
