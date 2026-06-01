@@ -1147,6 +1147,7 @@ export default function LiquidacionPeriodo() {
     setProcesando(false)
   }
 
+  const pLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const mes = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
