@@ -1,4 +1,3 @@
-// modules — LiquidacionPeriodo.jsx
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
@@ -11,5 +10,4 @@ import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../c
 
 export default function LiquidacionPeriodo({
   const { session, consorcioActivo, unidades, copropietarios, expensas, setExpensas, adminPerfil } = useApp()
-  const uid = session?.user?.id
-  const consorcioId = consorcioActivo?.id session, consorcioId, consorcioActivo, unidades, copropietarios, adminPerfil, expensas, cargar, setPagina }
+  const uid = session?.user?.id session, consorcioId, consorcioActivo, unidades, copropietarios, adminPerfil, expensas, cargar, setPagina }
