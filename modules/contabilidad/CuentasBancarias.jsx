@@ -59,7 +59,6 @@ export default function CuentasBancarias() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
 
-  const fmt = n => '$' + Number(n||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
 
   const TIPOS = [
     { v:'corriente', l:'Cuenta corriente' },
