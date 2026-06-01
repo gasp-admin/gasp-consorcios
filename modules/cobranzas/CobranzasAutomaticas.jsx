@@ -1,5 +1,3 @@
-// modules — CobranzasAutomaticas.jsx
-// Extraído del V59. Refactorizado: props → useApp(). Cero cambios de comportamiento.
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
@@ -12,4 +10,4 @@ import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../c
 
 export default function CobranzasAutomaticas({
   const { session, consorcioActivo, unidades, copropietarios, expensas } = useApp()
-  const uid = session?.user?.id session, consorcioId, consorcioActivo, unidades, copropietarios, expensas } session, consorcioId, consorcioActivo, unidades, copropietarios, expensas }
+  const uid = session?.user?.id session, consorcioId, consorcioActivo, unidades, copropietarios, expensas } session, consorcioId, consorcioActivo, unidades, copropietarios, expensas } session, consorcioId, consorcioActivo, unidades, copropietarios, expensas }
