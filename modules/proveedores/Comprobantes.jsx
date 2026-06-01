@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, extraerFacturaIA, ges
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Comprobantes() {
-  const { session, consorcioActivo, unidades, copropietarios, expensas, adminPerfil } = useApp()
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
