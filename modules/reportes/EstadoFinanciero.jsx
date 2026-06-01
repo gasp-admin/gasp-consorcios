@@ -110,7 +110,6 @@ export default function EstadoFinanciero() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId, desde, hasta])
 
-  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
   const MEDIOS_LABEL = {
     transferencia:'Transferencia', efectivo:'Efectivo',
     cheque_propio:'Cheque propio', cheque_tercero:'Cheque de tercero', otros:'Otros'
@@ -140,7 +139,6 @@ export default function EstadoFinanciero() {
     if (!datos) return
     if (!window.XLSX) await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)})
     const XLSX = window.XLSX
-    const fmt = n => Number(n)||0
     const rows = [
       ['Estado Financiero — ' + (consorcioActivo?.nombre||'')],
       ['Período: ' + desde + ' al ' + hasta],
