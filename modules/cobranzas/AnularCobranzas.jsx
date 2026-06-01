@@ -65,6 +65,7 @@ export default function AnularCobranzas() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtroExp, filtroUF])
 
+  const pLabel = p => {
     if (!p) return '—'
     const exp = expensas.find(e=>e.id===p)
     if (!exp) return p
