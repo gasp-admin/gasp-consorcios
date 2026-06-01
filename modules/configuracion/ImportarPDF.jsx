@@ -298,27 +298,45 @@ Esta acción no se puede deshacer fácilmente.`)) return
           }
           ok++
         } else {
-          // UF existente — registrar solo el saldo como nota de débito
-          if (deudaTotal > 0 || saldoAnterior > 0) {
-            const saldo = Math.max(0, deudaTotal - pagado)
-            if (saldo > 0) {
-              await supabase.from('con_movimientos_unidad').insert([{
-                id: `MOV-MIG-${Date.now()}-${ok}`,
-                admin_id: uid,
-                consorcio_id: cid,
-                unidad_id: uf.id,
-                expensa_id: expId,
-                tipo: 'debito',
-                concepto: `Saldo inicial migrado — período ${periodo}`,
-                categoria: 'ajuste_inicial',
-                monto: saldo,
-                fecha: hoy,
-                notas: `Migrado desde: ${archivo?.name}`,
-                estado: 'vigente',
-              }])
-            }
-            ok++
+          // UF existente — registrar saldo como nota de débito Y en con_liquidacion_uf
+          const saldo = Math.max(0, deudaTotal - pagado)
+          if (saldo > 0) {
+            await supabase.from('con_movimientos_unidad').insert([{
+              id: `MOV-MIG-${Date.now()}-${ok}`,
+              admin_id: uid,
+              consorcio_id: cid,
+              unidad_id: uf.id,
+              expensa_id: expId,
+              tipo: 'debito',
+              concepto: `Saldo inicial migrado — período ${periodo}`,
+              categoria: 'ajuste_inicial',
+              monto: saldo,
+              fecha: hoy,
+              notas: `Migrado desde: ${archivo?.name}`,
+              estado: 'vigente',
+            }])
           }
+          // Siempre insertar en con_liquidacion_uf (fuente de la cuenta corriente)
+          await supabase.from('con_liquidacion_uf').upsert([{
+            id: `LUFF-MIG-${cid}-${periodo}-UF${u.numero}`,
+            admin_id: uid,
+            consorcio_id: cid,
+            expensa_id: expId,
+            periodo,
+            nro_uf: String(u.numero),
+            unidad_id: uf.id,
+            propietario_nombre: u.propietario || `UF ${u.numero}`,
+            coeficiente: parseFloat(u.coeficiente) || 0,
+            saldo_anterior: saldoAnterior,
+            pagos: pagadoPeriodoAnterior,
+            deuda: 0,
+            interes: parseFloat(u.mora) || 0,
+            expensa_calculada: expensaActual,
+            ajustes: 0,
+            total_uf: deudaTotal || expensaActual,
+            fuente: 'pdf_importado',
+          }], { onConflict: 'id' })
+          ok++
         }
       }
 
@@ -656,7 +674,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
             Ya puede comenzar a operar con GASP Consorcios.
           </div>
           <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
-            <Btn onClick={() => onDone?.()}>Ir al Dashboard</Btn>
+            <Btn onClick={() => setPagina?.('dashboard')}>Ir al Dashboard</Btn>
             <BtnSec onClick={() => {
               setPaso(1); setArchivo(null); setDatos(null); setMsg(null)
             }}>Importar otro PDF</BtnSec>
