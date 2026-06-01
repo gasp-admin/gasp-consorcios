@@ -9,8 +9,9 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function GruposLiquidacion() {
-  const { session, consorcioActivo } = useApp()
-  const uid = session?.user?.id session, consorcioId, consorcioActivo } session, consorcioId, consorcioActivo }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [grupos, setGrupos]     = useState([])
   const [columnas, setColumnas] = useState([])
   const [tab, setTab]           = useState('grupos') // 'grupos' | 'columnas'
