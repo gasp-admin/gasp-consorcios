@@ -9,8 +9,9 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function ReporteMovimientos() {
-  const { session, consorcioActivo, expensas } = useApp()
-  const uid = session?.user?.id session, consorcioId, consorcioActivo, expensas } session, consorcioId, consorcioActivo, expensas }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [expSel, setExpSel]     = useState('')
   const [datos, setDatos]       = useState(null)
   const [cargando, setCargando] = useState(false)
