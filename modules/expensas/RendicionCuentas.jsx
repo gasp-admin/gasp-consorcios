@@ -24,6 +24,7 @@ export default function RendicionCuentas() {
   const [htmlVista, setHtmlVista]     = useState('')
   const [msg, setMsg]                 = useState(null)
 
+  const pLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const ms=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
