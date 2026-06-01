@@ -93,8 +93,7 @@ export default function Cobranzas() {
         await supabase.rpc('registrar_notificacion_pago', {
           p_cobranza_id: cobId, p_admin_id: uid, p_consorcio_id: consorcioId
         })
-      }
-    } catch(e) { /* no crítico */ }
+      } catch(e) { /* no crítico */ }
     seleccionarExpensa(expSel)
   }
 
