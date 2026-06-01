@@ -334,7 +334,6 @@ export default function CobranzasAutomaticas() {
       if (authRes.error || !authRes.access_token)
         throw new Error(`Error autenticación SIRO: ${authRes.error || 'Sin token'}`)
       const access_token = authRes.access_token
-    const pLabel = expSel => {
     const exp = expensas.find(e=>e.id===expSel)
       const [y,m] = (exp?.periodo||'').split('-')
       const fd = `${y}${m}01`, fh = `${y}${m}${new Date(parseInt(y),parseInt(m),0).getDate()}`
