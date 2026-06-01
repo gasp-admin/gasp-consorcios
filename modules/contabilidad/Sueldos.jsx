@@ -5,11 +5,13 @@ import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/con
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
-import { getCuentaCorriente, siroProxy, enviarLiquidacion, leerReciboSueldo, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
+import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Sueldos() {
-  const { session, consorcioActivo, expensas } = useApp() session, consorcioId, consorcioActivo, expensas } session, consorcioId, consorcioActivo, expensas } session, consorcioId, consorcioActivo, expensas }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [tab, setTab]           = useState('liquidar')
   const [empleados, setEmpleados] = useState([])
   const [sueldos, setSueldos]   = useState([])
