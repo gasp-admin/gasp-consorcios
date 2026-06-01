@@ -8,7 +8,7 @@ import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/con
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
-import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
+import { getCuentaCorriente, siroProxy, enviarLiquidacion, enviarNotificacion, generarActaAsamblea, extraerPdfIA, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Asambleas() {
