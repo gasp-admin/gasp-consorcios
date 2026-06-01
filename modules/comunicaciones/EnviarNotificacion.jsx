@@ -72,7 +72,6 @@ export default function EnviarNotificacion() {
       }
       const res  = await enviarNotificacion(payload, token)
       setCuerpo(''); setAdjunto(null)
-    }
     } catch(e) {
       setMsg({ tipo:'error', texto: 'Error: ' + e.message })
     }
