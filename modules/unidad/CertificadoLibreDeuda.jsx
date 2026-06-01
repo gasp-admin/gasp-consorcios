@@ -8,7 +8,7 @@ import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/con
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
-import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
+import { getCuentaCorriente, siroProxy, enviarLiquidacion, generarCertificadoLibreDeuda, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function CertificadoLibreDeuda() {
@@ -185,7 +185,7 @@ export default function CertificadoLibreDeuda() {
         tiene_fondo_reserva: tieneFondo,
       }
 
-      const res  = await fetch(`${SUPA_URL}/functions/v1/generar-certificado-libre-deuda`, {
+      const res  = await generarCertificadoLibreDeuda(, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
