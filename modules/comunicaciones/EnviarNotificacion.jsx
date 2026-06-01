@@ -70,7 +70,9 @@ export default function EnviarNotificacion() {
         adjunto:       adjunto ? { nombre: adjunto.nombre, tipo: adjunto.tipo, base64: adjunto.base64 } : null,
         drive_link:    (inclDrive && driveFolderUrl) ? driveFolderUrl : null,
       }
-      const res  = await enviarNotificacion(payload, token); setCuerpo(''); setAdjunto(null) }
+      const res  = await enviarNotificacion(payload, token)
+      setCuerpo(''); setAdjunto(null)
+    }
     } catch(e) {
       setMsg({ tipo:'error', texto: 'Error: ' + e.message })
     }
