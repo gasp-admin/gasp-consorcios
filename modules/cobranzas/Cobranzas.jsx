@@ -1,6 +1,5 @@
 // modules — Cobranzas.jsx
 // Extraído del V59. Refactorizado: props → useApp(). Cero cambios de comportamiento.
-
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
@@ -11,7 +10,5 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
-export default function Cobranzas() {
-
 export default function Cobranzas({
-  const { session, consorcioActivo, unidades, copropietarios, expensas } = useApp() session, consorcioId, unidades, copropietarios, adminPerfil }
+  const { session, consorcioActivo, unidades, copropietarios, expensas } = useApp() session, consorcioId, unidades, copropietarios, adminPerfil } session, consorcioId, unidades, copropietarios, adminPerfil }
