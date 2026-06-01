@@ -155,9 +155,6 @@ export default function ReciboPago() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtroExp, filtroUF])
 
-  const fmt = n => '$' + Number(n).toLocaleString('es-AR', { minimumFractionDigits:2 })
-  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
-  const periodoLabel = pid => {
     const exp = expensas.find(e=>e.id===pid)
     if (!exp) return '—'
     const [y,m] = (exp.periodo||'').split('-')
