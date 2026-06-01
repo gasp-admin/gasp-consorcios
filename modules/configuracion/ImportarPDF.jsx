@@ -182,9 +182,26 @@ Esta acción no se puede deshacer fácilmente.`)) return
         }
       }
 
-      // 2. Crear expensa de apertura/migración
-      const expId = `EXP-MIG-${consorcioId}-${Date.now()}`
-      await supabase.from('con_expensas').insert([{
+      // 2. Usar expensa existente o crear nueva de migración
+      let expId
+      const { data: expExistente } = await supabase.from('con_expensas')
+        .select('id').eq('consorcio_id', cid).eq('periodo', periodo).maybeSingle()
+      if (expExistente?.id) {
+        expId = expExistente.id
+        // Actualizar la existente con los datos del PDF
+        await supabase.from('con_expensas').update({
+          tipo: 'migracion',
+          estado: 'cerrada',
+          total_gastos: datos.totales?.total_gastos || 0,
+          total_expensa: datos.totales?.total_expensa || 0,
+          saldo_caja_final: datos.totales?.saldo_caja_final || 0,
+          descripcion: `Período migrado desde liquidación anterior (${archivo?.name})`,
+          pdf_procesado: true,
+          pdf_procesado_at: new Date().toISOString(),
+        }).eq('id', expId)
+      } else {
+        expId = `EXP-MIG-${cid}-${Date.now()}`
+        await supabase.from('con_expensas').insert([{
         id: expId,
         admin_id: uid,
         consorcio_id: cid,
@@ -195,6 +212,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
         total_expensa: datos.totales?.total_expensa || 0,
         descripcion: `Período migrado desde liquidación anterior (${archivo?.name})`,
       }])
+      }
 
       // 3. Cargar gastos del período anterior
       for (const g of (datos.gastos||[])) {
@@ -324,7 +342,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
       setAsignaciones({})
       setMsg({
         tipo: errs.length === 0 ? 'ok' : 'warn',
-        texto: `✓ Migración completada — ${ok} registros importados' + (errs.length>0?' · '+errs.length+' errores':'') + '`
+        texto: `✓ Migración completada — ${ok} registros importados${errs.length>0?' · '+errs.length+' errores':''}`
       })
       setPaso(4)
 
