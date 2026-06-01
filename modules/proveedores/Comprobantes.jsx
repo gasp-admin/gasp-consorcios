@@ -1,4 +1,4 @@
-// modules — Comprobantes.jsx
+// modules — Comprobantes.jsx — fix hooks order 1780275360
 // Extraído del V59. Refactorizado: props → useApp(). Cero cambios de comportamiento.
 
 import { useState, useEffect, useCallback, useRef } from 'react'
