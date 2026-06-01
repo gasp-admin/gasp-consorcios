@@ -21,6 +21,7 @@ export default function Copropietarios() {
   const [form, setForm] = useState(null)
   const [msg, setMsg] = useState(null)
   const [tabForm, setTabForm] = useState('principal')
+  const [busqueda, setBusqueda] = useState('')
   const F = f => setForm(x => ({ ...x, ...f }))
 
   async function cargar() {
@@ -63,7 +64,6 @@ export default function Copropietarios() {
     { id:'fiscal', label:'Datos fiscales' },
   ]
 
-  const [busqueda, setBusqueda] = useState('')
   const filtrados = lista.filter(cp => {
     const q = busqueda.toLowerCase()
     return !q || cp.apellido_nombre?.toLowerCase().includes(q)
