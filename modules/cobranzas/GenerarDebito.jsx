@@ -110,7 +110,6 @@ export default function GenerarDebito() {
     // Formato TXT para subir a onlinesiro.com.ar
     // Columnas: nro_referencia | nombre | importe_minimo | fecha_vto1 | importe_maximo | fecha_vto2
     // (formato CSV/TXT que acepta la web de SIRO para carga masiva de deuda)
-  const pLabel = expSel => {
     const exp = expensas.find(e => e.id === expSel)
     const periodo = exp?.periodo || ''
     const [y, m] = periodo.split('-')
