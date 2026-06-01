@@ -9,8 +9,9 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function HistorialLiquidaciones() {
-  const { session, consorcioActivo, unidades, copropietarios, expensas, adminPerfil } = useApp()
-  const uid = session?.user?.id session, consorcioId, consorcioActivo, consorcios } session, consorcioId, consorcioActivo, consorcios } session, consorcioId, consorcioActivo, consorcios }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const SB = 'https://payzqbkydmvovjxlznuq.supabase.co';
   const AK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBheXpxYmt5ZG12b3ZqeGx6bnVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0OTg0ODAsImV4cCI6MjA5MTA3NDQ4MH0.ut-cHjkd1oztZa-W3uYRbHDScEB4RLg55WtfIcBidm8';
   const EF_URL = `${SB}/functions/v1/importar-liquidacion-historica`;
