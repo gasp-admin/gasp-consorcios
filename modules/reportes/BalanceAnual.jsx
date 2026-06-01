@@ -11,6 +11,27 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
+const BA_CATS_LABEL = {
+  contratos_abonos:'CONTRATOS Y ABONOS', gastos_bancarios:'GASTOS BANCARIOS',
+  honorarios_admin:'GASTOS DE ADMINISTRACIÓN', impuesto_municipal:'IMPUESTO MUNICIPAL',
+  mantenimiento:'MANTENIMIENTO GENERAL', otros:'OTROS EGRESOS',
+  seguros:'SEGUROS', servicios_publicos:'SERVICIOS PÚBLICOS', varios:'VARIOS'
+}
+function baNormCat(c) {
+  const cc = (c||'').toLowerCase()
+    .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+    .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').trim()
+  if (cc.includes('contrat')||cc.includes('abon')||cc.includes('piscin')||cc.includes('limpiez')||cc.includes('porton')||cc.includes('portón')) return 'contratos_abonos'
+  if (cc.includes('banc')||cc.includes('financiero')) return 'gastos_bancarios'
+  if (cc.includes('honorar')||cc.includes('admin')) return 'honorarios_admin'
+  if (cc.includes('municipal')||cc.includes('impuest')) return 'impuesto_municipal'
+  if (cc.includes('manten')||cc.includes('parque')||cc.includes('ascensor')||cc.includes('bomba')||cc.includes('pintura')||cc.includes('matafuego')||cc.includes('construc')||cc.includes('electric')||cc.includes('gas mant')) return 'mantenimiento'
+  if (cc.includes('seguro')) return 'seguros'
+  if (cc.includes('energia')||cc.includes('energía')||cc.includes('gas serv')||cc.includes('servicio publ')||cc.includes('calp')||cc.includes('camuzzi')||cc.includes('edenor')||cc.includes('edea')) return 'servicios_publicos'
+  if (cc.includes('varios')||cc.includes('material')||cc.includes('ferret')) return 'varios'
+  return 'otros'
+}
+
 export default function BalanceAnual() {
   const { session, consorcioActivo } = useApp()
   const consorcioId = consorcioActivo?.id
