@@ -87,8 +87,6 @@ export default function PagosProveedor() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
 
-  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR')
-  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
 
   const MEDIOS = [
     {v:'transferencia',l:'Transferencia'},{v:'cheque_propio',l:'Cheque propio'},
