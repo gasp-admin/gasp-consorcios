@@ -9,7 +9,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function CobranzasAutomaticas() {
-  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const { session, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, cargando, esSuperAdmin, consorcios, setConsorcios, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio } = useApp()
   const uid = session?.user?.id
   const consorcioId = consorcioActivo?.id
   const [tab, setTab]             = useState('importar')
