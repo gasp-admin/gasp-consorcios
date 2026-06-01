@@ -144,8 +144,6 @@ export default function GenerarDebito() {
     setMsg({ tipo:'ok', texto:`✓ Archivo SIRO generado — ${nroReg} unidades` })
   }
 
-  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
-  const periodoLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const mes = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
