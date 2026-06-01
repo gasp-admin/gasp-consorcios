@@ -26,6 +26,9 @@ export default function Comprobantes() {
   const [archivoFactura, setArchivoFactura] = useState(null)
   const [filtroEstado, setFiltroEstado] = useState('')
   const [busquedaComp, setBusquedaComp] = useState('')
+  const [tabComp, setTabComp]         = useState('proveedores')
+  const [gastosSueldos, setGastosSueldos] = useState([])
+  const [cargandoSueldos, setCargandoSueldos] = useState(false)
   const hoy = new Date().toISOString().split('T')[0]
 
   // ── Extraer datos de factura PDF con IA ───────────────────────────────────
@@ -282,10 +285,8 @@ export default function Comprobantes() {
 
 
 
-  // ── Tab sueldos: gastos de con_gastos de categoría sueldos/fateryh/vep_931 ──
-  const [tabComp, setTabComp]         = useState('proveedores')
-  const [gastosSueldos, setGastosSueldos] = useState([])
-  const [cargandoSueldos, setCargandoSueldos] = useState(false)
+
+  // ── Tab sueldos ──
 
   async function cargarGastosSueldos() {
     setCargandoSueldos(true)
