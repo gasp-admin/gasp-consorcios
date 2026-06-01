@@ -20,6 +20,8 @@ export default function CtaProveedor() {
   const [comps, setComps]     = useState([])
   const [pagos, setPagos]     = useState([])
   const [cargando, setCargando] = useState(false)
+  const [fDesde, setFDesde] = useState('')
+  const [fHasta, setFHasta] = useState('')
 
   async function cargar(pid) {
     if (!pid) return
@@ -41,8 +43,6 @@ export default function CtaProveedor() {
 
   const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
   const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
-  const [fDesde, setFDesde] = useState('')
-  const [fHasta, setFHasta] = useState('')
 
   const totalDeuda    = comps.filter(c=>c.estado!=='anulado').reduce((a,c)=>a+(parseFloat(c.monto_total)||0),0)
   const totalPagado   = pagos.reduce((a,p)=>a+(parseFloat(p.monto)||0),0)
