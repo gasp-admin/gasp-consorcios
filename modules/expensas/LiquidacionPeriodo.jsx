@@ -9,8 +9,9 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function LiquidacionPeriodo() {
-  const { session, consorcioActivo, unidades, copropietarios, expensas, setExpensas, adminPerfil } = useApp()
-  const uid = session?.user?.id session, consorcioId, consorcioActivo, unidades, copropietarios, adminPerfil, expensas, cargar, setPagina }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [paso, setPaso]           = useState(1) // 1=período, 2=gastos, 3=distribución, 4=cierre
   const [expSel, setExpSel]       = useState(null)  // expensa en edición
   const [gastos, setGastos]       = useState([])
