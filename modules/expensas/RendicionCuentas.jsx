@@ -1,4 +1,3 @@
-// modules — RendicionCuentas.jsx
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
@@ -11,5 +10,4 @@ import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../c
 
 export default function RendicionCuentas({
   const { session, consorcioActivo, expensas, copropietarios, unidades } = useApp()
-  const uid = session?.user?.id
-  const consorcioId = consorcioActivo?.id session, consorcioId, consorcioActivo, expensas, copropietarios, unidades }
+  const uid = session?.user?.id session, consorcioId, consorcioActivo, expensas, copropietarios, unidades }
