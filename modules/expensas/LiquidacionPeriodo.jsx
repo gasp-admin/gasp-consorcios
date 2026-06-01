@@ -46,6 +46,8 @@ export default function LiquidacionPeriodo() {
   // Grupos y columnas de liquidación del consorcio activo
   const [gruposLiq, setGruposLiq]     = useState([])
   const [[], setColumnasLiq] = useState([])
+  const [notasPeriodo, setNotasPeriodo] = useState('')
+  const [cargandoNotas, setCargandoNotas] = useState(false)
   const hoy = new Date().toISOString().split('T')[0]
 
   // Cargar grupos y columnas cuando cambia el consorcio
@@ -530,8 +532,6 @@ export default function LiquidacionPeriodo() {
     setPaso(3)
   }
 
-  const [notasPeriodo, setNotasPeriodo] = useState('')
-  const [cargandoNotas, setCargandoNotas] = useState(false)
 
   // Cargar notas del período cuando se selecciona la expensa
   useEffect(() => {
