@@ -390,6 +390,7 @@ export default function CobranzasAutomaticas() {
   const totalImp = activos.reduce((a,r)=>a+r.importe,0)
   const selIds   = activos.map(r=>r._id)
 
+  const pLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const mes = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
