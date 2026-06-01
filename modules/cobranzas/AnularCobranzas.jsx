@@ -65,9 +65,6 @@ export default function AnularCobranzas() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtroExp, filtroUF])
 
-  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR')
-  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
-  const periodoLabel = p => {
     if (!p) return '—'
     const exp = expensas.find(e=>e.id===p)
     if (!exp) return p
