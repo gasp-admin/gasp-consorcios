@@ -18,6 +18,7 @@ export default function Unidades() {
 
   const [form, setForm] = useState(null)
   const [msg, setMsg] = useState(null)
+  const [busqueda, setBusqueda] = useState('')
   const F = f => setForm(x => ({ ...x, ...f }))
 
   async function cargar() {
@@ -39,7 +40,6 @@ export default function Unidades() {
   }
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
 
-  const [busqueda, setBusqueda] = useState('')
   const TIPOS=['departamento','local','cochera','baulera','oficina','otro']
   const ESTADOS=['ocupada','desocupada','en_venta']
   const totalCoef=unidades.reduce((a,u)=>a+(Number(u.porcentaje_fiscal)||0),0)
