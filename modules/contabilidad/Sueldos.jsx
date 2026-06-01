@@ -1,6 +1,5 @@
 // modules — Sueldos.jsx
 // Extraído del V59. Refactorizado: props → useApp(). Cero cambios de comportamiento.
-
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
@@ -11,7 +10,5 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, leerReciboSueldo, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
-export default function Sueldos() {
-
 export default function Sueldos({
-  const { session, consorcioActivo, expensas } = useApp() session, consorcioId, consorcioActivo, expensas }
+  const { session, consorcioActivo, expensas } = useApp() session, consorcioId, consorcioActivo, expensas } session, consorcioId, consorcioActivo, expensas }
