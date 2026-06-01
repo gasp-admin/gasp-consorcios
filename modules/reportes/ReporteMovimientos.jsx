@@ -71,6 +71,7 @@ export default function ReporteMovimientos() {
 
   useEffect(() => { if (expSel) cargar(expSel) }, [expSel])
 
+  const pLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
