@@ -9,8 +9,9 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function EmailTracking() {
-  const { session, consorcioActivo, unidades, copropietarios, expensas, adminPerfil } = useApp()
-  const uid = session?.user?.id session, consorcioId } session, consorcioId }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [logs, setLogs]           = useState([])
   const [cargando, setCargando]   = useState(true)
   const [filtroEstado, setFiltroEstado] = useState('')
