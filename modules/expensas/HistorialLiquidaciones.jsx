@@ -97,8 +97,7 @@ export default function HistorialLiquidaciones() {
         setMsg(`⚠️ No se pudo listar la carpeta automáticamente (requiere Google API Key en el servidor). Usá la Opción B pegando los IDs de los PDFs directamente.`);
         // Pre-rellenar el campo de Opción B con el folder ID para orientar al usuario
         setFileIdsManual(`# Folder ID detectado: ${folderId}\n# Pegá aquí los IDs de los PDFs de Drive (uno por línea)\n# Los IDs se encuentran en la URL de cada archivo:\n# drive.google.com/file/d/ID_AQUI/view`);
-      }
-    } catch (e) {
+      } catch (e) {
       setMsg(`❌ Error al conectar con el servidor: ${e.message}. Usá la Opción B.`);
     } finally { setLoading(false); }
   };
