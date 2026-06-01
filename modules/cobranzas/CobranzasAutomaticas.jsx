@@ -34,7 +34,6 @@ export default function CobranzasAutomaticas() {
   const [todosConsorcios, setTodosConsorcios] = useState([])
 
   const hoy = new Date().toISOString().split('T')[0]
-  const fmtN = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
 
   async function cargarConfig() {
     const { data } = await supabase.from('con_config_cobranza').select('*')
@@ -391,7 +390,6 @@ export default function CobranzasAutomaticas() {
   const totalImp = activos.reduce((a,r)=>a+r.importe,0)
   const selIds   = activos.map(r=>r._id)
 
-  const periodoLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const mes = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
