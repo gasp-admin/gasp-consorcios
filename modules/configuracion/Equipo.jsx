@@ -15,6 +15,7 @@ export default function Actas() {
   const { session, copropietarios, consorcioActivo} = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
+  if (!session) return <div style={{textAlign:'center',padding:40,color:'#6b7280'}}>Cargando...</div>
 
   const [actas, setActas]     = useState([])
   const [form, setForm]       = useState(null)
