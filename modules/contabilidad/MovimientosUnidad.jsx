@@ -75,7 +75,6 @@ export default function MovimientosUnidad() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtroUF])
 
-  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR')
   const hoy = new Date().toISOString().split('T')[0]
 
   const CATEGORIAS = [
