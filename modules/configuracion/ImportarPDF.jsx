@@ -19,6 +19,7 @@ export default function ImportarPDF() {
   const [msg, setMsg]               = useState(null)
   const [datos, setDatos]           = useState(null)
   const [edits, setEdits]           = useState({})
+  const [asignaciones, setAsignaciones] = useState({})
   const [progreso, setProgreso]     = useState('')
   // Consorcio destino — puede ser diferente al activo
   const [consorcios, setConsorcios] = useState([])
