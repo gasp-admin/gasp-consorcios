@@ -554,7 +554,6 @@ export default function LiquidacionPeriodo() {
     // ── Datos base ──────────────────────────────────────────────────────────
     const totalGastosTotal = gastos.reduce((a,g)=>a+parseFloat(g.monto||0),0)
     const per = periodoLabel(expSel?.periodo)
-    const fmtN = n => (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
 
     // Fechas correctas
     const [yy, mm] = (expSel?.periodo || '').split('-')
@@ -1148,9 +1147,6 @@ export default function LiquidacionPeriodo() {
     setProcesando(false)
   }
 
-  const fmt  = (n) => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
-  const fmtD = (d) => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
-  const periodoLabel = (p) => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const mes = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
