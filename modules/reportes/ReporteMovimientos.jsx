@@ -23,6 +23,7 @@ export default function ReporteMovimientos() {
   async function cargar(eid) {
     if (!eid) return
     setCargando(true)
+  const pLabel = eid => {
     const exp = expensas.find(e => e.id === eid)
 
     const [
