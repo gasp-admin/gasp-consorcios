@@ -23,10 +23,11 @@ export default function PerfilAdmin() {
   const [tabActiva, setTabActiva] = useState('datos')
 
   useEffect(() => {
+    if (!uid) return
     async function cargar() {
       const { data } = await supabase.from('con_admin_perfil').select('*').eq('admin_id',uid).single()
-      if (data) setPerfil({...data, email:data.email||session.user.email||''})
-      else setPerfil(p=>({...p, email:session.user.email||''}))
+      if (data) setPerfil({...data, email:data.email||session?.user?.email||''})
+      else setPerfil(p=>({...p, email:session?.user?.email||''}))
       setCargando(false)
     }
     cargar()
