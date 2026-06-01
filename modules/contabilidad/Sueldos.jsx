@@ -246,6 +246,7 @@ export default function Sueldos() {
     const filasActivas = filas.filter(f => f.incluir && parseMto(f.sueldo_neto) > 0)
     if (filasActivas.length === 0) return setMsg({ tipo:'warn', texto:'No hay filas con sueldo neto mayor a cero' })
     setProcesando(true); setMsg(null)
+  const pLabel = expSel => {
     const exp = expensas.find(e => e.id === expSel)
     const periodo = exp?.periodo || ''
     let ok = 0, errores = []
