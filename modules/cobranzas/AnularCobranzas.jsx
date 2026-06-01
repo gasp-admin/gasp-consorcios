@@ -9,8 +9,9 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function AnularCobranzas() {
-  const { session, unidades, copropietarios, expensas, consorcioActivo} = useApp()
-  const uid = session?.user?.id session, consorcioId, unidades, copropietarios, expensas } session, consorcioId, unidades, copropietarios, expensas }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [cobranzas, setCobranzas] = useState([])
   const [filtroExp, setFiltroExp] = useState('')
   const [filtroUF, setFiltroUF]   = useState('')
