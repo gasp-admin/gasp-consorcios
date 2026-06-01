@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: false,
-  generateBuildId: async () => 'build-1780311854',
+  generateBuildId: async () => 'build-1780312011',
 }
 module.exports = nextConfig
