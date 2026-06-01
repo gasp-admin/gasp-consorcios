@@ -38,7 +38,6 @@ export default function Sueldos() {
   // input de archivo — se accede por ID directo sin useRef
 
   const hoy = new Date().toISOString().split('T')[0]
-  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
   // parseMto: soporta tanto formato argentino "1.234,56" como numérico "1234.56"
   // Los inputs type=number del browser envían punto decimal estándar (no formato argentino)
   const parseMto = s => {
@@ -70,7 +69,6 @@ export default function Sueldos() {
     { v:'otro',                 l:'Otro' },
   ]
 
-  const periodoLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const meses=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
