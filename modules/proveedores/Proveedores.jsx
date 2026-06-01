@@ -19,6 +19,7 @@ export default function Proveedores() {
   const [lista, setLista] = useState([])
   const [form, setForm]   = useState(null)
   const [msg, setMsg]     = useState(null)
+  const [busqueda, setBusqueda] = useState('')
   const F = f => setForm(x=>({...x,...f}))
 
   async function cargar() {
@@ -46,7 +47,6 @@ export default function Proveedores() {
   }
   useEffect(()=>{ if (consorcioId) cargar() },[consorcioId])
   const RUBROS=['limpieza','plomería','electricidad','gas','pintura','jardinería','ascensores','seguros','administración','otros']
-  const [busqueda, setBusqueda] = useState('')
   const filtrados = lista.filter(p => {
     const q = busqueda.toLowerCase()
     return !q || p.razon_social?.toLowerCase().includes(q) || p.cuit?.toLowerCase().includes(q)
