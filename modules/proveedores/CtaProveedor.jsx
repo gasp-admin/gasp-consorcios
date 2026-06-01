@@ -41,8 +41,6 @@ export default function CtaProveedor() {
 
   useEffect(() => { if (provSel) cargar(provSel) }, [provSel])
 
-  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
-  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
 
   const totalDeuda    = comps.filter(c=>c.estado!=='anulado').reduce((a,c)=>a+(parseFloat(c.monto_total)||0),0)
   const totalPagado   = pagos.reduce((a,p)=>a+(parseFloat(p.monto)||0),0)
