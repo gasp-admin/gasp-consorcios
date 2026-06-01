@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function ListadoConsorcios() {
-  const { session, consorcioActivo, consorcios } = useApp()
+  const { session, consorcioActivo, consorcios, cargando } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
@@ -135,6 +135,8 @@ export default function ListadoConsorcios() {
       }))
     })
   }
+
+  if (cargando) return <div style={{ padding:32, textAlign:'center', color:'#6b7280' }}>Cargando consorcios...</div>
 
   return (
     <div>
