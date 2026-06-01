@@ -1,6 +1,3 @@
-// modules — ControlPeriodos.jsx
-// Extraído del V59. Props → useApp().
-
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
@@ -11,8 +8,5 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
-export default function ControlPeriodos() {
-  const { session, consorcioActivo, expensas } = useApp()
-  const consorcioId = consorcioActivo?.id
-
-export default function ControlPeriodos({ session, consorcioId, consorcioActivo, expensas }
+export default function ControlPeriodos({
+  const { session, consorcioActivo, expensas } = useApp() session, consorcioId, consorcioActivo, expensas }
