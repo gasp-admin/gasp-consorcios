@@ -21,6 +21,8 @@ export default function ImportarPDF() {
   const [edits, setEdits]           = useState({})
   const [asignaciones, setAsignaciones] = useState({})
   const [progreso, setProgreso]     = useState('')
+  const [driveFileId, setDriveFileId] = useState('')
+  const [importandoDrive, setImportandoDrive] = useState(false)
   // Consorcio destino — puede ser diferente al activo
   const [consorcios, setConsorcios] = useState([])
   const [conIdDestino, setConIdDestino]   = useState(consorcioId)
@@ -41,6 +43,43 @@ export default function ImportarPDF() {
       reader.onerror = () => rej(new Error('Error leyendo archivo'))
       reader.readAsDataURL(file)
     })
+  }
+
+  async function importarDesdedriveGrande() {
+    if (!driveFileId.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el ID del archivo en Google Drive' })
+    if (!conIdDestino) return setMsg({ tipo:'warn', texto:'Selección un consorcio destino' })
+    setImportandoDrive(true); setMsg(null)
+    setProgreso('Procesando PDF desde Drive (2 llamadas IA)...')
+    try {
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const colaId = 'COLA-' + conIdDestino + '-' + driveFileId.trim()
+      await supabase.from('con_importacion_cola').upsert({
+        id: colaId, admin_id: sess.user.id,
+        consorcio_id: conIdDestino, consorcio_nombre: conNomDestino,
+        drive_file_id: driveFileId.trim(),
+        drive_file_nombre: 'Liquidacion ' + conNomDestino,
+        estado: 'pendiente'
+      }, { onConflict: 'id' })
+      setProgreso('IA procesando (2-4 min)...')
+      const resp = await fetch(SUPA_URL + '/functions/v1/importar-liquidacion-historica', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess?.access_token },
+        body: JSON.stringify({
+          accion: 'procesar_pdf', cola_id: colaId,
+          pdf_id: driveFileId.trim(),
+          pdf_url: 'https://drive.google.com/file/d/' + driveFileId.trim() + '/view',
+          consorcio_id: conIdDestino
+        })
+      })
+      if (!resp.ok) { const e = await resp.json().catch(()=>({})); throw new Error(e.error || 'Error ' + resp.status) }
+      const res = await resp.json()
+      if (!res.ok) throw new Error(res.error || 'Error desconocido')
+      setMsg({ tipo:'ok', texto:'Completado — ' + res.ufs + ' UFs, período ' + res.periodo })
+      setProgreso(''); setDriveFileId('')
+    } catch(e) {
+      setMsg({ tipo:'error', texto: 'Error: ' + e.message }); setProgreso('')
+    }
+    setImportandoDrive(false)
   }
 
   async function extraerConIA() {
@@ -401,6 +440,23 @@ Esta acción no se puede deshacer fácilmente.`)) return
   return (
     <div>
       <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>🤖 Migrar desde liquidación PDF</div>
+          <div style={{ background:'#fef9c3', border:'2px solid #fde047', borderRadius:12, padding:16, marginBottom:16 }}>
+            <div style={{ fontWeight:600, color:'#854d0e', marginBottom:4 }}>Edificios grandes (+150 UFs) — desde Google Drive</div>
+            <div style={{ fontSize:13, color:'#78350f', marginBottom:10 }}>Subí el PDF a Drive, copiá el ID del archivo (desde la URL) y usá este método.</div>
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-end' }}>
+              <div style={{ flex:1, minWidth:200 }}>
+                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>ID del archivo en Google Drive</div>
+                <input value={driveFileId} onChange={e=>setDriveFileId(e.target.value)}
+                  placeholder="ej: 1Ce2jNv6MLxFVK1JnElSm_X5WFY..."
+                  style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:8, fontSize:13 }} />
+              </div>
+              <button onClick={importarDesdedriveGrande} disabled={importandoDrive || !driveFileId}
+                style={{ padding:'8px 16px', background: importandoDrive||!driveFileId ? '#d1d5db':'#1d4ed8', color:'white', border:'none', borderRadius:8, cursor:'pointer', fontWeight:600 }}>
+                {importandoDrive ? 'Procesando...' : 'Importar desde Drive'}
+              </button>
+            </div>
+            {progreso && importandoDrive && <div style={{ fontSize:13, color:'#78350f', marginTop:8 }}>{progreso}</div>}
+          </div>
       <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
         La IA extrae automáticamente los datos de su última liquidación para armar la base de datos inicial
       </div>
