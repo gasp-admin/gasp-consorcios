@@ -303,19 +303,34 @@ Esta acción no se puede deshacer fácilmente.`)) return
           }
           ok++
         } else {
-          // UF existente — registrar saldo como nota de débito Y en con_liquidacion_uf
-          const saldo = Math.max(0, deudaTotal - pagado)
-          if (saldo > 0) {
+          // UF existente — débito=expensa, crédito=pagos (estructura correcta para cta cte)
+          if (expensaActual > 0) {
             await supabase.from('con_movimientos_unidad').insert([{
-              id: `MOV-MIG-${Date.now()}-${ok}`,
+              id: `MOV-MIG-${Date.now()}-${ok}-D`,
               admin_id: uid,
               consorcio_id: cid,
               unidad_id: uf.id,
               expensa_id: expId,
               tipo: 'debito',
-              concepto: `Saldo inicial migrado — período ${periodo}`,
-              categoria: 'ajuste_inicial',
-              monto: saldo,
+              concepto: `Expensa período ${periodo}`,
+              categoria: 'expensa',
+              monto: expensaActual,
+              fecha: hoy,
+              notas: `Migrado desde: ${archivo?.name}`,
+              estado: 'vigente',
+            }])
+          }
+          if (pagadoPeriodoAnterior > 0) {
+            await supabase.from('con_movimientos_unidad').insert([{
+              id: `MOV-MIG-${Date.now()}-${ok}-C`,
+              admin_id: uid,
+              consorcio_id: cid,
+              unidad_id: uf.id,
+              expensa_id: expId,
+              tipo: 'credito',
+              concepto: `Pago período ${periodo}`,
+              categoria: 'pago',
+              monto: pagadoPeriodoAnterior,
               fecha: hoy,
               notas: `Migrado desde: ${archivo?.name}`,
               estado: 'vigente',
