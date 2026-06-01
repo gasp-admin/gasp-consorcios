@@ -21,6 +21,9 @@ export default function MovEntrecuentas() {
   const [form, setForm]         = useState(null)
   const [msg, setMsg]           = useState(null)
   const [guardando, setGuardando] = useState(false)
+  const [busqueda, setBusqueda] = useState('')
+  const [fDesde, setFDesde] = useState('')
+  const [fHasta, setFHasta] = useState('')
   const hoy = new Date().toISOString().split('T')[0]
 
   async function cargar() {
@@ -73,9 +76,6 @@ export default function MovEntrecuentas() {
   const fmt = n => '$' + Number(n||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
   const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
   const nombreCuenta = id => cuentas.find(c=>c.id===id)?.nombre || id
-  const [busqueda, setBusqueda] = useState('')
-  const [fDesde, setFDesde] = useState('')
-  const [fHasta, setFHasta] = useState('')
   const movsFiltr = movs.filter(m=>{
     const q=busqueda.toLowerCase()
     return (!q||m.concepto?.toLowerCase().includes(q)||nombreCuenta(m.cuenta_origen).toLowerCase().includes(q))
