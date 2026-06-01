@@ -11,6 +11,7 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
+const BA_CATS_ORDER = ['contratos_abonos','gastos_bancarios','honorarios_admin','impuesto_municipal','mantenimiento','otros','seguros','servicios_publicos','varios']
 const BA_CATS_LABEL = {
   contratos_abonos:'CONTRATOS Y ABONOS', gastos_bancarios:'GASTOS BANCARIOS',
   honorarios_admin:'GASTOS DE ADMINISTRACIÓN', impuesto_municipal:'IMPUESTO MUNICIPAL',
