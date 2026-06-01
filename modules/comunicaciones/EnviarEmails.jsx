@@ -9,8 +9,9 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function EnviarEmails() {
-  const { session, unidades, adminPerfil, consorcioActivo} = useApp()
-  const uid = session?.user?.id session, consorcioId, unidades, adminPerfil } session, consorcioId, unidades, adminPerfil }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [expensas, setExpensas]   = useState([])
   const [expSel, setExpSel]       = useState('')
   const [testEmail, setTestEmail] = useState('')
