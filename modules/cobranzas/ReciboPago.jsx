@@ -155,6 +155,7 @@ export default function ReciboPago() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtroExp, filtroUF])
 
+  const pLabel = pid => {
     const exp = expensas.find(e=>e.id===pid)
     if (!exp) return '—'
     const [y,m] = (exp.periodo||'').split('-')
