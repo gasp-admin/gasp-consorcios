@@ -5,12 +5,13 @@ import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/con
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
-import { getCuentaCorriente, siroProxy, enviarLiquidacion, enviarNotificacion, generarActaAsamblea, extraerPdfIA, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
+import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Asambleas() {
-  const { session, consorcioActivo, unidades, copropietarios, expensas } = useApp()
-  const uid = session?.user?.id session, consorcioId, consorcioActivo, unidades, copropietarios, expensas } session, consorcioId, consorcioActivo, unidades, copropietarios, expensas }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [asambleas,  setAsambleas]  = useState([])
   const [vista,      setVista]      = useState('lista')
   const [tabLista,   setTabLista]   = useState('registros')   // 'registros' | 'actas_pdf' | 'mandato'
