@@ -11,7 +11,7 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
-export default function Actas() {
+export default function Equipo() {
   const { session, copropietarios, consorcioActivo} = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
