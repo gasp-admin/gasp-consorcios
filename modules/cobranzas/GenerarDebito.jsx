@@ -144,6 +144,7 @@ export default function GenerarDebito() {
     setMsg({ tipo:'ok', texto:`✓ Archivo SIRO generado — ${nroReg} unidades` })
   }
 
+  const pLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const mes = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
