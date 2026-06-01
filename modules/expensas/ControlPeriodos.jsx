@@ -80,7 +80,6 @@ export default function ControlPeriodos() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
 
-  const periodoLabel = periodo => {
     const [y,m] = (periodo||'').split('-')
     const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
       'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
