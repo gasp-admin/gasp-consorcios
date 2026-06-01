@@ -12,7 +12,6 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, leerReciboSueldo, ges
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Sueldos() {
-  const { session, consorcioActivo, expensas } = useApp()
-  const consorcioId = consorcioActivo?.id
 
-export default function Sueldos({ session, consorcioId, consorcioActivo, expensas }
+export default function Sueldos({
+  const { session, consorcioActivo, expensas } = useApp() session, consorcioId, consorcioActivo, expensas }
