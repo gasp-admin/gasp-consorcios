@@ -219,8 +219,6 @@ export default function Comprobantes() {
 
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtro])
 
-  const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR')
-  const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
 
   const totalPendiente = comprobantes.filter(c=>c.estado==='pendiente'||c.estado==='pagado_parcial')
     .reduce((a,c) => a + (parseFloat(c.saldo_pendiente)||0), 0)
