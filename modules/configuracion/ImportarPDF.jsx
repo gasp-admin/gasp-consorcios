@@ -237,6 +237,12 @@ Esta acción no se puede deshacer fácilmente.`)) return
         else ok++
       }
 
+      // 4. Verificar modelo_cc del consorcio
+      const { data: conData } = await supabase.from('con_consorcios')
+        .select('modelo_cc').eq('id', cid).single()
+      const modeloCC = conData?.modelo_cc ?? 'normal'
+      const esHistorico = modeloCC === 'historico' || modeloCC === 'mixto'
+
       // 4. Registrar saldo inicial por unidad
       // IMPORTANTE: u.pagado = pagos del período ANTERIOR (no de la expensa actual)
       // El saldo_anterior = lo que debían al inicio del período migrado
@@ -303,8 +309,8 @@ Esta acción no se puede deshacer fácilmente.`)) return
           }
           ok++
         } else {
-          // UF existente — débito=expensa, crédito=pagos (estructura correcta para cta cte)
-          if (expensaActual > 0) {
+          // UF existente — solo insertar mov en modelo normal (histórico usa con_liquidacion_uf)
+          if (expensaActual > 0 && !esHistorico) {
             await supabase.from('con_movimientos_unidad').insert([{
               id: `MOV-MIG-${Date.now()}-${ok}-D`,
               admin_id: uid,
@@ -320,7 +326,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
               estado: 'vigente',
             }])
           }
-          if (pagadoPeriodoAnterior > 0) {
+          if (pagadoPeriodoAnterior > 0 && !esHistorico) {
             await supabase.from('con_movimientos_unidad').insert([{
               id: `MOV-MIG-${Date.now()}-${ok}-C`,
               admin_id: uid,
