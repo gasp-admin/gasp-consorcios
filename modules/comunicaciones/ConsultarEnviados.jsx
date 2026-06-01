@@ -9,8 +9,9 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function ConsultarEnviados() {
-  const { session, unidades, copropietarios, consorcioActivo} = useApp()
-  const uid = session?.user?.id session, consorcioId, unidades, copropietarios } session, consorcioId, unidades, copropietarios }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [logs, setLogs]           = useState([])
   const [cargando, setCargando]   = useState(true)
   const [filtroTipo, setFiltroTipo] = useState('')   // '' | 'notificacion' | 'liquidacion'
