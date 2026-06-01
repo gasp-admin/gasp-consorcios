@@ -46,10 +46,10 @@ export default function ImportarPDF() {
   }
 
   async function importarDesdedriveGrande() {
-    if (!driveFileId.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el ID del archivo en Google Drive' })
-    if (!conIdDestino) return setMsg({ tipo:'warn', texto:'Selección un consorcio destino' })
+    if (!driveFileId.trim()) return setMsg({ tipo:'warn', texto:'Ingres\u00e1 el ID del archivo en Google Drive' })
+    if (!conIdDestino) return setMsg({ tipo:'warn', texto:'Selecci\u00f3n un consorcio destino' })
     setImportandoDrive(true); setMsg(null)
-    setProgreso('Procesando PDF desde Drive (2 llamadas IA)...')
+    setProgreso('Paso 1/2: Descargando PDF y extrayendo metadatos...')
     try {
       const { data: { session: sess } } = await supabase.auth.getSession()
       const colaId = 'COLA-' + conIdDestino + '-' + driveFileId.trim()
@@ -60,21 +60,41 @@ export default function ImportarPDF() {
         drive_file_nombre: 'Liquidacion ' + conNomDestino,
         estado: 'pendiente'
       }, { onConflict: 'id' })
-      setProgreso('IA procesando (2-4 min)...')
-      const resp = await fetch(SUPA_URL + '/functions/v1/importar-liquidacion-historica', {
+
+      // PASO 1: metadatos (~30-60s, bien dentro del limite de 150s)
+      const r1 = await fetch(SUPA_URL + '/functions/v1/importar-liquidacion-historica', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess?.access_token },
         body: JSON.stringify({
-          accion: 'procesar_pdf', cola_id: colaId,
+          accion: 'procesar_meta', cola_id: colaId,
           pdf_id: driveFileId.trim(),
           pdf_url: 'https://drive.google.com/file/d/' + driveFileId.trim() + '/view',
           consorcio_id: conIdDestino
         })
       })
-      if (!resp.ok) { const e = await resp.json().catch(()=>({})); throw new Error(e.error || 'Error ' + resp.status) }
-      const res = await resp.json()
-      if (!res.ok) throw new Error(res.error || 'Error desconocido')
-      setMsg({ tipo:'ok', texto:'Completado — ' + res.ufs + ' UFs, período ' + res.periodo })
+      if (!r1.ok) { const e = await r1.json().catch(()=>({})); throw new Error(e.error || 'Error paso 1: ' + r1.status) }
+      const res1 = await r1.json()
+      if (!res1.ok) throw new Error(res1.error || 'Error en paso 1')
+
+      setProgreso('Paso 2/2: Extrayendo prorrateo de ' + conNomDestino + ' (' + res1.periodo + ')...')
+
+      // PASO 2: prorrateo + persistencia (~60-120s)
+      const r2 = await fetch(SUPA_URL + '/functions/v1/importar-liquidacion-historica', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess?.access_token },
+        body: JSON.stringify({
+          accion: 'procesar_prorrateo', cola_id: colaId,
+          pdf_id: driveFileId.trim(),
+          consorcio_id: conIdDestino,
+          expensa_id: res1.expensa_id,
+          meta_json: res1.meta_json
+        })
+      })
+      if (!r2.ok) { const e = await r2.json().catch(()=>({})); throw new Error(e.error || 'Error paso 2: ' + r2.status) }
+      const res2 = await r2.json()
+      if (!res2.ok) throw new Error(res2.error || 'Error en paso 2')
+
+      setMsg({ tipo:'ok', texto:'Completado \u2014 ' + res2.ufs + ' UFs procesadas, per\u00edodo ' + res2.periodo })
       setProgreso(''); setDriveFileId('')
     } catch(e) {
       setMsg({ tipo:'error', texto: 'Error: ' + e.message }); setProgreso('')
