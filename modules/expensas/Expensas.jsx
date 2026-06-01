@@ -84,7 +84,6 @@ export default function Expensas() {
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
 
   const CATEGORIAS=['limpieza','mantenimiento','seguro','seguros','honorarios','honorarios_admin','servicios_publicos','electricidad','gas','reparaciones','administracion','gastos_bancarios','impuesto_municipal','sueldos','cargas_sociales','otro']
-  const periodoActual=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`}
 
   if (selected) {
     const totalGasDet=gastos.reduce((a,g)=>a+Number(g.monto||0),0)
