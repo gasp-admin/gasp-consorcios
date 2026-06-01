@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Proveedores() {
-  const { session, consorcioActivo} = useApp()
+  const { session, consorcioActivo, consorcios, proveedores } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
