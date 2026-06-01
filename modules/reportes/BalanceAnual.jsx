@@ -9,8 +9,9 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function BalanceAnual() {
-  const { session, consorcioActivo } = useApp()
-  const uid = session?.user?.id session, consorcioId, consorcioActivo } session, consorcioId, consorcioActivo }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [periodoDesde, setPeriodoDesde] = useState(() => {
     const d = new Date(); d.setFullYear(d.getFullYear()-1); return d.toISOString().slice(0,7)
   })
