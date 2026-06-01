@@ -20,6 +20,9 @@ export default function MovimientosVarios() {
   const [form, setForm]       = useState(null)
   const [msg, setMsg]         = useState(null)
   const [guardando, setGuardando] = useState(false)
+  const [busqueda, setBusqueda] = useState('')
+  const [fDesde, setFDesde] = useState('')
+  const [fHasta, setFHasta] = useState('')
   const hoy = new Date().toISOString().split('T')[0]
 
   async function cargar() {
@@ -79,9 +82,6 @@ export default function MovimientosVarios() {
   const fmt = n => '$' + (Number(n)||0).toLocaleString('es-AR')
   const fmtD = d => d ? new Date(d+'T00:00:00').toLocaleDateString('es-AR') : '—'
 
-  const [busqueda, setBusqueda] = useState('')
-  const [fDesde, setFDesde] = useState('')
-  const [fHasta, setFHasta] = useState('')
 
   const movsFiltr = movs.filter(m => {
     const q = busqueda.toLowerCase()
