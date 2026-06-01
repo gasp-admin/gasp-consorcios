@@ -18,7 +18,7 @@ export default function ListadoConsorcios() {
 
   const [busqueda, setBusqueda] = useState('')
 
-  const filtrados = consorcios.filter(c => {
+  const filtrados = (consorcios||[]).filter(c => {
     const q = busqueda.toLowerCase()
     return !q || c.nombre?.toLowerCase().includes(q) || c.cuit?.toLowerCase().includes(q)
       || c.direccion?.toLowerCase().includes(q) || c.localidad?.toLowerCase().includes(q)
