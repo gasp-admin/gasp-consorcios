@@ -71,8 +71,6 @@ export default function ReporteMovimientos() {
 
   useEffect(() => { if (expSel) cargar(expSel) }, [expSel])
 
-  const fmt  = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
-  const periodoLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
