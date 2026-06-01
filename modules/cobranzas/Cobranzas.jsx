@@ -9,7 +9,9 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Cobranzas() {
-  const { session, consorcioActivo, unidades, copropietarios, expensas } = useApp() session, consorcioId, unidades, copropietarios, adminPerfil } session, consorcioId, unidades, copropietarios, adminPerfil } session, consorcioId, unidades, copropietarios, adminPerfil }
+  const { session, consorcioActivo, unidades, copropietarios, expensas, proveedores, adminPerfil } = useApp()
+  const uid = session?.user?.id
+  const consorcioId = consorcioActivo?.id
   const [expensas, setExpensas]         = useState([])
   const [expSel, setExpSel]             = useState(null)
   const [detalles, setDetalles]         = useState([])
