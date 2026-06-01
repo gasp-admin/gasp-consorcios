@@ -69,6 +69,7 @@ export default function Sueldos() {
     { v:'otro',                 l:'Otro' },
   ]
 
+  const pLabel = p => {
     if (!p) return '—'
     const [y,m] = p.split('-')
     const meses=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
