@@ -326,23 +326,28 @@ export default function CobranzasAutomaticas() {
     if (!expSel) return setMsg({ tipo:'warn', texto:'Seleccioná el período primero' })
     setCargandoSiro(true); setMsg(null)
     try {
-      const tokenRes = await fetch('https://apisiro.bancoroela.com.ar:49220/auth/singin', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ Usuario:config.siro_api_usuario, Password:config.siro_api_password })
-      })
-      if (!tokenRes.ok) throw new Error(`Error autenticación SIRO: ${tokenRes.status}`)
-      const { access_token } = await tokenRes.json()
+      // Autenticación via siro-proxy (evita CORS y puerto no estándar)
+      const { data:{ session:sess } } = await supabase.auth.getSession()
+      const authRes = await siroProxy('sesion', {
+        usuario: config.siro_api_usuario,
+        password: config.siro_api_password
+      }, sess?.access_token)
+      if (authRes.error || !authRes.access_token)
+        throw new Error(`Error autenticación SIRO: ${authRes.error || 'Sin token'}`)
+      const access_token = authRes.access_token
       const exp = expensas.find(e=>e.id===expSel)
       const [y,m] = (exp?.periodo||'').split('-')
       const fd = `${y}${m}01`, fh = `${y}${m}${new Date(parseInt(y),parseInt(m),0).getDate()}`
-      const listadoRes = await fetch('https://apisiro.bancoroela.com.ar:49220/siro/Listados/Proceso', {
-        method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':`bearer ${access_token}`},
-        body: JSON.stringify({ cuit_administrador:config.siro_cuit_admin||config.siro_api_usuario,
-          fecha_desde:fd, fecha_hasta:fh, nro_convenio:config.siro_convenio_id })
-      })
-      if (!listadoRes.ok) throw new Error(`Error SIRO API: ${listadoRes.status}`)
-      const listado = await listadoRes.json()
+      // Rendición via siro-proxy
+      const listadoRes = await siroProxy('rendicion', {
+        token: access_token,
+        fecha_desde: fd,
+        fecha_hasta: fh,
+        cuit_administrador: config.siro_cuit_admin || config.siro_api_usuario,
+        nro_empresa: config.siro_convenio_id
+      }, sess?.access_token)
+      if (listadoRes.error) throw new Error(`Error SIRO API: ${listadoRes.error}`)
+      const listado = listadoRes
       const registrosApi = listado.data || listado || []
       let ok=0, sinMatch=[]
       for (const pago of registrosApi) {
