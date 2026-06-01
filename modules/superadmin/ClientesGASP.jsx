@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function ClientesGASP() {
-  const { session } = useApp()
+  const { session, consorcios } = useApp()
   const uid = session?.user?.id
   const token = session?.access_token
 
