@@ -8,7 +8,7 @@ import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/con
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
-import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
+import { getCuentaCorriente, siroProxy, enviarLiquidacion, enviarNotificacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function EnviarNotificacion() {
@@ -70,22 +70,7 @@ export default function EnviarNotificacion() {
         adjunto:       adjunto ? { nombre: adjunto.nombre, tipo: adjunto.tipo, base64: adjunto.base64 } : null,
         drive_link:    (inclDrive && driveFolderUrl) ? driveFolderUrl : null,
       }
-      const res  = await fetch(`${SUPA_URL}/functions/v1/enviar-notificacion`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sess?.access_token}`,
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-        },
-        body: JSON.stringify(payload)
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Error del servidor')
-      setResultado(data)
-      setMsg({ tipo:'ok', texto: esTest
-        ? `✓ Email de prueba enviado a ${testEmail}`
-        : `✓ Enviados: ${data.enviados} · Sin email: ${data.sinEmail} · Errores: ${data.errores}` })
-      if (!esTest) { setAsunto(''); setCuerpo(''); setAdjunto(null) }
+      const res  = await enviarNotificacion(payload, token); setCuerpo(''); setAdjunto(null) }
     } catch(e) {
       setMsg({ tipo:'error', texto: 'Error: ' + e.message })
     }
