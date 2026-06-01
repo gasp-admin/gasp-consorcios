@@ -73,8 +73,23 @@ export default function EstadoFinanciero() {
     // Acreedores (facturas pendientes de pagar a proveedores)
     const acreedores = (compPend||[]).reduce((a,c) => a + (parseFloat(c.saldo_pendiente)||0), 0)
 
-    // Ingresos del período (cobranzas operativas registradas)
-    const ingresos = (cobranzas||[]).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
+    // Ingresos del período
+    // Fuente 1: cobranzas operativas registradas en con_cobranzas (fecha en rango)
+    const ingresosCobranzas = (cobranzas||[]).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
+    // Fuente 2: total_cobrado de expensas cerradas del período (para consorcios históricos)
+    // Solo usar si no hay cobranzas operativas (evitar doble conteo)
+    const ingresosPorExpensas = ingresosCobranzas === 0
+      ? (expensasCerradas||[]).reduce((a,e) => {
+          // Solo incluir expensas cuyo período cae en el rango seleccionado
+          const periodoFecha = new Date(e.periodo + '-15')
+          const desdeDate = desde ? new Date(desde) : null
+          const hastaDate = hasta ? new Date(hasta) : null
+          if (desdeDate && periodoFecha < desdeDate) return a
+          if (hastaDate && periodoFecha > hastaDate) return a
+          return a + (parseFloat(e.total_cobrado)||0)
+        }, 0)
+      : 0
+    const ingresos = ingresosCobranzas + ingresosPorExpensas
 
     // Egresos del período
     // NOTA: con_gastos ya incluye todos los gastos del consorcio (honorarios, servicios, etc.)
