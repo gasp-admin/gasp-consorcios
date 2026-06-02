@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
-import { supabase } from '../../lib/supabaseClient'
+import { supabase } from '../../lib/supabase'
 
 const ROLES_DISP = [
   { v:'administrativo', l:'Administrativo', desc:'Ver, editar, liquidar, cobrar' },
