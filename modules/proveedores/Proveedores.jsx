@@ -103,6 +103,32 @@ export default function Proveedores() {
             <Sel label="Situación fiscal" value={form.tipo_fiscal||'monotributo'} onChange={v=>F({tipo_fiscal:v})} opts={[{v:'monotributo',l:'Monotributo'},{v:'responsable_inscripto',l:'Resp. Inscripto'},{v:'exento',l:'Exento'},{v:'consumidor_final',l:'Consumidor Final'}]} />
             <div style={{ gridColumn:'span 3' }}><Input label="Notas" value={form.notas||''} onChange={v=>F({notas:v})} /></div>
           </div>
+
+          {/* ── Sección ART y Seguro (Auditoría A-2) ── */}
+          <div style={{background: form.habilitado_trabajo===false?'#fff1f0':'#f6ffed', border:`1px solid ${form.habilitado_trabajo===false?'#ffa39e':'#b7eb8f'}`, borderRadius:8, padding:'10px 14px', marginBottom:10}}>
+            <div style={{fontWeight:700, fontSize:13, marginBottom:8, color: form.habilitado_trabajo===false?'#cf1322':'#389e0d'}}>
+              {form.habilitado_trabajo===false ? '⛔ PROVEEDOR INHABILITADO' : '✅ Habilitado para asignación de trabajos'}
+              {form.motivo_inhabilitado && <span style={{fontWeight:400, fontSize:11, marginLeft:8}}>— {form.motivo_inhabilitado}</span>}
+            </div>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10}}>
+              <Input label="Compañía ART" value={form.art_compania||''} onChange={v=>F({art_compania:v})} placeholder="Ej: Galeno ART" />
+              <Input label="N° Póliza ART" value={form.art_poliza||''} onChange={v=>F({art_poliza:v})} placeholder="N° póliza" />
+              <div>
+                <label style={{fontSize:11, fontWeight:600, color: form.art_vencimiento && new Date(form.art_vencimiento+'T12:00:00')<new Date() ? '#cf1322' : '#374151', display:'block', marginBottom:4}}>
+                  Vencimiento ART {form.art_vencimiento && new Date(form.art_vencimiento+'T12:00:00')<new Date() ? '🔴 VENCIDA' : ''}
+                </label>
+                <input type="date" className="input-base" value={form.art_vencimiento||''} onChange={e=>F({art_vencimiento:e.target.value})} style={{width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:6}} />
+              </div>
+              <Input label="Compañía Seguro" value={form.seguro_compania||''} onChange={v=>F({seguro_compania:v})} placeholder="Ej: Sancor" />
+              <Input label="N° Póliza Seguro" value={form.seguro_poliza||''} onChange={v=>F({seguro_poliza:v})} placeholder="N° póliza" />
+              <div>
+                <label style={{fontSize:11, fontWeight:600, color: form.seguro_vencimiento && new Date(form.seguro_vencimiento+'T12:00:00')<new Date() ? '#cf1322' : '#374151', display:'block', marginBottom:4}}>
+                  Vencimiento Seguro {form.seguro_vencimiento && new Date(form.seguro_vencimiento+'T12:00:00')<new Date() ? '🔴 VENCIDO' : ''}
+                </label>
+                <input type="date" className="input-base" value={form.seguro_vencimiento||''} onChange={e=>F({seguro_vencimiento:e.target.value})} style={{width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:6}} />
+              </div>
+            </div>
+          </div>
           <div style={{ display:'flex', gap:8 }}>
             <Btn onClick={guardar}>💾 Guardar</Btn>
             <BtnSec onClick={()=>setForm(null)}>Cancelar</BtnSec>
@@ -114,6 +140,21 @@ export default function Proveedores() {
           <Card key={p.id}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
               <div style={{ flex:1, minWidth:0 }}>
+                {p.habilitado_trabajo===false && (
+                  <div style={{background:'#fff1f0',border:'1px solid #ffa39e',borderRadius:4,padding:'2px 8px',fontSize:11,fontWeight:700,color:'#cf1322',marginBottom:4,display:'inline-block'}}>
+                    ⛔ {p.motivo_inhabilitado || 'Inhabilitado'}
+                  </div>
+                )}
+                {p.art_vencimiento && new Date(p.art_vencimiento+'T12:00:00')<new Date() && (
+                  <div style={{background:'#fffbe6',border:'1px solid #ffe58f',borderRadius:4,padding:'2px 8px',fontSize:11,fontWeight:600,color:'#d46b08',marginBottom:4,display:'inline-block'}}>
+                    ⚠️ ART vencida {new Date(p.art_vencimiento).toLocaleDateString('es-AR')}
+                  </div>
+                )}
+                {p.seguro_vencimiento && new Date(p.seguro_vencimiento+'T12:00:00')<new Date() && (
+                  <div style={{background:'#fffbe6',border:'1px solid #ffe58f',borderRadius:4,padding:'2px 8px',fontSize:11,fontWeight:600,color:'#d46b08',marginBottom:4,display:'inline-block'}}>
+                    ⚠️ Seguro vencido {new Date(p.seguro_vencimiento).toLocaleDateString('es-AR')}
+                  </div>
+                )}
                 <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
                   <span style={{ fontWeight:700, fontSize:14 }}>{p.razon_social}</span>
                   {!p.consorcio_id
