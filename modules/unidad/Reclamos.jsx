@@ -222,7 +222,7 @@ export default function Reclamos() {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
             <thead>
               <tr style={{ background:'#f8fafc', borderBottom:'1.5px solid #e5e7eb' }}>
-                {['Fecha','UF — Vecino','Asunto','Cat.','Prioridad','Estado',''].map((h,i)=>(
+                {['N°','Fecha','UF — Vecino','Asunto','Cat.','Prioridad','Estado',''].map((h,i)=>(
                   <th key={i} style={{ padding:'8px 12px', textAlign:'left', fontWeight:600, color:'#374151', fontSize:11.5 }}>{h}</th>
                 ))}
               </tr>
@@ -234,6 +234,10 @@ export default function Reclamos() {
                 return (
                   <tr key={r.id} style={{ borderBottom:'1px solid #f3f4f6', cursor:'pointer' }}
                     onClick={()=>{ setDetalle(r); setRespuesta(r.respuesta||'') }}>
+                    <td style={{ padding:'8px 12px', color:'#374151', fontSize:12, fontWeight:700, whiteSpace:'nowrap' }}>
+                      {r.nro_reclamo ? '#' + r.nro_reclamo : '—'}
+                      {r.es_emergencia && <span style={{display:'block',background:'#fee2e2',color:'#dc2626',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,marginTop:2}}>🚨 EMERGENCIA</span>}
+                    </td>
                     <td style={{ padding:'8px 12px', color:GR, fontSize:11, whiteSpace:'nowrap' }}>{fmt(r.created_at)}</td>
                     <td style={{ padding:'8px 12px' }}>
                       {uf && <div style={{ fontWeight:600 }}>UF {uf.numero}</div>}
