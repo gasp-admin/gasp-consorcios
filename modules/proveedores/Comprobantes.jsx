@@ -665,6 +665,32 @@ function FormComp({ form, setForm, guardar, guardando, proveedores, expensas,
           </div>
         ))}
       </div>
+      {/* ── Retenciones (Auditoría M-3) ── */}
+      <div style={{background:'#fffbe6', border:'1px solid #ffe58f', borderRadius:8, padding:'10px 14px', marginBottom:12}}>
+        <div style={{fontWeight:700, fontSize:12, color:'#854d0e', marginBottom:8}}>🏛️ Retenciones impositivas</div>
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10}}>
+          {[
+            { k:'retencion_iibb', l:'Ret. Ing. Brutos' },
+            { k:'retencion_ganancias', l:'Ret. Ganancias' },
+            { k:'retencion_suss', l:'Ret. SUSS/Seg. Social' },
+          ].map(f2 => (
+            <div key={f2.k}>
+              <div style={{fontSize:11, color:GR, marginBottom:3, fontWeight:500}}>{f2.l}</div>
+              <input type="number" min="0" step="0.01" value={form[f2.k]||''}
+                onChange={e => setForm(f => ({...f, [f2.k]: e.target.value}))}
+                placeholder="0.00"
+                style={{width:'100%', padding:'6px 10px', border:'1px solid #d1d5db', borderRadius:6, fontSize:13, boxSizing:'border-box'}} />
+            </div>
+          ))}
+          <div>
+            <div style={{fontSize:11, color:'#854d0e', marginBottom:3, fontWeight:700}}>Monto a pagar</div>
+            <div style={{padding:'7px 10px', background:'#fef9c3', border:'1px solid #fde047', borderRadius:6, fontWeight:700, fontSize:14, color:'#854d0e'}}>
+              ${(((parseFloat(form.monto_total)||0) - (parseFloat(form.retencion_iibb)||0) - (parseFloat(form.retencion_ganancias)||0) - (parseFloat(form.retencion_suss)||0))).toLocaleString('es-AR', {minimumFractionDigits:2})}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
         <div>
           <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Período asociado</div>
