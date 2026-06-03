@@ -30,6 +30,13 @@ export default function HistorialLiquidaciones() {
   const [filtroCon, setFiltroCon]             = useState('todos');
   const [fileIdsManual, setFileIdsManual]     = useState('');
 
+  // ─── FIX: Selector local de consorcio destino ─────────────────────────────
+  // Se usa consorcioImportar (local) en lugar de consorcioActivo (global) para
+  // todas las operaciones de importación. Evita imputaciones al consorcio incorrecto
+  // cuando el consorcio activo de la app no coincide con el destino deseado.
+  const [consorcioImportar, setConsorcioImportar] = useState(null);
+  // ──────────────────────────────────────────────────────────────────────────
+
   const tok = session?.access_token;
 
   const sbGet = async (tabla, query) => {
@@ -88,10 +95,7 @@ export default function HistorialLiquidaciones() {
         setSeleccionados(d.archivos.map((a) => a.id));
         setMsg(`✅ ${d.archivos.length} liquidación(es) encontrada(s). Revisá la selección y procesá.`);
       } else {
-        // Fallback: extraer IDs del link de Drive compartido no funciona sin API key de Google.
-        // Mostrar instrucción para usar Opción B con el folder ID extraído.
         setMsg(`⚠️ No se pudo listar la carpeta automáticamente (requiere Google API Key en el servidor). Usá la Opción B pegando los IDs de los PDFs directamente.`);
-        // Pre-rellenar el campo de Opción B con el folder ID para orientar al usuario
         setFileIdsManual(`# Folder ID detectado: ${folderId}\n# Pegá aquí los IDs de los PDFs de Drive (uno por línea)\n# Los IDs se encuentran en la URL de cada archivo:\n# drive.google.com/file/d/ID_AQUI/view`);
       }
     } catch (e) {
@@ -99,8 +103,12 @@ export default function HistorialLiquidaciones() {
     } finally { setLoading(false); }
   };
 
+  // ─── FIX: procesarLote usa consorcioImportar (local) ──────────────────────
   const procesarLote = async (ids, nombresMap) => {
-    if (!consorcioActivo || !consorcioActivo.id) { setMsg('Seleccionar un consorcio activo'); return; }
+    if (!consorcioImportar || !consorcioImportar.id) {
+      setMsg('⚠️ Seleccioná el consorcio destino antes de procesar.');
+      return;
+    }
     setProcesando(true);
     setProgreso({ actual: 0, total: ids.length });
     let ok = 0, err = 0;
@@ -108,15 +116,15 @@ export default function HistorialLiquidaciones() {
       const fileId = ids[i];
       const nombre = nombresMap[fileId] || fileId;
       setProgreso({ actual: i + 1, total: ids.length });
-      setMsg(`⚙️ Procesando ${i + 1}/${ids.length}: ${nombre}`);
-      const colaId = `COLA-${consorcioActivo.id}-${fileId}`;
+      setMsg(`⚙️ Procesando ${i + 1}/${ids.length}: ${nombre} → ${consorcioImportar.nombre}`);
+      const colaId = `COLA-${consorcioImportar.id}-${fileId}`;
       try {
         await fetch(EF_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
           body: JSON.stringify({
             accion: 'encolar_lote',
-            archivos: [{ drive_file_id: fileId, drive_file_nombre: nombre, consorcio_id: consorcioActivo.id, consorcio_nombre: consorcioActivo.nombre }]
+            archivos: [{ drive_file_id: fileId, drive_file_nombre: nombre, consorcio_id: consorcioImportar.id, consorcio_nombre: consorcioImportar.nombre }]
           })
         });
         const r = await fetch(EF_URL, {
@@ -127,8 +135,8 @@ export default function HistorialLiquidaciones() {
             cola_id: colaId,
             pdf_id: fileId,
             pdf_url: `https://drive.google.com/file/d/${fileId}/view`,
-            consorcio_id: consorcioActivo.id,
-            consorcio_nombre: consorcioActivo.nombre
+            consorcio_id: consorcioImportar.id,
+            consorcio_nombre: consorcioImportar.nombre
           })
         });
         const res = await r.json();
@@ -140,6 +148,7 @@ export default function HistorialLiquidaciones() {
     setProcesando(false);
     setTimeout(() => cargarTodo(), 1500);
   };
+  // ──────────────────────────────────────────────────────────────────────────
 
   const procesarSeleccionados = () => {
     const nombresMap = {};
@@ -175,8 +184,8 @@ export default function HistorialLiquidaciones() {
   const card      = { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: 20, marginBottom: 16 };
   const btn       = (c) => ({ background: c || '#1F4E79', color: '#fff', border: 'none', borderRadius: 7, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 });
   const btnOut    = { background: '#fff', color: '#1F4E79', border: '1px solid #1F4E79', borderRadius: 7, padding: '8px 14px', cursor: 'pointer', fontSize: 13 };
-  const badge     = (c) => ({ background: c, color: '#fff', borderRadius: 12, padding: '2px 8px', fontSize: 11, fontWeight: 600 });
   const inputSt   = { border: '1px solid #d1d5db', borderRadius: 7, padding: '8px 12px', fontSize: 13, width: '100%', boxSizing: 'border-box' };
+  const badge     = (c) => ({ background: c, color: '#fff', borderRadius: 12, padding: '2px 8px', fontSize: 11, fontWeight: 600 });
   const estadoColor = { pendiente: '#6b7280', procesando: '#d97706', completado: '#107569', error: '#dc2626' };
 
   const historialFiltrado = filtroCon === 'todos' ? historial : historial.filter((h) => h.consorcio_id === filtroCon);
@@ -237,11 +246,60 @@ export default function HistorialLiquidaciones() {
       {/* ─── TAB IMPORTAR ─────────────────────────────── */}
       {tab === 'importar' && (
         <div>
-          {!consorcioActivo && (
-            <div style={{ ...card, background: '#fef9c3', border: '1px solid #fde68a', color: '#92400e' }}>
-              ⚠️ Seleccioná un consorcio activo en el menú superior antes de importar.
-            </div>
-          )}
+
+          {/* ── FIX: Selector explícito de consorcio destino ────────────────── */}
+          <div style={{
+            ...card,
+            background: consorcioImportar ? '#f0fdf4' : '#fff7ed',
+            border: consorcioImportar ? '2px solid #22c55e' : '2px solid #f97316',
+            marginBottom: 20
+          }}>
+            <h3 style={{ margin: '0 0 10px', fontSize: 15, color: consorcioImportar ? '#166534' : '#9a3412', display: 'flex', alignItems: 'center', gap: 8 }}>
+              🏢 Consorcio destino de la importación
+              <span style={{ fontSize: 11, fontWeight: 400, background: consorcioImportar ? '#dcfce7' : '#ffedd5', color: consorcioImportar ? '#166534' : '#9a3412', padding: '2px 8px', borderRadius: 10 }}>
+                {consorcioImportar ? 'Seleccionado' : 'Requerido'}
+              </span>
+            </h3>
+            <select
+              style={{
+                ...inputSt,
+                fontWeight: 700,
+                fontSize: 14,
+                color: '#1F4E79',
+                border: consorcioImportar ? '2px solid #22c55e' : '2px solid #f97316',
+                background: '#fff'
+              }}
+              value={consorcioImportar?.id || ''}
+              onChange={(e) => {
+                const c = (consorcios || []).find(x => x.id === e.target.value)
+                setConsorcioImportar(c || null)
+              }}
+            >
+              <option value=''>— Seleccionar consorcio destino —</option>
+              {(consorcios || [])
+                .slice()
+                .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+                .map(c => (
+                  <option key={c.id} value={c.id}>{c.nombre}</option>
+                ))
+              }
+            </select>
+            {consorcioImportar ? (
+              <div style={{
+                marginTop: 10, padding: '8px 14px', background: '#dcfce7',
+                borderRadius: 7, fontSize: 13, color: '#166534', fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 8
+              }}>
+                ✅ La liquidación se importará a: <b>{consorcioImportar.nombre}</b>
+                <span style={{ fontWeight: 400, fontSize: 11, color: '#4ade80' }}>ID: {consorcioImportar.id}</span>
+              </div>
+            ) : (
+              <div style={{ marginTop: 8, fontSize: 12, color: '#dc2626', fontWeight: 600 }}>
+                ⛔ Seleccioná el consorcio destino antes de usar cualquier opción de importación.
+              </div>
+            )}
+          </div>
+          {/* ── FIN selector ─────────────────────────────────────────────────── */}
 
           {/* Opción A: URL de carpeta */}
           <div style={card}>
@@ -275,7 +333,8 @@ export default function HistorialLiquidaciones() {
                   ))}
                 </div>
                 <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
-                  <button style={btn('#107569')} onClick={procesarSeleccionados} disabled={procesando || !seleccionados.length || !consorcioActivo}>
+                  {/* FIX: disabled si no hay consorcioImportar */}
+                  <button style={btn('#107569')} onClick={procesarSeleccionados} disabled={procesando || !seleccionados.length || !consorcioImportar}>
                     🤖 Procesar {seleccionados.length} con IA
                   </button>
                 </div>
@@ -296,11 +355,13 @@ export default function HistorialLiquidaciones() {
               <span style={{ fontSize: 12, color: '#6b7280' }}>
                 {fileIdsManual.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).length} ID(s) ingresado(s)
               </span>
-              <button style={btn('#107569')} onClick={procesarManual} disabled={procesando || !fileIdsManual.trim() || !consorcioActivo}>
+              {/* FIX: disabled si no hay consorcioImportar */}
+              <button style={btn('#107569')} onClick={procesarManual} disabled={procesando || !fileIdsManual.trim() || !consorcioImportar}>
                 🤖 Procesar con IA
               </button>
             </div>
           </div>
+
           {/* Opción C — subida manual para consorcios grandes (>80 UFs) */}
           <div style={{ background:'#fffbeb', border:'2px solid #f59e0b', borderRadius:8, padding:16, marginBottom:16 }}>
             <h3 style={{ margin:'0 0 6px', fontSize:15, color:'#92400e' }}>
@@ -312,19 +373,29 @@ export default function HistorialLiquidaciones() {
             <p style={{ fontSize:12, color:'#92400e', margin:'0 0 10px' }}>
               Descargá el PDF de Drive a tu PC y seleccionalo acá. Se procesa con IA directamente, sin pasar por Drive. Un PDF por vez (~60 segundos).
             </p>
-            <label style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'9px 20px',
-              background:'#f59e0b', color:'#fff', borderRadius:6, fontSize:13, fontWeight:700, cursor:'pointer' }}>
+            <label style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 20px',
+              background: consorcioImportar ? '#f59e0b' : '#d1d5db',
+              color: '#fff', borderRadius: 6, fontSize: 13, fontWeight: 700,
+              cursor: consorcioImportar ? 'pointer' : 'not-allowed',
+              opacity: consorcioImportar ? 1 : 0.6
+            }}>
               📁 Elegir PDF
               <input
                 type="file"
                 accept=".pdf,application/pdf"
                 style={{ display:'none' }}
+                disabled={!consorcioImportar}
                 onChange={(e) => {
                   const file = e.target.files && e.target.files[0]
                   if (!file) return
-                  if (!consorcioActivo || !consorcioActivo.id) { setMsg('Seleccionar un consorcio activo'); return }
+                  // FIX: usa consorcioImportar, no consorcioActivo
+                  if (!consorcioImportar || !consorcioImportar.id) {
+                    setMsg('⚠️ Seleccioná el consorcio destino antes de subir un PDF.')
+                    return
+                  }
                   setProcesando(true)
-                  setMsg('Leyendo PDF...')
+                  setMsg(`Leyendo PDF: ${file.name} → ${consorcioImportar.nombre}`)
                   const reader = new FileReader()
                   reader.onerror = () => { setMsg('Error al leer el archivo'); setProcesando(false) }
                   reader.onload = async () => {
@@ -333,30 +404,34 @@ export default function HistorialLiquidaciones() {
                       const h = atob(base64.slice(0, 8))
                       if (!h.startsWith('%PDF')) { setMsg('El archivo no es un PDF valido'); setProcesando(false); e.target.value = ''; return }
                       const fakeId = 'LOCAL-' + Date.now()
-                      const colaId = 'COLA-' + consorcioActivo.id + '-' + fakeId
-                      setMsg('Enviando a IA: ' + file.name)
+                      const colaId = 'COLA-' + consorcioImportar.id + '-' + fakeId
+                      setMsg(`Enviando a IA: ${file.name} → ${consorcioImportar.nombre}`)
                       await fetch(EF_URL, {
                         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
-                        body: JSON.stringify({ accion: 'encolar_lote', archivos: [{ drive_file_id: fakeId, drive_file_nombre: file.name, consorcio_id: consorcioActivo.id, consorcio_nombre: consorcioActivo.nombre }] })
+                        body: JSON.stringify({ accion: 'encolar_lote', archivos: [{ drive_file_id: fakeId, drive_file_nombre: file.name, consorcio_id: consorcioImportar.id, consorcio_nombre: consorcioImportar.nombre }] })
                       })
                       const r = await fetch(EF_URL, {
                         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
-                        body: JSON.stringify({ accion: 'procesar_pdf', cola_id: colaId, pdf_id: fakeId, pdf_url: '', pdf_base64: base64, consorcio_id: consorcioActivo.id, consorcio_nombre: consorcioActivo.nombre })
+                        body: JSON.stringify({ accion: 'procesar_pdf', cola_id: colaId, pdf_id: fakeId, pdf_url: '', pdf_base64: base64, consorcio_id: consorcioImportar.id, consorcio_nombre: consorcioImportar.nombre })
                       })
                       const res = await r.json()
-                      if (res.ok) { setMsg('OK: ' + file.name + ' periodo ' + res.periodo + ' UFs: ' + res.ufs) }
-                      else { setMsg('Error: ' + (res.error || 'desconocido')) }
-                    } catch (err) { setMsg('Error: ' + err.message) }
+                      if (res.ok) { setMsg(`✅ OK: ${file.name} — período ${res.periodo} — UFs: ${res.ufs} — Consorcio: ${consorcioImportar.nombre}`) }
+                      else { setMsg('❌ Error: ' + (res.error || 'desconocido')) }
+                    } catch (err) { setMsg('❌ Error: ' + err.message) }
                     setProcesando(false); e.target.value = ''; setTimeout(() => cargarTodo(), 1500)
                   }
                   reader.readAsDataURL(file)
                 }}
               />
             </label>
+            {!consorcioImportar && (
+              <p style={{ margin: '8px 0 0', fontSize: 12, color: '#dc2626', fontWeight: 600 }}>
+                ⛔ Seleccioná el consorcio destino (arriba) antes de subir el PDF.
+              </p>
+            )}
           </div>
 
-
-{/* Info */}
+          {/* Info */}
           <div style={{ ...card, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, color: '#166534' }}>✅ ¿Qué genera la importación?</h4>
             <ul style={{ margin: '0', paddingLeft: 20, fontSize: 12, color: '#166534', lineHeight: 1.8 }}>
