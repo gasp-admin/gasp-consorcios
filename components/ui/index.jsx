@@ -56,15 +56,15 @@ export function Input({ label, value, onChange, type='text', placeholder, requir
   )
 }
 
-export function Sel({ label, value, onChange, opts, required }) {
+export function Sel({ label, value, onChange, opts, required, disabled }) {
   return (
     <div>
       <div style={{ fontSize:12, color:'#6b7280', marginBottom:4, fontWeight:500 }}>
         {label}{required && <span style={{color:RJ}}> *</span>}
       </div>
-      <select value={value||''} onChange={e=>onChange(e.target.value)}
+      <select value={value||''} onChange={e=>onChange&&onChange(e.target.value)} disabled={disabled}
         style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontFamily:'inherit', background:'#fff' }}>
-        {opts.map(o => <option key={o.v||o} value={o.v||o}>{o.l||o}</option>)}
+        {(opts||[]).map(o => <option key={o.v||o} value={o.v||o}>{o.l||o}</option>)}
       </select>
     </div>
   )
