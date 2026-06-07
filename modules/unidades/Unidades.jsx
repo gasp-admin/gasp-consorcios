@@ -39,6 +39,7 @@ export default function Unidades() {
   const [busqueda, setBusqueda] = useState('')
   const TIPOS=['departamento','local','cochera','baulera','oficina','otro']
   const ESTADOS=['ocupada','desocupada','en_venta']
+  const columnasLiq = [] // grupos de liquidación del consorcio (placeholder)
   const totalCoef=unidades.reduce((a,u)=>a+(Number(u.porcentaje_fiscal)||0),0)
   const filtradas = unidades.filter(u => {
     const q = busqueda.toLowerCase()
