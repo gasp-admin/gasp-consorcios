@@ -17,6 +17,7 @@ export const NAV_ITEMS = [
   { id: 'expensas',                 label: 'Períodos',                icon: '📅', sec: 'Expensas' },
   { id: 'periodos',                 label: 'Control períodos',        icon: '🔒', sec: 'Expensas' },
   { id: 'historial_liquidaciones',  label: 'Historial Liquidaciones', icon: '📂', sec: 'Expensas' },
+  { id: 'verificacion_unidades',    label: 'Verificar UFs (PDF)',     icon: '🔍', sec: 'Expensas' },
   { id: 'cobranzas',                label: 'Cobranzas',               icon: '💳', sec: 'Cobranzas' },
   { id: 'cobranzas_auto',           label: 'Cobranzas automáticas',   icon: '🏦', sec: 'Cobranzas' },
   { id: 'generar_debito',           label: 'Generar débito',          icon: '📤', sec: 'Cobranzas' },
