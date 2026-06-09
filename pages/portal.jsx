@@ -362,19 +362,24 @@ export default function Portal() {
     const pl = (per) => { if(!per) return ''; const [y,m]=per.split('-'); return `${meses[parseInt(m)-1]} ${y}` }
     const lineas = []
 
-    const tieneHistoricos = (dets2||[]).some(d => d.id?.startsWith('DET-HIST-'))
+    const tieneHistoricos = lufsOrd.length > 0 || (dets2||[]).some(d => d.id?.startsWith('DET-HIST-') || d.id?.includes('-HIST-'))
     const lufsOrd = [...(lufs||[])].sort((a,b)=>(a.periodo||'').localeCompare(b.periodo||''))
 
     if (tieneHistoricos && lufsOrd.length > 0) {
       // Modelo histórico: ajuste de convergencia para que el saldo coincida
       // exactamente con total_uf del PDF en cada período
       const primerLuf = lufsOrd[0]
-      if ((parseFloat(primerLuf.saldo_anterior)||0) > 0) {
+      const primerSA = parseFloat(primerLuf.saldo_anterior)||0
+      if (primerSA > 0) {
         lineas.push({ fecha: primerLuf.periodo+'-01', tipo:'debito',
-          concepto:'Saldo al inicio del período histórico',
-          monto: parseFloat(primerLuf.saldo_anterior)||0 })
+          concepto:`Deuda anterior al ${pl(primerLuf.periodo)}`,
+          monto: primerSA })
+      } else if (primerSA < 0) {
+        lineas.push({ fecha: primerLuf.periodo+'-01', tipo:'credito',
+          concepto:`Saldo a favor al ${pl(primerLuf.periodo)}`,
+          monto: Math.abs(primerSA) })
       }
-      let accHist = parseFloat(primerLuf.saldo_anterior)||0
+      let accHist = primerSA
       for (const luf of lufsOrd) {
         const per    = luf.periodo||''
         const exp    = parseFloat(luf.expensa_calculada)||0
