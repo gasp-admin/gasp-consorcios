@@ -59,7 +59,7 @@ function fmtN(n) {
   return Number(n).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })
 }
 
-function generarPDFLiquidacion({ consorcioActivo, expensa, gastos, detalles, unidades, copropietarios, adminPerfil }) {
+function generarPDFLiquidacion({ consorcioActivo, expensa, gastos, detalles, unidades, copropietarios, adminPerfil, lufsHist }) {
   const adm = adminPerfil || {}
   const totR={}; const gasR={}
   RUBROS_PDF.forEach(r => { totR[r.numero]=[0,0,0,0,0]; gasR[r.numero]=[] })
@@ -89,7 +89,9 @@ function generarPDFLiquidacion({ consorcioActivo, expensa, gastos, detalles, uni
       fdoUF=(pctFdo/100)*totGen[1]; gralesUF=(pctGrales/100)*totGen[2]
       cochUF=(pctCoch/100)*totGen[3]; dptUF=(pctPart/100)*totGen[4]
     }
-    const total=deuda+interes+fdoUF+gralesUF+cochUF+dptUF
+    const totalCalc=deuda+interes+fdoUF+gralesUF+cochUF+dptUF
+    const lufMatch = (lufsHist||[]).find(l=>l.unidad_id===det.unidad_id)
+    const total = lufMatch ? parseFloat(lufMatch.total_uf)||totalCalc : totalCalc
     return { uf:u.numero_interno||u.numero||det.unidad_id, dpto:u.piso?`${u.piso} ${u.numero||''}`.trim():(u.tipo||''), prop:cp.apellido_nombre||'—', salAnt, pagos, deuda, interes, pct:pctGrales, fdoUF, gralesUF, cochUF, dptUF, total, redondeo:parseFloat(det.redondeo)||0 }
   })
   const morosos=ufsTabla.filter(u=>u.deuda>0||u.interes>0)
@@ -343,6 +345,7 @@ export default function Portal() {
         unidades: todasUnidades,
         copropietarios: todosCoprop,
         adminPerfil: adminPerfil || {},
+        lufsHist: lufsPortal || [],
       })
     } catch(e) { alert('Error al generar PDF: ' + e.message) }
     setGenerandoPDF(false)
