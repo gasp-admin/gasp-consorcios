@@ -362,7 +362,7 @@ export default function Portal() {
     const pl = (per) => { if(!per) return ''; const [y,m]=per.split('-'); return `${meses[parseInt(m)-1]} ${y}` }
     const lineas = []
 
-    const tieneHistoricos = lufsOrd.length > 0 || (dets2||[]).some(d => d.id?.startsWith('DET-HIST-') || d.id?.includes('-HIST-'))
+    const tieneHistoricos = (consorcio?.modelo_cc === 'historico' || consorcio?.modelo_cc === 'mixto') && lufsOrd.length > 0
     const lufsOrd = [...(lufs||[])].sort((a,b)=>(a.periodo||'').localeCompare(b.periodo||''))
 
     if (tieneHistoricos && lufsOrd.length > 0) {
