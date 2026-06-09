@@ -423,7 +423,7 @@ export default function Portal() {
       // Expensas del período abierto (DET no históricos)
       const detsOrd2 = [...(dets2||[])].sort((a,b)=>(a.con_expensas?.periodo||'').localeCompare(b.con_expensas?.periodo||''))
       for (const d of detsOrd2) {
-        if (d.id?.startsWith('DET-HIST-')) continue
+        if (d.id?.startsWith('DET-HIST-') || d.id?.includes('-HIST-')) continue
         const per   = d.con_expensas?.periodo||''
         const monto = parseFloat(d.monto)||0
         const intM2 = parseFloat(d.interes_mora)||0
