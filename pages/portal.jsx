@@ -362,8 +362,8 @@ export default function Portal() {
     const pl = (per) => { if(!per) return ''; const [y,m]=per.split('-'); return `${meses[parseInt(m)-1]} ${y}` }
     const lineas = []
 
-    const tieneHistoricos = (consorcio?.modelo_cc === 'historico' || consorcio?.modelo_cc === 'mixto') && lufsOrd.length > 0
     const lufsOrd = [...(lufs||[])].sort((a,b)=>(a.periodo||'').localeCompare(b.periodo||''))
+    const tieneHistoricos = (consorcio?.modelo_cc === 'historico' || consorcio?.modelo_cc === 'mixto') && lufsOrd.length > 0
 
     if (tieneHistoricos && lufsOrd.length > 0) {
       // Modelo histórico: ajuste de convergencia para que el saldo coincida
