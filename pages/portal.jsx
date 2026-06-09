@@ -333,10 +333,20 @@ export default function Portal() {
     }, 100)
   }
 
-  function abrirPDFCompleto() {
+  async function abrirPDFCompleto() {
     if (!expensaActual || !consorcio) return
     setGenerandoPDF(true)
     try {
+      // Para consorcios históricos, cargar todos los lufs del período para el PDF
+      let lufsHist = []
+      if (consorcio.modelo_cc === 'historico' && expensaActual?.periodo) {
+        const { data: lufsData } = await supabase
+          .from('con_liquidacion_uf')
+          .select('unidad_id, total_uf, saldo_anterior, pagos, deuda, interes, expensa_calculada, ajustes')
+          .eq('consorcio_id', consorcio.id)
+          .eq('periodo', expensaActual.periodo)
+        lufsHist = lufsData || []
+      }
       generarPDFLiquidacion({
         consorcioActivo: consorcio,
         expensa: expensaActual,
@@ -345,7 +355,7 @@ export default function Portal() {
         unidades: todasUnidades,
         copropietarios: todosCoprop,
         adminPerfil: adminPerfil || {},
-        lufsHist: lufsPortal || [],
+        lufsHist,
       })
     } catch(e) { alert('Error al generar PDF: ' + e.message) }
     setGenerandoPDF(false)
