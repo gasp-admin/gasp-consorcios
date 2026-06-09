@@ -218,7 +218,7 @@ export default function HistorialLiquidaciones() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h2 style={{ margin: 0, color: '#1F4E79', fontSize: 22 }}>📂 Historial de Liquidaciones</h2>
-          <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: 13 }}>Mis Expensas v42 — Importación automática con auto-corrección</p>
+          <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: 13 }}>Mis Expensas v43 — Importación automática con auto-corrección</p>
         </div>
         <button style={btn()} onClick={cargarTodo}>🔄 Actualizar</button>
       </div>
@@ -289,12 +289,12 @@ export default function HistorialLiquidaciones() {
           </div>
 
           <div style={{ ...card, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-            <h4 style={{ margin: '0 0 8px', fontSize: 13, color: '#166534' }}>✅ Flujo v42</h4>
+            <h4 style={{ margin: '0 0 8px', fontSize: 13, color: '#166534' }}>✅ Flujo v43</h4>
             <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12, color: '#166534', lineHeight: 1.8 }}>
               <li><b>meta</b>: extrae período, vencimiento, rubros y estado financiero</li>
               <li><b>≤30 UFs</b>: prorrateo en una sola llamada</li>
               <li><b>&gt;30 UFs</b>: rangos de 25 UFs secuenciales</li>
-              <li><b>Auto-detección de dpto</b>: reconoce 1 A, EP A, PB 1, UC AK, LOC, SOT, SUB, etc.</li>
+              <li><b>Auto-detección de dpto</b>: reconoce 1 A, EP A, PB 1, UC AK, TI 4E, TII 11D, COC 901, K 40, LOC, SOT, SUB, etc.</li>
               <li><b>Auto-corrección aritm.</b>: si diff &gt; 0.5 → expensa = total − deuda − interés − ajuste</li>
               <li><b>Saldo anterior negativo</b>: genera crédito "Saldo a favor" automáticamente</li>
               <li><b>Validación final</b>: informa UFs con diferencia aritmética al completar</li>
