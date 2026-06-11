@@ -1,5 +1,8 @@
 {
   "buildCommand": "rm -rf .next && next build",
   "framework": "nextjs",
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "env": {
+    "BUILD_VERSION": "v1781203208"
+  }
 }
