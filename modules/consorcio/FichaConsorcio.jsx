@@ -1,70 +1,74 @@
 // modules/consorcio/FichaConsorcio.jsx
-// Módulo: Ficha y edición del consorcio activo
-// Permite ver y editar todos los datos del consorcio: nombre, CUIT, domicilio,
-// datos bancarios, administrador, seguro, reglamento, formato liquidación, notas.
+// Módulo: Ficha y edición del consorcio activo — v2
+// Campos ajustados a la estructura real de con_consorcios
 
 import { useState, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
 import { AZ, VD, RJ, AM, GR } from '../../lib/config'
-import { Card, Btn, Sel } from '../../components/ui'
+import { Card, Btn } from '../../components/ui'
 
 const FLD = { fontSize: 13, padding: '7px 10px', border: '1px solid #d0d9e8', borderRadius: 6, width: '100%', boxSizing: 'border-box' }
 const LBL = { fontSize: 12, color: '#5a6a8a', fontWeight: 600, marginBottom: 3, display: 'block' }
-const SEC = { fontWeight: 700, fontSize: 13, color: AZ, borderBottom: '2px solid #e0e8f4', paddingBottom: 6, marginBottom: 14, marginTop: 20 }
+const SEC = { fontWeight: 700, fontSize: 13, color: AZ, borderBottom: '2px solid #e0e8f4', paddingBottom: 6, marginBottom: 14, marginTop: 22 }
 const COL2 = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px' }
 const COL3 = { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px 16px' }
 
 const FORMATOS = [
-  { value: 'standard',     label: 'Standard (1 grupo)' },
-  { value: 'con_subtotal', label: 'Con subtotal (Ática II)' },
+  { value: 'standard',     label: 'Standard (1 grupo de gastos)' },
+  { value: 'con_subtotal', label: 'Con subtotal — Ática II' },
   { value: 'cazon',        label: 'Cazón 1900 (3 grupos %)' },
 ]
 
+// Campos que se guardan en con_consorcios
+const CAMPOS = [
+  'nombre', 'cuit', 'direccion', 'localidad', 'provincia', 'telefono', 'email_consorcio',
+  'banco', 'cbu', 'alias_cbu', 'nro_cuenta',
+  'aseguradora', 'poliza_nro', 'poliza_compania', 'poliza_vto_desde', 'poliza_vto_hasta', 'poliza_suma', 'poliza_vencimiento',
+  'matricula_rpi', 'escritura_nro', 'escritura_fecha', 'escritura_escribano',
+  'vto1_dia', 'vto2_dia',
+  'interes_mora', 'interes_mora_2',
+  'notas_liquidacion_default',
+  'formato_liquidacion', 'modelo_cc',
+  'reglamento_url', 'drive_folder_url',
+  'notas',
+]
+
+function emptyForm(c) {
+  const f = {}
+  CAMPOS.forEach(k => { f[k] = c?.[k] ?? '' })
+  return f
+}
+
 export default function FichaConsorcio() {
-  const { consorcioActivo, setConsorcioActivo, consorcios, setConsorcios } = useApp()
-  const [form, setForm] = useState(null)
+  const { consorcioActivo, setConsorcioActivo, setConsorcios } = useApp()
+  const [form, setForm]         = useState(null)
   const [guardando, setGuardando] = useState(false)
-  const [msg, setMsg] = useState(null)
+  const [msg, setMsg]           = useState(null)
 
   useEffect(() => {
-    if (consorcioActivo) {
-      setForm({
-        nombre:               consorcioActivo.nombre || '',
-        cuit:                 consorcioActivo.cuit || '',
-        direccion:            consorcioActivo.direccion || '',
-        localidad:            consorcioActivo.localidad || '',
-        provincia:            consorcioActivo.provincia || 'Buenos Aires',
-        telefono:             consorcioActivo.telefono || '',
-        email_consorcio:      consorcioActivo.email_consorcio || '',
-        banco:                consorcioActivo.banco || '',
-        cbu:                  consorcioActivo.cbu || '',
-        alias_cbu:            consorcioActivo.alias_cbu || '',
-        cuenta_nro:           consorcioActivo.cuenta_nro || '',
-        aseguradora:          consorcioActivo.aseguradora || '',
-        poliza_nro:           consorcioActivo.poliza_nro || '',
-        poliza_vencimiento:   consorcioActivo.poliza_vencimiento || '',
-        formato_liquidacion:  consorcioActivo.formato_liquidacion || 'standard',
-        modelo_cc:            consorcioActivo.modelo_cc || '',
-        notas:                consorcioActivo.notas || '',
-        reglamento_url:       consorcioActivo.reglamento_url || '',
-      })
-    }
-  }, [consorcioActivo])
+    if (consorcioActivo) setForm(emptyForm(consorcioActivo))
+  }, [consorcioActivo?.id])
 
-  function upd(k, v) { setForm(f => ({ ...f, [k]: v })) }
+  function upd(k, v) { setForm(f => ({ ...f, [k]: v })); setMsg(null) }
 
   async function guardar() {
     if (!consorcioActivo?.id) return
     setGuardando(true); setMsg(null)
     try {
-      const { error } = await supabase
-        .from('con_consorcios')
-        .update(form)
-        .eq('id', consorcioActivo.id)
+      // Solo enviar campos no vacíos (evitar sobrescribir con cadenas vacías tipos date)
+      const payload = {}
+      CAMPOS.forEach(k => {
+        const v = form[k]
+        if (v === '' || v === null || v === undefined) {
+          payload[k] = null
+        } else {
+          payload[k] = v
+        }
+      })
+      const { error } = await supabase.from('con_consorcios').update(payload).eq('id', consorcioActivo.id)
       if (error) throw error
-      // Actualizar contexto
-      const updated = { ...consorcioActivo, ...form }
+      const updated = { ...consorcioActivo, ...payload }
       setConsorcioActivo(updated)
       setConsorcios(prev => prev.map(c => c.id === updated.id ? updated : c))
       setMsg({ tipo: 'ok', txt: '✅ Datos guardados correctamente.' })
@@ -77,140 +81,205 @@ export default function FichaConsorcio() {
   if (!form) return <Card><p style={{ color: GR }}>Cargando...</p></Card>
 
   return (
-    <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
+    <div style={{ maxWidth: 860, margin: '0 auto', padding: '0 0 48px' }}>
+
+      {/* Encabezado */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 18, color: AZ }}>📋 Ficha del Consorcio</h2>
-        <div style={{ fontSize: 12, color: GR }}>ID: <b>{consorcioActivo.id}</b></div>
+        <span style={{ fontSize: 11, color: GR, background: '#f0f4ff', padding: '3px 10px', borderRadius: 6 }}>
+          ID: {consorcioActivo.id}
+        </span>
       </div>
 
       {msg && (
         <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14,
           background: msg.tipo === 'ok' ? '#f0fdf4' : '#fff1f1',
-          color: msg.tipo === 'ok' ? VD : RJ, fontSize: 13 }}>
+          color: msg.tipo === 'ok' ? VD : RJ, fontSize: 13, fontWeight: 600 }}>
           {msg.txt}
         </div>
       )}
 
       <Card>
-        {/* ─── Identificación ─────────────────── */}
+
+        {/* ── Identificación ─────────────────────────── */}
         <div style={SEC}>Identificación</div>
         <div style={COL2}>
           <div>
-            <label style={LBL}>Nombre del consorcio</label>
-            <input style={FLD} value={form.nombre} onChange={e => upd('nombre', e.target.value)} />
+            <label style={LBL}>Nombre del consorcio *</label>
+            <input style={FLD} value={form.nombre || ''} onChange={e => upd('nombre', e.target.value)} />
           </div>
           <div>
             <label style={LBL}>CUIT</label>
-            <input style={FLD} value={form.cuit} onChange={e => upd('cuit', e.target.value)}
-              placeholder="30-XXXXXXXX-X" maxLength={13} />
+            <input style={FLD} value={form.cuit || ''} onChange={e => upd('cuit', e.target.value)} placeholder="30-XXXXXXXX-X" maxLength={13} />
           </div>
         </div>
 
-        {/* ─── Domicilio ──────────────────────── */}
-        <div style={SEC}>Domicilio</div>
+        {/* ── Domicilio ──────────────────────────────── */}
+        <div style={SEC}>Domicilio del edificio</div>
         <div style={COL3}>
           <div style={{ gridColumn: '1 / 3' }}>
             <label style={LBL}>Dirección</label>
-            <input style={FLD} value={form.direccion} onChange={e => upd('direccion', e.target.value)} />
+            <input style={FLD} value={form.direccion || ''} onChange={e => upd('direccion', e.target.value)} />
           </div>
           <div>
             <label style={LBL}>Localidad</label>
-            <input style={FLD} value={form.localidad} onChange={e => upd('localidad', e.target.value)} />
+            <input style={FLD} value={form.localidad || ''} onChange={e => upd('localidad', e.target.value)} />
           </div>
           <div>
             <label style={LBL}>Provincia</label>
-            <input style={FLD} value={form.provincia} onChange={e => upd('provincia', e.target.value)} />
+            <input style={FLD} value={form.provincia || ''} onChange={e => upd('provincia', e.target.value)} />
           </div>
           <div>
             <label style={LBL}>Teléfono</label>
-            <input style={FLD} value={form.telefono} onChange={e => upd('telefono', e.target.value)} />
+            <input style={FLD} value={form.telefono || ''} onChange={e => upd('telefono', e.target.value)} />
           </div>
           <div>
             <label style={LBL}>Email del consorcio</label>
-            <input style={FLD} value={form.email_consorcio} onChange={e => upd('email_consorcio', e.target.value)}
-              type="email" />
+            <input style={FLD} type="email" value={form.email_consorcio || ''} onChange={e => upd('email_consorcio', e.target.value)} />
           </div>
         </div>
 
-        {/* ─── Datos bancarios ────────────────── */}
+        {/* ── Datos bancarios ────────────────────────── */}
         <div style={SEC}>Datos bancarios</div>
         <div style={COL3}>
           <div>
             <label style={LBL}>Banco</label>
-            <input style={FLD} value={form.banco} onChange={e => upd('banco', e.target.value)} />
+            <input style={FLD} value={form.banco || ''} onChange={e => upd('banco', e.target.value)} />
           </div>
           <div>
-            <label style={LBL}>CBU</label>
-            <input style={FLD} value={form.cbu} onChange={e => upd('cbu', e.target.value)}
-              placeholder="22 dígitos" maxLength={22} />
+            <label style={LBL}>CBU (22 dígitos)</label>
+            <input style={FLD} value={form.cbu || ''} onChange={e => upd('cbu', e.target.value)} maxLength={22} />
           </div>
           <div>
             <label style={LBL}>Alias CBU</label>
-            <input style={FLD} value={form.alias_cbu} onChange={e => upd('alias_cbu', e.target.value)} />
+            <input style={FLD} value={form.alias_cbu || ''} onChange={e => upd('alias_cbu', e.target.value)} />
           </div>
           <div>
-            <label style={LBL}>Número de cuenta</label>
-            <input style={FLD} value={form.cuenta_nro} onChange={e => upd('cuenta_nro', e.target.value)} />
+            <label style={LBL}>N° de cuenta</label>
+            <input style={FLD} value={form.nro_cuenta || ''} onChange={e => upd('nro_cuenta', e.target.value)} />
           </div>
         </div>
 
-        {/* ─── Seguro ─────────────────────────── */}
+        {/* ── Seguro ─────────────────────────────────── */}
         <div style={SEC}>Seguro del edificio</div>
         <div style={COL3}>
           <div>
             <label style={LBL}>Aseguradora</label>
-            <input style={FLD} value={form.aseguradora} onChange={e => upd('aseguradora', e.target.value)} />
+            <input style={FLD} value={form.aseguradora || ''} onChange={e => upd('aseguradora', e.target.value)} />
+          </div>
+          <div>
+            <label style={LBL}>Compañía / Productor</label>
+            <input style={FLD} value={form.poliza_compania || ''} onChange={e => upd('poliza_compania', e.target.value)} />
           </div>
           <div>
             <label style={LBL}>N° de póliza</label>
-            <input style={FLD} value={form.poliza_nro} onChange={e => upd('poliza_nro', e.target.value)} />
+            <input style={FLD} value={form.poliza_nro || ''} onChange={e => upd('poliza_nro', e.target.value)} />
           </div>
           <div>
-            <label style={LBL}>Vencimiento póliza</label>
-            <input style={{ ...FLD }} type="date" value={form.poliza_vencimiento}
-              onChange={e => upd('poliza_vencimiento', e.target.value)} />
+            <label style={LBL}>Vigencia desde</label>
+            <input style={FLD} type="date" value={form.poliza_vto_desde || ''} onChange={e => upd('poliza_vto_desde', e.target.value)} />
+          </div>
+          <div>
+            <label style={LBL}>Vencimiento</label>
+            <input style={FLD} type="date" value={form.poliza_vto_hasta || ''} onChange={e => upd('poliza_vto_hasta', e.target.value)} />
+          </div>
+          <div>
+            <label style={LBL}>Suma asegurada ($)</label>
+            <input style={FLD} type="number" value={form.poliza_suma || ''} onChange={e => upd('poliza_suma', e.target.value)} />
           </div>
         </div>
 
-        {/* ─── Configuración GASP ─────────────── */}
+        {/* ── Reglamento / Escribanía ────────────────── */}
+        <div style={SEC}>📖 Reglamento de propiedad horizontal</div>
+        <div style={COL2}>
+          <div>
+            <label style={LBL}>Matrícula RPI</label>
+            <input style={FLD} value={form.matricula_rpi || ''} onChange={e => upd('matricula_rpi', e.target.value)} placeholder="Ej: 123456/Folio 45/Tomo 12" />
+          </div>
+          <div>
+            <label style={LBL}>Escribano/a</label>
+            <input style={FLD} value={form.escritura_escribano || ''} onChange={e => upd('escritura_escribano', e.target.value)} placeholder="Nombre y matrícula" />
+          </div>
+          <div>
+            <label style={LBL}>Escritura N°</label>
+            <input style={FLD} value={form.escritura_nro || ''} onChange={e => upd('escritura_nro', e.target.value)} />
+          </div>
+          <div>
+            <label style={LBL}>Fecha de escritura</label>
+            <input style={FLD} value={form.escritura_fecha || ''} onChange={e => upd('escritura_fecha', e.target.value)} placeholder="dd/mm/aaaa" />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={LBL}>URL Reglamento (Google Drive)</label>
+            <input style={FLD} value={form.reglamento_url || ''} onChange={e => upd('reglamento_url', e.target.value)} placeholder="https://drive.google.com/..." />
+          </div>
+        </div>
+
+        {/* ── Expensas / Liquidación ─────────────────── */}
+        <div style={SEC}>Configuración de expensas</div>
+        <div style={COL3}>
+          <div>
+            <label style={LBL}>Vencimiento 1° — día del mes</label>
+            <input style={FLD} type="number" min="1" max="31" value={form.vto1_dia || ''} onChange={e => upd('vto1_dia', e.target.value)} />
+          </div>
+          <div>
+            <label style={LBL}>Vencimiento 2° — día del mes</label>
+            <input style={FLD} type="number" min="1" max="31" value={form.vto2_dia || ''} onChange={e => upd('vto2_dia', e.target.value)} />
+          </div>
+          <div>
+            <label style={LBL}>Interés mora 1° (%)</label>
+            <input style={FLD} type="number" step="0.01" value={form.interes_mora || ''} onChange={e => upd('interes_mora', e.target.value)} />
+          </div>
+          <div>
+            <label style={LBL}>Interés mora 2° (%)</label>
+            <input style={FLD} type="number" step="0.01" value={form.interes_mora_2 || ''} onChange={e => upd('interes_mora_2', e.target.value)} />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={LBL}>Nota por defecto en liquidaciones</label>
+            <textarea style={{ ...FLD, minHeight: 50, resize: 'vertical' }} value={form.notas_liquidacion_default || ''} onChange={e => upd('notas_liquidacion_default', e.target.value)} />
+          </div>
+        </div>
+
+        {/* ── Configuración GASP ─────────────────────── */}
         <div style={SEC}>Configuración GASP</div>
         <div style={COL2}>
           <div>
             <label style={LBL}>Formato de liquidación</label>
-            <select style={FLD} value={form.formato_liquidacion}
-              onChange={e => upd('formato_liquidacion', e.target.value)}>
+            <select style={FLD} value={form.formato_liquidacion || 'standard'} onChange={e => upd('formato_liquidacion', e.target.value)}>
               {FORMATOS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
             </select>
           </div>
           <div>
             <label style={LBL}>Modelo cuenta corriente</label>
-            <select style={FLD} value={form.modelo_cc || ''}
-              onChange={e => upd('modelo_cc', e.target.value)}>
-              <option value="">Normal (período actual)</option>
+            <select style={FLD} value={form.modelo_cc || ''} onChange={e => upd('modelo_cc', e.target.value)}>
+              <option value="">Normal</option>
               <option value="historico">Histórico (carga desde PDF)</option>
               <option value="mixto">Mixto</option>
             </select>
           </div>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={LBL}>URL reglamento de propiedad (Google Drive)</label>
-            <input style={FLD} value={form.reglamento_url} onChange={e => upd('reglamento_url', e.target.value)}
-              placeholder="https://drive.google.com/..." />
+          <div>
+            <label style={LBL}>URL carpeta Google Drive</label>
+            <input style={FLD} value={form.drive_folder_url || ''} onChange={e => upd('drive_folder_url', e.target.value)} placeholder="https://drive.google.com/drive/folders/..." />
+          </div>
+          <div>
+            <label style={LBL}>ID carpeta Drive (interno)</label>
+            <input style={{ ...FLD, background: '#f7f9fc', color: '#888' }} value={consorcioActivo.drive_folder_id || '—'} readOnly />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
-            <label style={LBL}>Notas internas (formato liquidación, observaciones)</label>
-            <textarea style={{ ...FLD, minHeight: 60, resize: 'vertical' }} value={form.notas}
-              onChange={e => upd('notas', e.target.value)}
-              placeholder="Ej: Formato 3 grupos: GASTOS COMUNES + COCHERAS + OBRAS..." />
+            <label style={LBL}>Notas internas (formato, observaciones)</label>
+            <textarea style={{ ...FLD, minHeight: 60, resize: 'vertical' }} value={form.notas || ''} onChange={e => upd('notas', e.target.value)} placeholder="Ej: Formato 3 grupos: GASTOS COMUNES + COCHERAS + OBRAS..." />
           </div>
         </div>
 
-        {/* ─── Botón guardar ──────────────────── */}
-        <div style={{ marginTop: 20, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <Btn onClick={guardar} disabled={guardando}
-            style={{ background: VD, color: '#fff', padding: '9px 24px', fontSize: 13, fontWeight: 600 }}>
+        {/* ── Botón guardar ──────────────────────────── */}
+        <div style={{ marginTop: 24, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <Btn
+            onClick={guardar}
+            disabled={guardando}
+            style={{ background: VD, color: '#fff', padding: '10px 28px', fontSize: 13, fontWeight: 700, borderRadius: 8 }}>
             {guardando ? 'Guardando...' : '💾 Guardar cambios'}
           </Btn>
         </div>
+
       </Card>
     </div>
   )
