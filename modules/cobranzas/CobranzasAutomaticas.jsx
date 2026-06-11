@@ -1,4 +1,3 @@
-// CobranzasAutomaticas v1781203976
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
@@ -713,6 +712,7 @@ export default function CobranzasAutomaticas() {
                 <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Sistema de cobranza</div>
                 <select value={sistema} onChange={e=>setSistema(e.target.value)}
                   style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
+                  <option value="transferencia_siro">SIRO — Transferencias bancarias (TransferenciasSiro)</option>
                   <option value="siro_multi">SIRO Roela — Multi-consorcio (recomendado)</option>
                   <option value="siro">SIRO Roela — Un consorcio</option>
                   <option value="expensas_pagas">Expensas Pagas (archivo RD)</option>
