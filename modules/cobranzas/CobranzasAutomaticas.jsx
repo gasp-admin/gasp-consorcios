@@ -64,7 +64,7 @@ export default function CobranzasAutomaticas() {
       try {
         const conv    = l.slice(35,39)
         const cId     = mapaConv[conv] || null
-        const nroUF   = parseInt(l.slice(39,43)) || 0
+        const nroUF   = parseInt(l.slice(40,43)) || 0
         const imp     = parseInt(l.slice(24,35)) / 100
         const medio   = l.slice(123,125).trim()
         const canal   = medio==='PP'?'Plataforma Pagos':medio==='PF'?'Pago Fácil':medio==='RP'?'Rapipago':medio
