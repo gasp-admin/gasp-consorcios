@@ -334,7 +334,7 @@ export default function CobranzasAutomaticas() {
         expensa_id:expSel, unidad_id:r.unidadId,
         fecha:r.fechaAcred||r.fechaPago||hoy,
         monto:r.importe, medio_pago:'transferencia',
-        canal_cobro:r.canal, estado:'vigente',
+        canal_cobro:r.canal, estado:'acreditado',
         notas:`Auto importado ${r.tipo} — ${archNom}`,
       }])
       if (!error) {
