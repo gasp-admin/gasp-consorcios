@@ -91,6 +91,36 @@ export default function CobranzasAutomaticas() {
       .filter(r => !r.consorcioId || r.consorcioId === consorcioId)
   }
 
+  // TransferenciasSiro — posicional 120 chars
+  // Formato: pos 0-7 fechaOp | 8-15 fechaAcr | 16-22 importe(7 digits /100) | 23-25 seq
+  //          26-55 nombre(30) | 56-85 banco(30) | 86+ ref(puede contener UFn)
+  // Verificado con: PEREZ DARIO GERMAN $137.50 UF1 / FERNANDEZ FELIX GUILLERMO $132.00
+  function parsearTransferenciasSiro(texto) {
+    return texto.split(/\r?\n/).flatMap((line, i) => {
+      const l = line.trimEnd()
+      if (l.length < 50) return []
+      if (!/^202[0-9]{5}/.test(l)) return []
+      try {
+        const fechaOp  = l.slice(0, 8)
+        const fechaAcr = l.slice(8, 16)
+        const imp      = parseInt(l.slice(16, 23)) / 100
+        if (!imp || imp <= 0) return []
+        const nombre   = l.slice(26, 56).trim()
+        const banco    = l.slice(56, 86).trim()
+        const ref      = l.slice(86).trim()
+        const ufMatch  = ref.match(/UF(\d{1,3})/)
+        const nroUF    = ufMatch ? parseInt(ufMatch[1]) : null
+        const fOp = `${fechaOp.slice(6,8)}/${fechaOp.slice(4,6)}/${fechaOp.slice(0,4)}`
+        const fAcr = `${fechaAcr.slice(6,8)}/${fechaAcr.slice(4,6)}/${fechaAcr.slice(0,4)}`
+        return [{ _id:`TS-${i}`, tipo:'transferencia_siro',
+          canal: banco||'Transferencia bancaria',
+          fechaPago:fOp, fechaAcreditacion:fAcr,
+          importe:imp, nombrePagador:nombre, referencia:ref,
+          nroUF, consorcioId: consorcioId||null }]
+      } catch { return [] }
+    })
+  }
+
   // Expensas Pagas — posicional
   function parsearEP(texto) {
     return texto.split(/\r?\n/).flatMap((line, i) => {
@@ -259,7 +289,8 @@ export default function CobranzasAutomaticas() {
     setProcesando(true)
     try {
       let regs = []
-      if (sistema==='siro_multi')        regs = parsearSIROMulti(texto, todosConsorcios)
+      if (sistema==='transferencia_siro')  regs = parsearTransferenciasSiro(texto)
+      else if (sistema==='siro_multi')        regs = parsearSIROMulti(texto, todosConsorcios)
       else if (sistema==='siro')         regs = parsearSIROmono(texto)
       else if (sistema==='expensas_pagas') regs = parsearEP(texto)
       else                               regs = parsearBancoCsv(texto)
