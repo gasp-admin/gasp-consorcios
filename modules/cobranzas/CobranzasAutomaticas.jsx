@@ -91,48 +91,6 @@ export default function CobranzasAutomaticas() {
       .filter(r => !r.consorcioId || r.consorcioId === consorcioId)
   }
 
-  // TransferenciasSiro — posicional 120 chars (archivo rendición transferencias bancarias)
-  // Nombre archivo: TransferenciasSiro_{convenio}_{fecha}_{hora}.txt
-  function parsearTransferenciasSiro(texto) {
-    return texto.split(/\r?\n/).flatMap((line, i) => {
-      const l = line.trimEnd()
-      if (l.length < 70) return []
-      // Verificar que arranca con fecha válida 2026
-      if (!/^202[0-9]{5}/.test(l)) return []
-      try {
-        const fechaOp  = l.slice(0, 8)
-        const fechaAcr = l.slice(8, 16)
-        // Importe: pos 16-22 (7 dígitos) o 16-23 (8 dígitos) /100
-        const imp7     = parseInt(l.slice(16, 23)) / 100
-        const imp8     = parseInt(l.slice(16, 24)) / 100
-        // Usar el que da valor razonable (< 10M)
-        const imp      = imp8 < 10000000 && !isNaN(imp8) ? imp8 : imp7
-        if (!imp || imp <= 0) return []
-        const nombre   = l.slice(26, 56).trim()
-        const banco    = l.slice(56, 86).trim()
-        const ref      = l.slice(86).trim()
-        // Detectar UF en referencia: "UF1", "UF01", "7UF1", "20082423657UF1"
-        const ufMatch  = ref.match(/UF(\d{1,3})/)
-        const nroUF    = ufMatch ? parseInt(ufMatch[1]) : null
-        const fOp      = `${fechaOp.slice(6,8)}/${fechaOp.slice(4,6)}/${fechaOp.slice(0,4)}`
-        const fAcr     = `${fechaAcr.slice(6,8)}/${fechaAcr.slice(4,6)}/${fechaAcr.slice(0,4)}`
-        return [{
-          _id: `TS-${i}`,
-          tipo: 'transferencia_siro',
-          canal: banco || 'Transferencia bancaria',
-          fechaPago: fOp,
-          fechaAcreditacion: fAcr,
-          importe: imp,
-          nombrePagador: nombre,
-          referencia: ref,
-          nroUF,
-          // Sin consorcioId en el archivo — se asigna al consorcio activo
-          consorcioId: consorcioId || null,
-        }]
-      } catch { return [] }
-    })
-  }
-
   // Expensas Pagas — posicional
   function parsearEP(texto) {
     return texto.split(/\r?\n/).flatMap((line, i) => {
@@ -216,7 +174,11 @@ export default function CobranzasAutomaticas() {
 
   // Enriquecer con datos de BD — cruza UFs y obtiene saldos/vencimientos
   async function enriquecerConBD(regs) {
-    const cIds = [...new Set(regs.filter(r=>r.consorcioId).map(r=>r.consorcioId))]
+    // Para transferencia_siro, el consorcioId viene del consorcio activo
+    const cIds = [...new Set([
+      ...regs.filter(r=>r.consorcioId).map(r=>r.consorcioId),
+      ...(sistema==='transferencia_siro' && consorcioId ? [consorcioId] : [])
+    ])]
     if (!cIds.length) return regs
     const { data: exps } = await supabase.from('con_expensas')
       .select('id,consorcio_id,periodo,fecha_vencimiento,dias_gracia')
@@ -249,16 +211,44 @@ export default function CobranzasAutomaticas() {
         estadoUF:d.estado,
       }
     }
+    // Mapa de copropietarios por apellido para fallback por nombre pagador
+    const { data: copros } = await supabase.from('con_copropietarios')
+      .select('id,apellido_nombre')
+    const mapaCopro = {}
+    if (copros) for (const cp of copros) {
+      const key = cp.apellido_nombre?.toUpperCase().replace(/[^A-Z]/g,' ').trim().split(/\s+/).slice(0,2).join(' ')
+      if (key) mapaCopro[key] = cp.id
+    }
+    // Mapa unidadId → coproId para buscar por nombre
+    const mapaUFpropietario = {}
+    for (const uf of (ufs||[])) {
+      if (uf.propietario_id) mapaUFpropietario[uf.propietario_id] = uf
+    }
+
     return regs.map(r => {
-      if (!r.consorcioId || !r.nroUF) return r
-      const found = mapaUF[`${r.consorcioId}__${r.nroUF}`]
-      if (!found) return r
+      const cid = r.consorcioId || (sistema==='transferencia_siro' ? consorcioId : null)
+      if (!cid) return r
+      let found = r.nroUF ? mapaUF[`${cid}__${r.nroUF}`] : null
+      // Fallback: buscar por nombre del pagador si no hay nroUF o no se encontró
+      if (!found && r.nombrePagador) {
+        const nomKey = r.nombrePagador.toUpperCase().replace(/[^A-Z]/g,' ').trim().split(/\s+/).slice(0,2).join(' ')
+        const coproId = mapaCopro[nomKey]
+        if (coproId) {
+          const ufMatch = Object.values(mapaUFpropietario).find(u => u.propietario_id===coproId && u.consorcio_id===cid)
+          if (ufMatch) {
+            const numN = parseInt((ufMatch.numero||'').replace(/\D/g,'')) || 0
+            found = mapaUF[`${cid}__${numN}`]
+          }
+        }
+      }
+      if (!found) return { ...r, consorcioId: cid }
       return { ...r,
+        consorcioId: cid,
         unidadId:found.unidadId, ufLabel:found.ufLabel,
         saldo1er:found.s1, saldo2do:found.s2,
         venc1:found.fv1, venc2:found.fv2,
         estadoUF:found.estadoUF,
-        confianza: r.tipo==='SIRO' ? (found.unidadId?'alta':'media') : r.confianza,
+        confianza: (r.tipo==='SIRO'||r.tipo==='transferencia_siro') ? (found.unidadId?'alta':'media') : r.confianza,
       }
     })
   }
@@ -269,8 +259,7 @@ export default function CobranzasAutomaticas() {
     setProcesando(true)
     try {
       let regs = []
-      if (sistema==='transferencia_siro')  regs = parsearTransferenciasSiro(texto)
-      else if (sistema==='siro_multi')        regs = parsearSIROMulti(texto, todosConsorcios)
+      if (sistema==='siro_multi')        regs = parsearSIROMulti(texto, todosConsorcios)
       else if (sistema==='siro')         regs = parsearSIROmono(texto)
       else if (sistema==='expensas_pagas') regs = parsearEP(texto)
       else                               regs = parsearBancoCsv(texto)
@@ -723,7 +712,6 @@ export default function CobranzasAutomaticas() {
                 <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Sistema de cobranza</div>
                 <select value={sistema} onChange={e=>setSistema(e.target.value)}
                   style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
-                  <option value="transferencia_siro">SIRO — Transferencias bancarias (TransferenciasSiro)</option>
                   <option value="siro_multi">SIRO Roela — Multi-consorcio (recomendado)</option>
                   <option value="siro">SIRO Roela — Un consorcio</option>
                   <option value="expensas_pagas">Expensas Pagas (archivo RD)</option>
