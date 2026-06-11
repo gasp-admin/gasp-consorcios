@@ -358,7 +358,7 @@ export default function CobranzasAutomaticas() {
           categoria:'pago',
           monto:r.importe,
           fecha:r.fechaAcred||r.fechaPago||hoy,
-          estado:'vigente',
+          estado:'acreditado',
           notas:`Auto ${r.tipo} — ${archNom}`,
         }])
         ok++
@@ -429,7 +429,7 @@ export default function CobranzasAutomaticas() {
           id:`COB-SIRO-API-${uf.id}-${Date.now()}-${ok}`,
           admin_id:session.user.id, consorcio_id:consorcioId, expensa_id:expSel,
           unidad_id:uf.id, fecha, monto, medio_pago:'siro',
-          canal_cobro:pago.canal||'SIRO API', estado:'vigente',
+          canal_cobro:pago.canal||'SIRO API', estado:'acreditado',
           notas:`SIRO API — ${pago.nro_comprobante||''}`,
         }])
         if (!error) {
