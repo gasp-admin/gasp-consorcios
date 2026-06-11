@@ -1,3 +1,4 @@
+// CobranzasAutomaticas v1781203976
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
