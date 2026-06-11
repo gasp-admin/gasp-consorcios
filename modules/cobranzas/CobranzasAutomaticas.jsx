@@ -103,7 +103,7 @@ export default function CobranzasAutomaticas() {
       try {
         const fechaOp  = l.slice(0, 8)
         const fechaAcr = l.slice(8, 16)
-        const imp      = parseInt(l.slice(16, 23)) / 100
+        const imp      = parseInt(l.slice(16, 26)) / 100
         if (!imp || imp <= 0) return []
         const nombre   = l.slice(26, 56).trim()
         const banco    = l.slice(56, 86).trim()
