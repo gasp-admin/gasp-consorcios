@@ -113,15 +113,24 @@ export default function Dashboard() {
   return (
     <div>
       {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 20, fontWeight: 800, color: AZ }}>
-          {consorcioActivo.nombre}
+      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: AZ }}>
+            {consorcioActivo.nombre}
+          </div>
+          <div style={{ fontSize: 12, color: GR, marginTop: 2, display: 'flex', gap: 16 }}>
+            <span>📍 {consorcioActivo.localidad || 'Pinamar'}</span>
+            {expActiva && <span>📅 Período: <strong>{periodoLabel(expActiva.periodo)}</strong></span>}
+            {consorcioActivo.cbu && <span>🏦 CBU registrado</span>}
+          </div>
         </div>
-        <div style={{ fontSize: 12, color: GR, marginTop: 2, display: 'flex', gap: 16 }}>
-          <span>📍 {consorcioActivo.localidad || 'Pinamar'}</span>
-          {expActiva && <span>📅 Período: <strong>{periodoLabel(expActiva.periodo)}</strong></span>}
-          {consorcioActivo.cbu && <span>🏦 CBU registrado</span>}
-        </div>
+        <button
+          onClick={() => setPagina('ficha_consorcio')}
+          style={{ padding: '6px 14px', fontSize: 12, fontWeight: 600, background: '#f0f4ff',
+            color: AZ, border: '1px solid #c0cfe8', borderRadius: 7, cursor: 'pointer',
+            whiteSpace: 'nowrap', marginTop: 2 }}>
+          ✏️ Editar consorcio
+        </button>
       </div>
 
       {/* KPIs fila 1: estructura */}
