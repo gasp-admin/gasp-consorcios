@@ -346,6 +346,21 @@ export default function CobranzasAutomaticas() {
             pagos_periodo:np, estado:np>=(det.monto||0)?'pagada':'pendiente'
           }).eq('expensa_id',expSel).eq('unidad_id',r.unidadId)
         }
+        // Registrar movimiento en cta cte con leyenda que referencia el período de la liquidación
+        const periodoExp = expSel.match(/\d{4}-\d{2}$/)?.[0] || ''
+        const labelPeriodo = periodoExp ? periodoLabel(periodoExp) : ''
+        await supabase.from('con_movimientos_unidad').insert([{
+          id:`MOV-COB-${r.unidadId}-${Date.now()}`,
+          admin_id:session.user.id, consorcio_id:r.consorcioId,
+          unidad_id:r.unidadId, expensa_id:expSel,
+          tipo:'credito',
+          concepto:`Pago Exp. ${labelPeriodo} (${r.canal||'transferencia'})`,
+          categoria:'pago',
+          monto:r.importe,
+          fecha:r.fechaAcred||r.fechaPago||hoy,
+          estado:'vigente',
+          notas:`Auto ${r.tipo} — ${archNom}`,
+        }])
         ok++
       } else errores.push(error.message)
     }
