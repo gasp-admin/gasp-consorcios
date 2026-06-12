@@ -43,13 +43,67 @@ export default function AgendaVencimientos() {
   const DIAS  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']
 
   async function cargar() {
-    const { data } = await supabase.from('con_agenda_vencimientos').select('*')
+    // 1. Agenda manual
+    const { data: agenda } = await supabase.from('con_agenda_vencimientos').select('*')
       .eq('admin_id', uid)
       .in('estado',['pendiente','vencido'])
       .order('fecha_vencimiento')
-    setVencimientos(data || [])
+
+    // 2. Pólizas desde con_consorcios (automático desde ficha)
+    const { data: cons } = await supabase.from('con_consorcios')
+      .select('id,nombre,poliza_vto_hasta,poliza_nro,aseguradora,poliza_suma')
+      .eq('admin_id', uid)
+      .not('poliza_vto_hasta', 'is', null)
+
+    // 3. ART y seguros de proveedores
+    const { data: provs } = await supabase.from('con_proveedores')
+      .select('id,razon_social,art_vencimiento,seguro_vencimiento,consorcio_id')
+      .eq('admin_id', uid)
+      .or('art_vencimiento.not.is.null,seguro_vencimiento.not.is.null')
+
+    const extras = []
+    const hoy = new Date(); hoy.setHours(0,0,0,0)
+
+    // Pólizas
+    for (const c of (cons||[])) {
+      const dias = Math.round((new Date(c.poliza_vto_hasta+'T00:00:00') - hoy) / 86400000)
+      const nro  = c.poliza_nro ? ' N° ' + c.poliza_nro : ''
+      extras.push({
+        id: 'AUTO-POL-' + c.id,
+        tipo: 'poliza',
+        descripcion: 'Póliza — ' + (c.aseguradora || 'Seguro del edificio') + nro,
+        fecha_vencimiento: c.poliza_vto_hasta,
+        monto: c.poliza_suma,
+        consorcio_id: c.id,
+        consorcio_nombre: c.nombre,
+        estado: dias < 0 ? 'vencido' : 'pendiente',
+        fuente: 'auto',
+      })
+    }
+
+    // ART / Seguro proveedores
+    for (const p of (provs||[])) {
+      if (p.art_vencimiento) {
+        const dias = Math.round((new Date(p.art_vencimiento+'T00:00:00') - hoy) / 86400000)
+        extras.push({ id:'AUTO-ART-'+p.id, tipo:'poliza',
+          descripcion:'ART — '+p.razon_social, fecha_vencimiento:p.art_vencimiento,
+          consorcio_id:p.consorcio_id, estado:dias<0?'vencido':'pendiente', fuente:'auto' })
+      }
+      if (p.seguro_vencimiento) {
+        const dias = Math.round((new Date(p.seguro_vencimiento+'T00:00:00') - hoy) / 86400000)
+        extras.push({ id:'AUTO-SEG-'+p.id, tipo:'poliza',
+          descripcion:'Seguro — '+p.razon_social, fecha_vencimiento:p.seguro_vencimiento,
+          consorcio_id:p.consorcio_id, estado:dias<0?'vencido':'pendiente', fuente:'auto' })
+      }
+    }
+
+    // Combinar: agenda manual primero, luego automáticos (sin duplicar)
+    const idsAgenda = new Set((agenda||[]).map(a => a.id))
+    const todos = [...(agenda||[]), ...extras.filter(e => !idsAgenda.has(e.id))]
+    todos.sort((a,b) => new Date(a.fecha_vencimiento) - new Date(b.fecha_vencimiento))
+    setVencimientos(todos)
   }
-  useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
+  useEffect(() => { if (uid) cargar() }, [consorcioId, uid])
 
   async function guardar() {
     if (!form?.descripcion?.trim() || !form?.fecha_vencimiento) return setMsg({ tipo:'warn', texto:'Descripción y fecha son requeridos' })
