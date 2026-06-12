@@ -262,7 +262,11 @@ export default function AgendaVencimientos() {
                         <div style={{ fontSize:11, color:GR, marginTop:2, display:'flex', alignItems:'center', gap:8 }}>
                           <span>📍 {v.consorcio_nombre}</span>
                           {v.fuente==='auto' && (
-                            <button onClick={() => setPagina('ficha_consorcio')}
+                            <button onClick={() => {
+                                const c = consorcios?.find(x => x.id === v.consorcio_id)
+                                if (c && setConsorcioActivo) setConsorcioActivo(c)
+                                setPagina('ficha_consorcio')
+                              }}
                               style={{ fontSize:10, padding:'1px 7px', background:'#e0e7ff', color:'#1A3FA0', border:'none', borderRadius:4, cursor:'pointer', fontWeight:600 }}>
                               ✏️ Actualizar ficha
                             </button>
