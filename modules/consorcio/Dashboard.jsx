@@ -9,7 +9,7 @@ import { fmt, fmtN, periodoLabel } from '../../lib/formatters'
 
 export default function Dashboard() {
   const {
-    consorcios, consorcioActivo, unidades, copropietarios,
+    consorcios, consorcioActivo, setConsorcioActivo, unidades, copropietarios,
     expensas, proveedores, setPagina, session
   } = useApp()
   const uid  = session?.user?.id
@@ -281,7 +281,11 @@ export default function Dashboard() {
                     <div style={{ fontSize:11, color:'#6B7280', marginTop:1, display:'flex', gap:8 }}>
                       {v.consorcio_nombre && <span>📍 {v.consorcio_nombre}</span>}
                       {v.consorcio_id && (
-                        <button onClick={e => { e.stopPropagation(); setConsorcioActivo && consorcios?.find(c=>c.id===v.consorcio_id) && setConsorcioActivo(consorcios.find(c=>c.id===v.consorcio_id)); setPagina('ficha_consorcio') }}
+                        <button onClick={() => {
+                              const c = consorcios?.find(c=>c.id===v.consorcio_id)
+                              if (c && setConsorcioActivo) setConsorcioActivo(c)
+                              setPagina('ficha_consorcio')
+                            }}
                           style={{ fontSize:10, padding:'1px 6px', background:'#e0e7ff', color:AZ, border:'none', borderRadius:4, cursor:'pointer', fontWeight:600 }}>
                           ✏️ Actualizar ficha
                         </button>
