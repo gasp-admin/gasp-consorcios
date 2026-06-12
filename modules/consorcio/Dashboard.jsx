@@ -307,17 +307,18 @@ export default function Dashboard() {
   )
 }
 
-// ── AgendaVencimientos ──────────────────────────────────────────────────────
-function AgendaVencimientos({ consorcioId, uid, setPagina }) {
-  co solid ${color}25`, borderRadius: 10,
-      padding: '12px', cursor: 'pointer',
+function KPI({ icon, label, value, sub, color = '#1A3FA0', onClick }) {
+  return (
+    <div onClick={onClick} style={{
+      background: '#fff', borderRadius: 10, padding: '12px', cursor: onClick ? 'pointer' : 'default',
+      border: `1px solid ${color}25`, flex: '1 1 120px', minWidth: 100,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <span style={{ fontSize: 16 }}>{icon}</span>
-        <span style={{ fontSize: 11, color: GR, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</span>
+        <span style={{ fontSize: 11, color: '#6B7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</span>
       </div>
       <div style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 10, color: GR, marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 10, color: '#6B7280', marginTop: 4 }}>{sub}</div>}
     </div>
   )
 }
