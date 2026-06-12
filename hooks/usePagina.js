@@ -8,7 +8,6 @@ export const NAV_ITEMS = [
   { id: 'dashboard',                label: 'Dashboard',               icon: '📊', sec: 'Inicio' },
   { id: 'listado_consorcios',       label: 'Mis Consorcios',          icon: '🏛️', sec: 'Consorcio' },
   { id: 'ficha_consorcio',          label: 'Ficha del consorcio',     icon: '✏️', sec: 'Consorcio' },
-  { id: 'agenda_vencimientos',       label: 'Agenda de vencimientos',  icon: '📅', sec: 'Consorcio' },
   { id: 'unidades',                 label: 'Unidades (UFs)',          icon: '🏢', sec: 'Consorcio' },
   { id: 'copropietarios',           label: 'Copropietarios',          icon: '👤', sec: 'Consorcio' },
   { id: 'cta_corriente',            label: 'Cta. corriente UF',      icon: '📋', sec: 'Consorcio' },
