@@ -221,10 +221,10 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
-    </div>
 
       {/* ── Agenda de Vencimientos ──────────────────────────── */}
       <AgendaVencimientos consorcioId={cid} uid={uid} setPagina={setPagina} />
+    </div>
   )
 }
 
