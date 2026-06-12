@@ -84,8 +84,9 @@ export default function Dashboard() {
           .not('poliza_vto_hasta','is',null)
           .lte('poliza_vto_hasta', en30.toISOString().slice(0,10))
         const extras = (polizas||[]).map(c => ({
-          id:'POL-'+c.id, tipo:'poliza',
+          id:'POL-'+c.id, tipo:'poliza', consorcio_id:c.id,
           descripcion:'Póliza — '+(c.aseguradora||'Seguro')+(c.poliza_nro?' N° '+c.poliza_nro:''),
+          consorcio_nombre:c.nombre,
           fecha_vencimiento:c.poliza_vto_hasta,
         }))
         const todos = [...(ven||[]), ...extras]
@@ -239,7 +240,7 @@ export default function Dashboard() {
             { id: 'cta_corriente',   icon: '📋', label: 'Cta. Cte.' },
             { id: 'emails',          icon: '✉️', label: 'Enviar liquid.' },
             { id: 'reclamos',        icon: '🎫', label: 'Reclamos' },
-            { id: 'agenda_vencimientos', icon: '📅', label: 'Vencimientos' },
+            { id: 'agenda_venc', icon: '📅', label: 'Vencimientos' },
           ].map(a => (
             <button key={a.id} onClick={() => setPagina(a.id)} style={{
               padding: '10px 6px', borderRadius: 8, border: '1px solid #e5e7eb',
@@ -258,7 +259,7 @@ export default function Dashboard() {
         <div style={{ marginTop:20 }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
             <div style={{ fontSize:14, fontWeight:700, color:AZ }}>📅 Vencimientos próximos</div>
-            <button onClick={() => setPagina('agenda_vencimientos')}
+            <button onClick={() => setPagina('agenda_venc')}
               style={{ fontSize:11, padding:'4px 10px', background:'#f0f4ff', color:AZ,
                 border:'1px solid #c0cfe8', borderRadius:6, cursor:'pointer', fontWeight:600 }}>
               Ver agenda completa →
@@ -275,7 +276,18 @@ export default function Dashboard() {
                   background:bg, border:'1px solid '+(dias<0?'#fca5a5':'#fcd34d'),
                   borderRadius:7, padding:'7px 12px' }}>
                   <span style={{ fontSize:16 }}>{v.tipo==='poliza'?'🛡️':v.tipo==='art'?'🦺':'📌'}</span>
-                  <span style={{ flex:1, fontSize:12, fontWeight:600, color:'#111827' }}>{v.descripcion}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12, fontWeight:600, color:'#111827' }}>{v.descripcion}</div>
+                    <div style={{ fontSize:11, color:'#6B7280', marginTop:1, display:'flex', gap:8 }}>
+                      {v.consorcio_nombre && <span>📍 {v.consorcio_nombre}</span>}
+                      {v.consorcio_id && (
+                        <button onClick={e => { e.stopPropagation(); setConsorcioActivo && consorcios?.find(c=>c.id===v.consorcio_id) && setConsorcioActivo(consorcios.find(c=>c.id===v.consorcio_id)); setPagina('ficha_consorcio') }}
+                          style={{ fontSize:10, padding:'1px 6px', background:'#e0e7ff', color:AZ, border:'none', borderRadius:4, cursor:'pointer', fontWeight:600 }}>
+                          ✏️ Actualizar ficha
+                        </button>
+                      )}
+                    </div>
+                  </div>
                   <span style={{ fontSize:11, fontWeight:700, color, whiteSpace:'nowrap',
                     background:'rgba(255,255,255,0.8)', borderRadius:5, padding:'2px 8px' }}>
                     {label}
