@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function AgendaVencimientos() {
-  const { session, consorcioActivo, proveedores } = useApp()
+  const { session, consorcioActivo, setConsorcioActivo, consorcios, proveedores, setPagina } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
