@@ -18,6 +18,7 @@ export default function Dashboard() {
   // KPIs extras que no están en el context global
   const [kpis, setKpis]   = useState(null)
   const [cargando, setCargando] = useState(false)
+  const [vencUrgentes, setVencUrgentes] = useState([])
 
   useEffect(() => {
     if (!cid || !uid) return
@@ -63,6 +64,35 @@ export default function Dashboard() {
           gastosMes:       gastosMes.reduce((a, g) => a + parseFloat(g.monto||0), 0),
         })
       } catch(e) { console.error('[Dashboard]', e) }
+      // Vencimientos próximos (30 días)
+      try {
+        const hoy = new Date(); hoy.setHours(0,0,0,0)
+        const en30 = new Date(hoy); en30.setDate(en30.getDate()+30)
+        const { data: ven } = await supabase
+          .from('con_agenda_vencimientos')
+          .select('id,tipo,descripcion,fecha_vencimiento,estado')
+          .eq('admin_id', uid)
+          .in('estado',['pendiente','vencido'])
+          .lte('fecha_vencimiento', en30.toISOString().slice(0,10))
+          .order('fecha_vencimiento')
+          .limit(5)
+        // También pólizas desde con_consorcios
+        const { data: polizas } = await supabase
+          .from('con_consorcios')
+          .select('id,nombre,poliza_vto_hasta,aseguradora,poliza_nro')
+          .eq('admin_id', uid)
+          .not('poliza_vto_hasta','is',null)
+          .lte('poliza_vto_hasta', en30.toISOString().slice(0,10))
+        const extras = (polizas||[]).map(c => ({
+          id:'POL-'+c.id, tipo:'poliza',
+          descripcion:'Póliza — '+(c.aseguradora||'Seguro')+(c.poliza_nro?' N° '+c.poliza_nro:''),
+          fecha_vencimiento:c.poliza_vto_hasta,
+        }))
+        const todos = [...(ven||[]), ...extras]
+          .sort((a,b)=>new Date(a.fecha_vencimiento)-new Date(b.fecha_vencimiento))
+          .slice(0,5)
+        setVencUrgentes(todos)
+      } catch(_) {}
       setCargando(false)
     }
     cargarKpis()
@@ -222,6 +252,40 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* ── Vencimientos próximos ───────────────────────────── */}
+      {vencUrgentes.length > 0 && (
+        <div style={{ marginTop:20 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:AZ }}>📅 Vencimientos próximos</div>
+            <button onClick={() => setPagina('agenda_vencimientos')}
+              style={{ fontSize:11, padding:'4px 10px', background:'#f0f4ff', color:AZ,
+                border:'1px solid #c0cfe8', borderRadius:6, cursor:'pointer', fontWeight:600 }}>
+              Ver agenda completa →
+            </button>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            {vencUrgentes.map(v => {
+              const dias = Math.round((new Date(v.fecha_vencimiento+'T00:00:00') - new Date(new Date().setHours(0,0,0,0))) / 86400000)
+              const color = dias < 0 ? '#B91C1C' : dias <= 7 ? '#B91C1C' : '#C07D10'
+              const bg    = dias < 0 ? '#fff1f1' : dias <= 7 ? '#fff1f1'  : '#fffbea'
+              const label = dias < 0 ? 'Vencido hace '+Math.abs(dias)+'d' : dias === 0 ? 'HOY ⚡' : 'En '+dias+'d'
+              return (
+                <div key={v.id} style={{ display:'flex', alignItems:'center', gap:10,
+                  background:bg, border:'1px solid '+(dias<0?'#fca5a5':'#fcd34d'),
+                  borderRadius:7, padding:'7px 12px' }}>
+                  <span style={{ fontSize:16 }}>{v.tipo==='poliza'?'🛡️':v.tipo==='art'?'🦺':'📌'}</span>
+                  <span style={{ flex:1, fontSize:12, fontWeight:600, color:'#111827' }}>{v.descripcion}</span>
+                  <span style={{ fontSize:11, fontWeight:700, color, whiteSpace:'nowrap',
+                    background:'rgba(255,255,255,0.8)', borderRadius:5, padding:'2px 8px' }}>
+                    {label}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── Agenda de Vencimientos ──────────────────────────── */}
       <AgendaVencimientos consorcioId={cid} uid={uid} setPagina={setPagina} />
