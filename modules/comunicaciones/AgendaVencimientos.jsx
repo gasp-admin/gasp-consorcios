@@ -256,8 +256,19 @@ export default function AgendaVencimientos() {
                         Vence: <strong>{fmtF(v.fecha_vencimiento)}</strong>
                         {v.fecha_aviso1 ? ' · Aviso 1: '+fmtF(v.fecha_aviso1) : ''}
                         {v.fecha_aviso2 ? ' · Aviso 2: '+fmtF(v.fecha_aviso2) : ''}
-                        {v.monto ? ` · $${Number(v.monto).toLocaleString('es-AR')}` : ''}
+                        {v.monto ? ' · $'+Number(v.monto).toLocaleString('es-AR') : ''}
                       </div>
+                      {v.consorcio_nombre && (
+                        <div style={{ fontSize:11, color:GR, marginTop:2, display:'flex', alignItems:'center', gap:8 }}>
+                          <span>📍 {v.consorcio_nombre}</span>
+                          {v.fuente==='auto' && (
+                            <button onClick={() => setPagina('ficha_consorcio')}
+                              style={{ fontSize:10, padding:'1px 7px', background:'#e0e7ff', color:'#1A3FA0', border:'none', borderRadius:4, cursor:'pointer', fontWeight:600 }}>
+                              ✏️ Actualizar ficha
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {v.notas&&<div style={{fontSize:11,color:GR,marginTop:2,fontStyle:'italic'}}>{v.notas}</div>}
                     </div>
                     <div style={{ textAlign:'right', marginLeft:14, flexShrink:0 }}>
