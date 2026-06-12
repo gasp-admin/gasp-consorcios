@@ -209,6 +209,7 @@ export default function Dashboard() {
             { id: 'cta_corriente',   icon: '📋', label: 'Cta. Cte.' },
             { id: 'emails',          icon: '✉️', label: 'Enviar liquid.' },
             { id: 'reclamos',        icon: '🎫', label: 'Reclamos' },
+            { id: 'agenda_vencimientos', icon: '📅', label: 'Vencimientos' },
           ].map(a => (
             <button key={a.id} onClick={() => setPagina(a.id)} style={{
               padding: '10px 6px', borderRadius: 8, border: '1px solid #e5e7eb',
