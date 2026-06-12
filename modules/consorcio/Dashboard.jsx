@@ -1,4 +1,4 @@
-// modules/consorcio/Dashboard.jsx
+// modules/consorcio/Dashboard.jsx — v1781305245
 // Dashboard GASP Consorcios — KPIs reales desde el context.
 
 import { useState, useEffect } from 'react'
