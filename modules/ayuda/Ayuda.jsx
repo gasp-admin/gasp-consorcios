@@ -416,9 +416,9 @@ export default function Ayuda() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
             {[
               { icon: '✉️', titulo: 'Email', desc: 'admconspinamar@gmail.com', link: 'mailto:admconspinamar@gmail.com', label: 'Enviar email' },
-              { icon: '💬', titulo: 'WhatsApp', desc: '+54 9 2254 60-0000', link: 'https://wa.me/5492254600000', label: 'Abrir WhatsApp' },
+              { icon: '💬', titulo: 'WhatsApp', desc: '+54 9 2267 444035', link: 'https://wa.me/5492267444035', label: 'Abrir WhatsApp' },
               { icon: '🌐', titulo: 'Sitio web', desc: 'administracionpinamar.com', link: 'https://administracionpinamar.com', label: 'Visitar sitio' },
-              { icon: '📍', titulo: 'Oficina', desc: 'Júpiter 49 Local 1, Pinamar', link: 'https://maps.google.com/?q=Jupiter+49+Pinamar', label: 'Ver en mapa' },
+              { icon: '📍', titulo: 'Oficina', desc: 'Del Lenguado 1313 Loc 3, Pinamar', link: 'https://maps.google.com/?q=Del+Lenguado+1313+Local+3+Pinamar+Buenos+Aires', label: 'Ver en mapa' },
             ].map((c, i) => (
               <a key={i} href={c.link} target="_blank" rel="noopener noreferrer"
                 style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
@@ -456,6 +456,16 @@ export default function Ayuda() {
               26 consorcios · 906 unidades funcionales<br />
               Supabase + Next.js 13.5.6 + Vercel
             </div>
+          </div>
+
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <a href="https://drive.google.com/drive/folders/1xPaU_v_hL_a8ZJ1havSkZ_E3zA9E1l5A"
+              target="_blank" rel="noopener noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '11px 24px', background: AZ, color: '#fff',
+                borderRadius: 8, textDecoration: 'none', fontSize: 13, fontWeight: 700 }}>
+              📄 Ver documentación completa en Drive
+            </a>
           </div>
         </div>
       )}
