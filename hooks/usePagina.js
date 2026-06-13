@@ -50,6 +50,7 @@ export const NAV_ITEMS = [
   { id: 'importar_pdf',             label: 'Migrar desde PDF (IA)',    icon: '🤖', sec: 'Configuración' },
   { id: 'equipo',                   label: 'Equipo',                  icon: '👥', sec: 'Configuración' },
   { id: 'perfil',                   label: 'Mi perfil',               icon: '⚙️', sec: 'Configuración' },
+  { id: 'ayuda',                    label: 'Centro de ayuda',         icon: '❓', sec: 'Ayuda' },
 ]
 
 export const NAV_SUPERADMIN = { id: 'clientes', label: 'Clientes GASP', icon: '🏢', sec: 'Configuración' }
