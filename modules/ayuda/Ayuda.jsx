@@ -371,7 +371,7 @@ export default function Ayuda() {
             </div>
           ))}
           <div style={{ marginTop: 20, textAlign: 'center' }}>
-            <a href="https://drive.google.com/drive/folders/1EXlLiRq6G43qzwLvLGR_UkM-TB9BeH58"
+            <a href="https://drive.google.com/drive/folders/1xPaU_v_hL_a8ZJ1havSkZ_E3zA9E1l5A"
               target="_blank" rel="noopener noreferrer"
               style={{ display: 'inline-block', padding: '10px 24px', background: AZ,
                 color: '#fff', borderRadius: 8, textDecoration: 'none', fontSize: 13, fontWeight: 700 }}>
