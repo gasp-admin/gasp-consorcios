@@ -110,8 +110,9 @@ export default function CobranzasAutomaticas() {
         const ref      = l.slice(86).trim()
         const ufMatch  = ref.match(/UF(\d{1,3})/)
         const nroUF    = ufMatch ? parseInt(ufMatch[1]) : null
-        const fOp = `${fechaOp.slice(6,8)}/${fechaOp.slice(4,6)}/${fechaOp.slice(0,4)}`
-        const fAcr = `${fechaAcr.slice(6,8)}/${fechaAcr.slice(4,6)}/${fechaAcr.slice(0,4)}`
+        // ISO YYYY-MM-DD — evita ambiguedad DD/MM vs MM/DD al insertar en columna date
+        const fOp = `${fechaOp.slice(0,4)}-${fechaOp.slice(4,6)}-${fechaOp.slice(6,8)}`
+        const fAcr = `${fechaAcr.slice(0,4)}-${fechaAcr.slice(4,6)}-${fechaAcr.slice(6,8)}`
         return [{ _id:`TS-${i}`, tipo:'transferencia_siro',
           canal: banco||'Transferencia bancaria',
           fechaPago:fOp, fechaAcreditacion:fAcr,
