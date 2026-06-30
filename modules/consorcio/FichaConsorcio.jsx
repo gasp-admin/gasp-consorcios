@@ -246,7 +246,36 @@ export default function FichaConsorcio() {
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={LBL}>URL Reglamento (Google Drive)</label>
-            <input style={FLD} value={form.reglamento_url || ''} onChange={e => upd('reglamento_url', e.target.value)} placeholder="https://drive.google.com/..." />
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <input style={{ ...FLD, flex: 1 }} value={form.reglamento_url || ''} onChange={e => upd('reglamento_url', e.target.value)} placeholder="https://drive.google.com/file/d/..." />
+              <button
+                onClick={analizarReglamento}
+                disabled={analizandoReg || !form.reglamento_url?.trim()}
+                title="Analizar el PDF del reglamento con IA y completar los campos automáticamente"
+                style={{
+                  whiteSpace: 'nowrap', padding: '7px 14px', fontSize: 12, fontWeight: 700,
+                  background: analizandoReg ? '#9CA3AF' : AZ, color: '#fff', border: 'none',
+                  borderRadius: 6, cursor: (analizandoReg || !form.reglamento_url?.trim()) ? 'not-allowed' : 'pointer',
+                  opacity: (!form.reglamento_url?.trim()) ? 0.5 : 1,
+                }}>
+                {analizandoReg ? '⏳ Analizando...' : '🔎 Analizar con IA'}
+              </button>
+            </div>
+            {form.reglamento_url?.trim() && (
+              <a href={form.reglamento_url} target="_blank" rel="noopener noreferrer"
+                style={{ fontSize: 11, color: AZ, textDecoration: 'none', marginTop: 4, display: 'inline-block' }}>
+                📄 Ver documento en Drive →
+              </a>
+            )}
+            {msgReg && (
+              <div style={{
+                marginTop: 8, padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                background: msgReg.tipo === 'ok' ? '#f0fdf4' : msgReg.tipo === 'warn' ? '#fffbea' : '#fff1f1',
+                color: msgReg.tipo === 'ok' ? VD : msgReg.tipo === 'warn' ? '#C07D10' : RJ,
+              }}>
+                {msgReg.txt}
+              </div>
+            )}
           </div>
         </div>
 
