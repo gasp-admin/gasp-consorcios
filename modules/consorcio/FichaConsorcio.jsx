@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
+import { SUPA_URL } from '../../lib/config'
 import { AZ, VD, RJ, AM, GR } from '../../lib/config'
 import { Card, Btn } from '../../components/ui'
 
@@ -45,6 +46,8 @@ export default function FichaConsorcio() {
   const [form, setForm]         = useState(null)
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg]           = useState(null)
+  const [analizandoReg, setAnalizandoReg] = useState(false)
+  const [msgReg, setMsgReg]     = useState(null)
 
   useEffect(() => {
     if (consorcioActivo) setForm(emptyForm(consorcioActivo))
@@ -75,6 +78,39 @@ export default function FichaConsorcio() {
     } catch(e) {
       setMsg({ tipo: 'err', txt: '❌ Error al guardar: ' + e.message })
     } finally { setGuardando(false) }
+  }
+
+  async function analizarReglamento() {
+    if (!form.reglamento_url?.trim()) {
+      setMsgReg({ tipo: 'err', txt: '⚠️ Primero cargá la URL del reglamento en Google Drive.' })
+      return
+    }
+    setAnalizandoReg(true); setMsgReg(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const resp = await fetch(`${SUPA_URL}/functions/v1/extraer-reglamento-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ reglamento_url: form.reglamento_url }),
+      })
+      const json = await resp.json()
+      if (!json.ok) throw new Error(json.error || 'No se pudo analizar el reglamento')
+      const d = json.datos || {}
+      setForm(f => ({
+        ...f,
+        matricula_rpi: d.matricula_rpi && d.matricula_rpi !== 'null' ? d.matricula_rpi : f.matricula_rpi,
+        escritura_escribano: d.escritura_escribano && d.escritura_escribano !== 'null' ? d.escritura_escribano : f.escritura_escribano,
+        escritura_nro: d.escritura_nro && d.escritura_nro !== 'null' ? d.escritura_nro : f.escritura_nro,
+        escritura_fecha: d.escritura_fecha && d.escritura_fecha !== 'null' ? d.escritura_fecha : f.escritura_fecha,
+      }))
+      const confianzaIcon = d.confianza === 'alta' ? '✅' : d.confianza === 'media' ? '⚠️' : '❗'
+      setMsgReg({
+        tipo: d.confianza === 'baja' ? 'warn' : 'ok',
+        txt: `${confianzaIcon} Datos extraídos (confianza ${d.confianza || 'media'}). Revisá los campos antes de guardar.${d.notas ? ' — ' + d.notas : ''}`,
+      })
+    } catch(e) {
+      setMsgReg({ tipo: 'err', txt: '❌ Error al analizar: ' + e.message })
+    } finally { setAnalizandoReg(false) }
   }
 
   if (!consorcioActivo) return <Card><p style={{ color: GR }}>Seleccione un consorcio primero.</p></Card>
