@@ -997,10 +997,15 @@ export default function LiquidacionPeriodo() {
 </body>
 </html>`
 
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-    const url  = URL.createObjectURL(blob)
-    window.open(url, '_blank', 'width=1000,height=750')
-    setTimeout(() => URL.revokeObjectURL(url), 60000)
+    // Usar document.write en lugar de blob URL para evitar bloqueo de popups
+    const printWin = window.open('', '_blank', 'width=1100,height=800,scrollbars=yes,resizable=yes')
+    if (!printWin) {
+      setMsg({ tipo:'warn', texto:'El navegador bloqueó la ventana emergente. Habilitá los popups para este sitio e intentá nuevamente.' })
+      return
+    }
+    printWin.document.open()
+    printWin.document.write(html)
+    printWin.document.close()
   }
 
 
