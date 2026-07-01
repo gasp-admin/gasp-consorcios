@@ -1069,6 +1069,12 @@ export default function LiquidacionPeriodo() {
         estado: 'cerrada',
         saldo_caja_final: saldoCajaFinal,
         total_cobrado: totalCobrado,
+        // Persistir el estado financiero completo (lo lee el PDF del propietario e historial)
+        saldo_anterior:     parseFloat(efC?.saldo_anterior)     || 0,
+        ingresos_termino:   parseFloat(efC?.ingresos_termino)   || 0,
+        ingresos_adeudados: parseFloat(efC?.ingresos_adeudados) || 0,
+        ingresos_intereses: parseFloat(efC?.ingresos_intereses) || 0,
+        total_egresos:      parseFloat(efC?.total_egresos)      || 0,
       }).eq('id', expSel.id)
 
       // 2. Eliminar detalles anteriores si existen (recalculo)
