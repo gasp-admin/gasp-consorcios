@@ -79,7 +79,8 @@ export default function Expensas() {
   }
   async function generarPDF(expensa) {
     const { data:conData } = await supabase.from('con_consorcios').select('*').eq('id', consorcioId).single()
-    generarPDFLiquidacion({ consorcioActivo:conData||{nombre:consorcioId}, expensa, gastos, detalles, unidades, copropietarios, adminPerfil })
+    const { data:expFresca } = await supabase.from('con_expensas').select('*').eq('id', expensa.id).single()
+    generarPDFLiquidacion({ consorcioActivo:conData||{nombre:consorcioId}, expensa:expFresca||expensa, gastos, detalles, unidades, copropietarios, adminPerfil })
   }
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
 
