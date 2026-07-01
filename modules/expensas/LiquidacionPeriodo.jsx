@@ -38,7 +38,9 @@ export default function LiquidacionPeriodo() {
   const [saldoCajaAnterior, setSaldoCajaAnterior] = useState(0)
   // Cobranzas del período anterior (pagos recibidos en la liquidación anterior)
   const [cobradoPeriodoAnt, setCobradoPeriodoAnt] = useState(0)
-  const [cobradoActual, setCobradoActual]         = useState(0) // cobranzas del período en curso
+  const [cobradoActual, setCobradoActual]         = useState(0) // ingresos en término
+  const [cobradoAdeudado, setCobradoAdeudado]     = useState(0) // ingresos por deuda
+  const [cobradoInteres, setCobradoInteres]       = useState(0) // ingresos por intereses
   // Grupos y columnas de liquidación del consorcio activo
   const [gruposLiq, setGruposLiq]     = useState([])
   const [columnasLiq, setColumnasLiq] = useState([])
@@ -404,12 +406,16 @@ export default function LiquidacionPeriodo() {
       setCobradoPeriodoAnt(0)
     }
 
-    // Cargar cobranzas del período ACTUAL — siempre, independiente de si hay expensa anterior
-    // Son las que aparecen como "Ingresos del período" en el Estado Financiero
-    const { data: cobranzasActuales } = await supabase.from('con_cobranzas')
-      .select('monto').eq('expensa_id', expSel?.id || '')
-    const totalCobradoActual = (cobranzasActuales||[]).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
-    setCobradoActual(totalCobradoActual)
+    // Ingresos del período por CRITERIO CAJA (fecha de acreditación + estado='acreditado').
+    // Se calculan en el servidor con la RPC con_estado_financiero para NO depender del
+    // expensa_id de la cobranza (apunta a la deuda que cancela, no al período de caja).
+    const { data: efRows, error: efErr } = await supabase
+      .rpc('con_estado_financiero', { p_consorcio_id: consorcioId, p_periodo: expSel?.periodo || '' })
+    if (efErr) console.error('con_estado_financiero:', efErr)
+    const ef = Array.isArray(efRows) ? efRows[0] : efRows
+    setCobradoActual(parseFloat(ef?.ingresos_termino)   || 0)
+    setCobradoAdeudado(parseFloat(ef?.ingresos_adeudados) || 0)
+    setCobradoInteres(parseFloat(ef?.ingresos_intereses)  || 0)
 
     // Calcular fechas de vencimiento
     const exp_periodo = expSel?.periodo || ''
@@ -678,9 +684,11 @@ export default function LiquidacionPeriodo() {
     //                   NO los cobros de abril (ya están incluidos en saldoAntEF)
     //   egresos       = gastos del período actual pagados a proveedores
     //   saldoFinalEF  = saldoAnt + ingresos - egresos
-    const saldoAntEF    = saldoCajaAnterior   // saldo_caja_final del período anterior
-    const cobradoTermEF = cobradoActual        // cobranzas del período en curso (mayo)
-    const saldoFinalEF  = saldoAntEF + cobradoTermEF - totalGastosTotal
+    const saldoAntEF       = saldoCajaAnterior   // saldo_caja_final del período anterior
+    const cobradoTermEF    = cobradoActual        // ingresos por expensas en término (RPC)
+    const cobradoAdeudEF   = cobradoAdeudado      // ingresos por expensas adeudadas (RPC)
+    const cobradoInteresEF = cobradoInteres       // ingresos por intereses (RPC)
+    const saldoFinalEF     = saldoAntEF + cobradoTermEF + cobradoAdeudEF + cobradoInteresEF - totalGastosTotal
 
     // ── Prorrateo — tabla portrait con columnas compactas ────────────────────
     // TOTAL por UF = EXPENSA + REDONDEO + DEUDA + INTERÉS
@@ -757,9 +765,11 @@ export default function LiquidacionPeriodo() {
       : '<tr><td colspan="5" style="text-align:center;padding:6px;color:#6b7280">Sin unidades con deuda</td></tr>'
 
     // ── Logo real de la administración ───────────────────────────────────────
+    // ↓↓↓ PEGAR ACÁ el logo real: "data:image/png;base64,AAAA...". Vacío = solo texto (sin img roto).
     const LOGO_ADM_B64 = ''
+    const logoImg = LOGO_ADM_B64 ? `<img src="${LOGO_ADM_B64}" alt="Administración de Consorcios Pinamar" style="width:72px;height:auto;object-fit:contain"/>` : ''
     const logoHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:100px;padding:4px 6px;text-align:center">
-      <img src="${LOGO_ADM_B64}" alt="Administración de Consorcios Pinamar" style="width:72px;height:auto;object-fit:contain"/>
+      ${logoImg}
       <div style="font-size:6.5pt;color:#1A3FA0;font-weight:700;margin-top:3px;line-height:1.3">Administración de<br/>Consorcios Pinamar</div>
     </div>`
 
@@ -883,10 +893,10 @@ export default function LiquidacionPeriodo() {
   <table>
     <thead><tr><th style="text-align:left">CONCEPTO</th>${tieneMulticol ? colsActivas.map(c=>`<th class="r">${c.nombre}</th>`).join('')+'<th class="r">Total</th>' : '<th class="r">EXPENSAS A</th><th class="r">Total</th>'}</tr></thead>
     <tbody class="ef-body">
-      <tr><td style="padding:2px 7px">Saldo anterior al 01/${String(mesAnt).padStart(2,'0')}/${anioAnt}</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">—</td>`).join('')+'<td style="text-align:right;padding:2px 7px;white-space:nowrap">'+fmtN(saldoAntEF)+'</td>' : `<td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(saldoAntEF)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(saldoAntEF)}</td>`}</tr>
+      <tr><td style="padding:2px 7px">Saldo anterior al 01/${String(mesActual).padStart(2,'0')}/${anioActual}</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">—</td>`).join('')+'<td style="text-align:right;padding:2px 7px;white-space:nowrap">'+fmtN(saldoAntEF)+'</td>' : `<td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(saldoAntEF)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(saldoAntEF)}</td>`}</tr>
       <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de expensas en t&eacute;rmino</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">—</td>`).join('')+'<td style="text-align:right;padding:2px 7px;white-space:nowrap">'+fmtN(cobradoTermEF)+'</td>' : `<td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoTermEF)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoTermEF)}</td>`}</tr>
-      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de expensas adeudadas</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">0,00</td>`).join('')+'<td style="text-align:right;padding:2px 7px">0,00</td>' : '<td style="text-align:right;padding:2px 7px">0,00</td><td style="text-align:right;padding:2px 7px">0,00</td>'}</tr>
-      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de intereses</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">0,00</td>`).join('')+'<td style="text-align:right;padding:2px 7px">0,00</td>' : '<td style="text-align:right;padding:2px 7px">0,00</td><td style="text-align:right;padding:2px 7px">0,00</td>'}</tr>
+      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de expensas adeudadas</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">—</td>`).join('')+'<td style="text-align:right;padding:2px 7px;white-space:nowrap">'+fmtN(cobradoAdeudEF)+'</td>' : `<td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoAdeudEF)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoAdeudEF)}</td>`}</tr>
+      <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Ingresos por pago de intereses</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">—</td>`).join('')+'<td style="text-align:right;padding:2px 7px;white-space:nowrap">'+fmtN(cobradoInteresEF)+'</td>' : `<td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoInteresEF)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">${fmtN(cobradoInteresEF)}</td>`}</tr>
       <tr><td class="indent" style="padding:2px 7px 2px 18px;font-style:italic">Egresos por pagos</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;padding:2px 7px">—</td>`).join('')+'<td style="text-align:right;padding:2px 7px;white-space:nowrap">-'+fmtN(totalGastosTotal)+'</td>' : `<td style="text-align:right;padding:2px 7px;white-space:nowrap">-${fmtN(totalGastosTotal)}</td><td style="text-align:right;padding:2px 7px;white-space:nowrap">-${fmtN(totalGastosTotal)}</td>`}</tr>
     </tbody>
     <tfoot><tr class="ef-final"><td>Saldo final al ${fechaVto1}</td>${tieneMulticol ? colsActivas.map(()=>`<td style="text-align:right;white-space:nowrap">—</td>`).join('')+'<td style="text-align:right;white-space:nowrap">'+fmtN(saldoFinalEF)+'</td>' : `<td style="text-align:right;white-space:nowrap">${fmtN(saldoFinalEF)}</td><td style="text-align:right;white-space:nowrap">${fmtN(saldoFinalEF)}</td>`}</tr></tfoot>
