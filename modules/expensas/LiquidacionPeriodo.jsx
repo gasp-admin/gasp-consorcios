@@ -1155,9 +1155,12 @@ export default function LiquidacionPeriodo() {
 
       // Generar PDF de liquidación automáticamente al cerrar el período
       // Usar timeout para que el DOM se actualice primero
-      setTimeout(() => {
+      setTimeout(async () => {
         try {
-          const expActualizado = { ...expSel,
+          // Traer la expensa recién cerrada CON los campos de estado financiero persistidos,
+          // para que el PDF (y el que se envía al propietario) tome saldo y cobranzas reales.
+          const { data: expFresca } = await supabase.from('con_expensas').select('*').eq('id', expSel.id).single()
+          const expActualizado = expFresca || { ...expSel,
             total_gastos: totalGastos,
             total_expensa: totalACobrar,
             estado: 'cerrada',
