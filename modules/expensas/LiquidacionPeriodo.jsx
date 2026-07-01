@@ -61,6 +61,16 @@ export default function LiquidacionPeriodo() {
   }, [consorcioId])
 
   // ── Cargar datos ───────────────────────────────────────────────────────────
+  // Recarga la lista de expensas (períodos) del consorcio activo en el contexto.
+  // La llaman nuevaExpensa, confirmarYCerrar y las acciones de reapertura/borrado.
+  async function cargar() {
+    if (!consorcioId) return
+    const { data } = await supabase.from('con_expensas')
+      .select('*').eq('consorcio_id', consorcioId)
+      .order('periodo', { ascending: false })
+    setExpensas(data || [])
+  }
+
   async function cargarGastos(eid) {
     const { data } = await supabase.from('con_gastos').select('*')
       .eq('expensa_id', eid).order('categoria')
@@ -1043,11 +1053,14 @@ export default function LiquidacionPeriodo() {
       // 1. Actualizar la expensa con los totales definitivos
       // totalCobrado = cobranzas REALES registradas en este período (con_cobranzas)
       // NO usar pagos_anterior (eso es la deuda que viene de períodos anteriores)
-      const { data: cobsMayo } = await supabase.from('con_cobranzas')
-        .select('monto').eq('expensa_id', expSel.id)
-      const totalCobrado = (cobsMayo||[]).reduce((a,c) => a + (parseFloat(c.monto)||0), 0)
-      // saldoCajaFinal = saldo anterior + lo cobrado en mayo - lo gastado en mayo
-      const saldoCajaFinal = saldoCajaAnterior + totalCobrado - totalGastos
+      // Ingresos y saldo por CRITERIO CAJA vía RPC — mismo cálculo que la vista previa.
+      // Evita el bug de filtrar cobranzas por expensa_id (devolvía 0 y persistía saldo mal).
+      const { data: efRows, error: efErr } = await supabase
+        .rpc('con_estado_financiero', { p_consorcio_id: consorcioId, p_periodo: expSel.periodo })
+      if (efErr) throw new Error('Estado financiero: ' + efErr.message)
+      const efC = Array.isArray(efRows) ? efRows[0] : efRows
+      const totalCobrado   = parseFloat(efC?.total_ingresos) || 0
+      const saldoCajaFinal = parseFloat(efC?.saldo_final)    || 0
       await supabase.from('con_expensas').update({
         total_gastos: totalGastos,
         total_expensa: totalACobrar,
