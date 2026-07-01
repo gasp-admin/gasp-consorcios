@@ -547,14 +547,12 @@ export default function LiquidacionPeriodo() {
   function vistaPrevia() {
     if (!distribucion || distribucion.length === 0) return setMsg({ tipo:'warn', texto:'Calculá la distribución antes de ver la vista previa' })
 
-    // Abrir ventana al inicio del evento click — antes de any async o long sync
-    // para que el navegador no la bloquee como popup no solicitado
+    // Abrir ventana al inicio del evento click para que el browser no la bloquee
     const printWin = window.open('', '_blank', 'width=1100,height=800,scrollbars=yes,resizable=yes')
     if (!printWin) {
-      setMsg({ tipo:'warn', texto:'⚠️ El navegador bloqueó la ventana emergente. Hacé click en el ícono de la barra de dirección para habilitarla, o desactivá el bloqueador de popups para este sitio.' })
+      setMsg({ tipo:'warn', texto:'⚠️ El navegador bloqueó la ventana emergente. Habilitá los popups para este sitio.' })
       return
     }
-    printWin.document.write('<html><head><title>Generando liquidación...</title></head><body style="font-family:sans-serif;padding:40px;color:#666">⏳ Generando vista previa...</body></html>')
 
     // ── Datos base ──────────────────────────────────────────────────────────
     const totalGastosTotal = gastos.reduce((a,g)=>a+parseFloat(g.monto||0),0)
@@ -759,6 +757,7 @@ export default function LiquidacionPeriodo() {
       : '<tr><td colspan="5" style="text-align:center;padding:6px;color:#6b7280">Sin unidades con deuda</td></tr>'
 
     // ── Logo real de la administración ───────────────────────────────────────
+    const LOGO_ADM_B64 = ''
     const logoHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:100px;padding:4px 6px;text-align:center">
       <img src="${LOGO_ADM_B64}" alt="Administración de Consorcios Pinamar" style="width:72px;height:auto;object-fit:contain"/>
       <div style="font-size:6.5pt;color:#1A3FA0;font-weight:700;margin-top:3px;line-height:1.3">Administración de<br/>Consorcios Pinamar</div>
@@ -1006,10 +1005,18 @@ export default function LiquidacionPeriodo() {
 </body>
 </html>`
 
-    // Escribir el HTML final en la ventana ya abierta
-    printWin.document.open()
-    printWin.document.write(html)
-    printWin.document.close()
+    // Escribir el HTML final — usando blob URL en un link temporal para máxima compatibilidad
+    try {
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+      const blobUrl = URL.createObjectURL(blob)
+      printWin.location.href = blobUrl
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 30000)
+    } catch(e) {
+      // Fallback: document.write directo
+      printWin.document.open()
+      printWin.document.write(html)
+      printWin.document.close()
+    }
   }
 
 
