@@ -547,6 +547,15 @@ export default function LiquidacionPeriodo() {
   function vistaPrevia() {
     if (!distribucion || distribucion.length === 0) return setMsg({ tipo:'warn', texto:'Calculá la distribución antes de ver la vista previa' })
 
+    // Abrir ventana al inicio del evento click — antes de any async o long sync
+    // para que el navegador no la bloquee como popup no solicitado
+    const printWin = window.open('', '_blank', 'width=1100,height=800,scrollbars=yes,resizable=yes')
+    if (!printWin) {
+      setMsg({ tipo:'warn', texto:'⚠️ El navegador bloqueó la ventana emergente. Hacé click en el ícono de la barra de dirección para habilitarla, o desactivá el bloqueador de popups para este sitio.' })
+      return
+    }
+    printWin.document.write('<html><head><title>Generando liquidación...</title></head><body style="font-family:sans-serif;padding:40px;color:#666">⏳ Generando vista previa...</body></html>')
+
     // ── Datos base ──────────────────────────────────────────────────────────
     const totalGastosTotal = gastos.reduce((a,g)=>a+parseFloat(g.monto||0),0)
     const per = periodoLabel(expSel?.periodo)
@@ -997,12 +1006,7 @@ export default function LiquidacionPeriodo() {
 </body>
 </html>`
 
-    // Usar document.write en lugar de blob URL para evitar bloqueo de popups
-    const printWin = window.open('', '_blank', 'width=1100,height=800,scrollbars=yes,resizable=yes')
-    if (!printWin) {
-      setMsg({ tipo:'warn', texto:'El navegador bloqueó la ventana emergente. Habilitá los popups para este sitio e intentá nuevamente.' })
-      return
-    }
+    // Escribir el HTML final en la ventana ya abierta
     printWin.document.open()
     printWin.document.write(html)
     printWin.document.close()
