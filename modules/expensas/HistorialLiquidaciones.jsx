@@ -135,8 +135,13 @@ export default function HistorialLiquidaciones() {
         setProgreso({ paso: 'Finalizando...', pct: 90 })
         await efPost({ accion: 'finalizar', cola_id: colaId, expensa_id, consorcio_id: con.id }).catch(() => {})
         setProgreso({ paso: 'Completado', pct: 100 })
-        const adv = ufsErr > 0 ? ` ⚠️ ${ufsErr} UF(s) con diferencia aritmética.` : ''
-        setMsg(`✅ ${file.name} — ${pdfRes?.nUFs || totalUFs} UFs — Período ${periodo}${adv}`)
+        const nUFsReal = pdfRes?.nUFs ?? 0
+        if (nUFsReal === 0) {
+          setMsg(`⚠️ ${file.name} — Período ${periodo}: estado financiero importado, pero el PRORRATEO no detectó UFs (cta cte SIN imputar). Reintentá este archivo.`)
+        } else {
+          const adv = ufsErr > 0 ? ` ⚠️ ${ufsErr} UF(s) con diferencia aritmética.` : ''
+          setMsg(`✅ ${file.name} — ${nUFsReal} UFs — Período ${periodo}${adv}`)
+        }
         return
       }
 
@@ -177,8 +182,12 @@ export default function HistorialLiquidaciones() {
       setProgreso({ paso: 'Finalizando...', pct: 95 })
       await efPost({ accion: 'finalizar', cola_id: colaId, expensa_id, consorcio_id: con.id }).catch(() => {})
       setProgreso({ paso: 'Completado', pct: 100 })
-      const adv = ufsErr > 0 ? ` ⚠️ ${ufsErr} UF(s) con diferencia aritmética.` : ''
-      setMsg(`✅ ${file.name} — ${ufsOk} UFs — Período ${periodo}${adv}`)
+      if (ufsOk === 0) {
+        setMsg(`⚠️ ${file.name} — Período ${periodo}: el PRORRATEO no detectó UFs (cta cte SIN imputar). Reintentá este archivo.`)
+      } else {
+        const adv = ufsErr > 0 ? ` ⚠️ ${ufsErr} UF(s) con diferencia aritmética.` : ''
+        setMsg(`✅ ${file.name} — ${ufsOk} UFs — Período ${periodo}${adv}`)
+      }
 
     } finally {
       if (storagePath) await eliminarPDF(storagePath)
