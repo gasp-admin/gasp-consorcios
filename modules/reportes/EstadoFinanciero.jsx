@@ -37,7 +37,7 @@ export default function EstadoFinanciero() {
       supabase.from('con_expensas_detalle').select('monto,saldo_anterior,interes_mora,pagos_periodo,estado')
         .eq('consorcio_id', consorcioId),
       supabase.from('con_cobranzas').select('monto,fecha,medio_pago')
-        .eq('consorcio_id', consorcioId).in('estado',['vigente','acreditado','cobrado'])
+        .eq('consorcio_id', consorcioId).eq('estado','acreditado')  // criterio caja: unificado con RPC con_estado_financiero
         .gte('fecha', desde).lte('fecha', hasta),
       supabase.from('con_gastos').select('monto,categoria,fecha')
         .eq('consorcio_id', consorcioId)
