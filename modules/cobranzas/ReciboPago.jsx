@@ -103,7 +103,7 @@ export default function ReciboPago() {
     <span class="label">Medio de pago</span>
     <span class="value">${(cob.medio_pago || 'efectivo').replace(/_/g,' ')}</span>
   </div>
-  ' + (cob.canal_cobro ? '<div class="row"><span class="label">Canal</span><span class="value">' + cob.canal_cobro + '</span></div>' : '') + '
+  ${cob.canal_cobro ? `<div class="row"><span class="label">Canal</span><span class="value">${cob.canal_cobro}</span></div>` : ''}
 
   <div class="monto-box">
     <div class="monto">${monto}</div>
