@@ -19,7 +19,7 @@ export default function ReciboPago() {
 
   async function cargar() {
     const q = supabase.from('con_cobranzas').select('*')
-      .eq('consorcio_id', consorcioId).eq('estado','vigente')
+      .eq('consorcio_id', consorcioId).in('estado',['vigente','acreditado','cobrado'])
       .order('fecha', { ascending:false }).limit(200)
     if (filtroExp) q.eq('expensa_id', filtroExp)
     if (filtroUF)  q.eq('unidad_id', filtroUF)
