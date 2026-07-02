@@ -262,6 +262,7 @@ export default function Portal() {
     if (hash === '#cuenta-corriente') { setTab('cuenta'); return }
     if (hash === '#pagos') { setTab('pagos'); return }
     if (hash === '#documentos') { setTab('documentos'); return }
+    if (hash.startsWith('#recibo-')) { setTab('pagos'); return }
     if (hash.startsWith('#liquidacion-')) {
       const per = hash.replace('#liquidacion-', '')
       setTab('cuenta')
@@ -368,6 +369,47 @@ export default function Portal() {
       })
     } catch(e) { alert('Error al generar PDF: ' + e.message) }
     setGenerandoPDF(false)
+  }
+
+  // Recibo de pago con el formato del sistema (Ley 14.701), accesible desde el portal.
+  function generarReciboCob(cob) {
+    if (!cob) return
+    const uf = unidad, cp = coprop, con = consorcio || {}, adm = adminPerfil || {}
+    const fecha = cob.fecha ? new Date(cob.fecha+'T00:00:00').toLocaleDateString('es-AR') : '\u2014'
+    const monto = '$' + Number(cob.monto||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
+    const periodo = periodoLabel(cob.con_expensas?.periodo)
+    const nroRecibo = cob.recibo_numero || String(cob.id).slice(-8).toUpperCase()
+    const logoTag = adm.sello_url ? `<img src="${adm.sello_url}" style="max-height:44px;max-width:92px;object-fit:contain;background:#fff;border-radius:4px;padding:2px" />` : ''
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Recibo ${nroRecibo}</title><style>
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:12px;color:#111}
+.recibo{width:180mm;margin:8mm auto;padding:8mm;border:2px solid #1A3FA0;border-radius:6px}
+.header{background:#1A3FA0;color:#fff;padding:10px 14px;border-radius:4px 4px 0 0;margin:-8mm -8mm 12px -8mm;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.header h1{font-size:16px;font-weight:700}.header p{font-size:11px;opacity:.85;margin-top:2px}
+.nro{text-align:right}.nro span{font-size:22px;font-weight:800;display:block}
+.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb}
+.label{color:#6B7280;font-size:11px}.value{font-weight:600}
+.monto-box{background:#f0fdf4;border:2px solid #86efac;border-radius:8px;padding:14px;text-align:center;margin:16px 0}
+.monto-box .monto{font-size:28px;font-weight:800;color:#1B6B35}
+.badge{display:inline-block;background:#dcfce7;color:#166534;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600}
+.firma{margin-top:24px;border-top:1px solid #374151;padding-top:8px;text-align:center;font-size:11px;color:#374151}
+@media print{body{-webkit-print-color-adjust:exact}}
+</style></head><body><div class="recibo">
+<div class="header"><div style="display:flex;align-items:center;gap:12px">${logoTag}<div><h1>RECIBO DE PAGO DE EXPENSAS</h1><p>Ley Provincial 14.701 \u2014 Provincia de Buenos Aires</p></div></div><div class="nro"><span>N\u00b0 ${nroRecibo}</span><div style="font-size:11px;opacity:.8">Comprobante</div></div></div>
+<div class="row"><span class="label">Consorcio</span><span class="value">${con.nombre || '\u2014'}</span></div>
+<div class="row"><span class="label">Unidad Funcional</span><span class="value">UF ${uf?.numero || '?'} \u2014 ${uf?.tipo || ''}</span></div>
+<div class="row"><span class="label">Copropietario</span><span class="value">${cp?.apellido_nombre || '\u2014'}</span></div>
+<div class="row"><span class="label">Per\u00edodo</span><span class="value">${periodo}</span></div>
+<div class="row"><span class="label">Fecha de pago</span><span class="value">${fecha}</span></div>
+<div class="row"><span class="label">Medio de pago</span><span class="value">${(cob.medio_pago || 'transferencia').replace(/_/g,' ')}</span></div>
+<div class="monto-box"><div class="monto">${monto}</div><div class="label" style="color:#166534;font-size:12px;margin-top:4px">Importe recibido \u2014 <span class="badge">\u2713 Pago registrado</span></div>
+<div style="margin-top:10px;display:flex;align-items:center;justify-content:center;gap:12px"><img src="https://api.qrserver.com/v1/create-qr-code/?size=70x70&data=GASP-REC-${nroRecibo}-${encodeURIComponent(con.nombre||'')}-${encodeURIComponent(periodo)}" alt="QR" style="width:70px;height:70px" /><div style="text-align:left;font-size:9px;color:#374151"><div style="font-weight:600;margin-bottom:2px">C\u00f3digo de verificaci\u00f3n</div><div>${nroRecibo}</div></div></div></div>
+<div class="row"><span class="label">Registrado por</span><span class="value">Administraci\u00f3n de Consorcios Pinamar</span></div>
+<div class="firma"><strong>${adm.nombre || 'Javier Garc\u00eda P\u00e9rez'}</strong> \u2014 Administrador de Consorcios \u2014 RPAC Mat. N\u00b0 ${adm.matricula_rpac || '83'}<br/>Pinamar, Provincia de Buenos Aires<br/><span style="font-size:10px;color:#9ca3af">Comprobante emitido por GASP Consorcios \u2014 ${new Date().toLocaleString('es-AR')}</span></div>
+</div></body></html>`
+    const win = window.open('', '_blank', 'width=820,height=720')
+    if (!win) { alert('Habilite las ventanas emergentes para descargar el recibo.'); return }
+    win.document.write(html); win.document.close()
+    win.onload = () => { win.focus(); win.print() }
   }
 
   async function cargarCtaCte(ufId, consorcioId) {
@@ -1157,7 +1199,10 @@ export default function Portal() {
                       </div>
                       {c.observaciones && <div style={{ fontSize:11, color:GR }}>{c.observaciones}</div>}
                     </div>
-                    <div style={{ fontWeight:800, fontSize:16, color:VD }}>{fmt(c.monto)}</div>
+                    <div style={{ textAlign:'right' }}>
+                      <div style={{ fontWeight:800, fontSize:16, color:VD }}>{fmt(c.monto)}</div>
+                      <button onClick={() => generarReciboCob(c)} style={{ marginTop:5, background:'#1A3FA0', color:'#fff', border:'none', borderRadius:6, padding:'5px 11px', fontSize:11, fontWeight:600, cursor:'pointer' }}>🧾 Recibo</button>
+                    </div>
                   </div>
                 ))}
               </div>
