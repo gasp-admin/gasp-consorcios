@@ -80,7 +80,21 @@ export default function Expensas() {
   async function generarPDF(expensa) {
     const { data:conData } = await supabase.from('con_consorcios').select('*').eq('id', consorcioId).single()
     const { data:expFresca } = await supabase.from('con_expensas').select('*').eq('id', expensa.id).single()
-    generarPDFLiquidacion({ consorcioActivo:conData||{nombre:consorcioId}, expensa:expFresca||expensa, gastos, detalles, unidades, copropietarios, adminPerfil })
+    // Traer detalle y gastos frescos de ESTE período: permite generar el PDF directo desde la lista, sin abrir el detalle
+    const [dRes, gRes] = await Promise.all([
+      supabase.from('con_expensas_detalle').select('*').eq('expensa_id', expensa.id).order('created_at'),
+      supabase.from('con_gastos').select('*').eq('expensa_id', expensa.id).order('fecha')
+    ])
+    // Consorcios históricos (ej. Dorado): traer el prorrateo importado para que total_uf mande en el PDF
+    let lufsHist = []
+    const periodo = expFresca?.periodo || expensa.periodo
+    if (conData?.modelo_cc === 'historico' && periodo) {
+      const { data:lufsData } = await supabase.from('con_liquidacion_uf')
+        .select('unidad_id, total_uf, saldo_anterior, pagos, deuda, interes, expensa_calculada, ajustes')
+        .eq('consorcio_id', consorcioId).eq('periodo', periodo)
+      lufsHist = lufsData || []
+    }
+    generarPDFLiquidacion({ consorcioActivo:conData||{nombre:consorcioId}, expensa:expFresca||expensa, gastos:gRes.data||[], detalles:dRes.data||[], unidades, copropietarios, adminPerfil, lufsHist })
   }
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
 
@@ -281,16 +295,26 @@ export default function Expensas() {
                     {exp.descripcion && <span style={{ maxWidth:340, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{exp.descripcion}</span>}
                   </div>
                 </div>
-                <button
-                  onClick={abrirDetalle}
-                  style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px',
-                    background: esCerradaItem ? '#f0f4ff' : '#1A3FA0',
-                    color: esCerradaItem ? '#1A3FA0' : '#fff',
-                    border: esCerradaItem ? '1px solid #bfdbfe' : 'none',
-                    borderRadius:7, fontSize:12, fontWeight:600, cursor:'pointer',
-                    whiteSpace:'nowrap', flexShrink:0 }}>
-                  {esCerradaItem ? '🔍 Ver liquidación' : '›'}
-                </button>
+                <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); generarPDF(exp) }}
+                    title="Generar el PDF de la liquidación (generado por el sistema)"
+                    style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px',
+                      background:'#fff', color:'#1A3FA0', border:'1px solid #bfdbfe',
+                      borderRadius:7, fontSize:12, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>
+                    🧾 PDF
+                  </button>
+                  <button
+                    onClick={abrirDetalle}
+                    style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px',
+                      background: esCerradaItem ? '#f0f4ff' : '#1A3FA0',
+                      color: esCerradaItem ? '#1A3FA0' : '#fff',
+                      border: esCerradaItem ? '1px solid #bfdbfe' : 'none',
+                      borderRadius:7, fontSize:12, fontWeight:600, cursor:'pointer',
+                      whiteSpace:'nowrap' }}>
+                    {esCerradaItem ? '🔍 Ver liquidación' : '›'}
+                  </button>
+                </div>
               </div>
             </Card>
           )
