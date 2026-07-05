@@ -1,5 +1,7 @@
 // modules — PerfilAdmin.jsx
 // Extraído del V59. Props → useApp().
+// v2: uploader de sello/firma a Supabase Storage (bucket público 'perfil-assets').
+//     Sube el archivo, guarda la URL pública (corta) en sello_url/firma_url.
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
@@ -21,6 +23,9 @@ export default function PerfilAdmin() {
   const [cargando, setCargando]   = useState(true)
   const [msg, setMsg]             = useState(null)
   const [tabActiva, setTabActiva] = useState('datos')
+  const [subiendo, setSubiendo]   = useState(null) // 'sello' | 'firma' | null
+  const selloRef = useRef(null)
+  const firmaRef = useRef(null)
 
   useEffect(() => {
     if (!uid) return
@@ -40,6 +45,28 @@ export default function PerfilAdmin() {
     else setMsg({ tipo:'ok', texto:'✓ Perfil guardado correctamente' })
     setGuardando(false)
   }
+
+  // Sube una imagen (sello/firma) a Storage y guarda su URL pública en el perfil.
+  async function subirImagen(file, tipo) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) return setMsg({ tipo:'error', texto:'El archivo debe ser una imagen (PNG, JPG o WebP).' })
+    if (file.size > 5 * 1024 * 1024) return setMsg({ tipo:'error', texto:'La imagen no debe superar los 5 MB.' })
+    setSubiendo(tipo)
+    try {
+      const path = `${uid}/${tipo}`  // una sola imagen por tipo; se sobrescribe en cada subida
+      const { error } = await supabase.storage.from('perfil-assets')
+        .upload(path, file, { upsert:true, contentType:file.type, cacheControl:'3600' })
+      if (error) throw error
+      const { data } = supabase.storage.from('perfil-assets').getPublicUrl(path)
+      const url = `${data.publicUrl}?t=${Date.now()}`  // cache-bust para ver la nueva al instante
+      P({ [`${tipo}_url`]: url })
+      setMsg({ tipo:'ok', texto:`✓ ${tipo === 'sello' ? 'Sello' : 'Firma'} subido. Tocá "Guardar configuración PDF" para conservarlo.` })
+    } catch (e) {
+      setMsg({ tipo:'error', texto:'Error al subir la imagen: ' + (e.message || e) })
+    }
+    setSubiendo(null)
+  }
+
   const P = f => setPerfil(p=>({...p,...f}))
   if (cargando) return <div style={{ textAlign:'center', color:GR, padding:40 }}>Cargando...</div>
 
@@ -103,17 +130,35 @@ export default function PerfilAdmin() {
                 rows={3} placeholder="Ej: Atención: Los pagos realizados fuera de término..."
                 style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontFamily:'inherit', resize:'vertical', boxSizing:'border-box' }} />
             </div>
+
+            {/* FIRMA */}
             <div style={{ gridColumn:'span 2' }}>
-              <Input label="URL de firma digital (imagen PNG/JPG, fondo transparente)" value={perfil.firma_url||''} onChange={v=>P({firma_url:v})} placeholder="https://..." />
+              <Input label="Firma digital (imagen PNG/JPG, fondo transparente)" value={perfil.firma_url||''} onChange={v=>P({firma_url:v})} placeholder="Subí un archivo o pegá una URL directa https://..." />
+              <input ref={firmaRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display:'none' }}
+                onChange={e=>{ const f=e.target.files?.[0]; e.target.value=''; subirImagen(f,'firma') }} />
+              <div style={{ marginTop:8 }}>
+                <Btn small color={VD} onClick={()=>firmaRef.current?.click()} disabled={subiendo==='firma'}>
+                  {subiendo==='firma' ? 'Subiendo...' : '📤 Subir imagen de firma'}
+                </Btn>
+              </div>
               {perfil.firma_url && <img src={perfil.firma_url} alt="Firma" style={{ marginTop:8, maxHeight:60, maxWidth:200, border:'1px solid #e5e7eb', borderRadius:6 }} onError={e=>e.target.style.display='none'} />}
             </div>
+
+            {/* SELLO */}
             <div style={{ gridColumn:'span 2' }}>
-              <Input label="URL de sello (imagen PNG/JPG, fondo transparente)" value={perfil.sello_url||''} onChange={v=>P({sello_url:v})} placeholder="https://..." />
+              <Input label="Sello / logo (imagen PNG/JPG, fondo transparente)" value={perfil.sello_url||''} onChange={v=>P({sello_url:v})} placeholder="Subí un archivo o pegá una URL directa https://..." />
+              <input ref={selloRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display:'none' }}
+                onChange={e=>{ const f=e.target.files?.[0]; e.target.value=''; subirImagen(f,'sello') }} />
+              <div style={{ marginTop:8 }}>
+                <Btn small color={VD} onClick={()=>selloRef.current?.click()} disabled={subiendo==='sello'}>
+                  {subiendo==='sello' ? 'Subiendo...' : '📤 Subir imagen de sello/logo'}
+                </Btn>
+              </div>
               {perfil.sello_url && <img src={perfil.sello_url} alt="Sello" style={{ marginTop:8, maxHeight:60, maxWidth:200, border:'1px solid #e5e7eb', borderRadius:6 }} onError={e=>e.target.style.display='none'} />}
             </div>
           </div>
           <div style={{ fontSize:11, color:GR, marginBottom:12, background:'#f9fafb', padding:'8px 12px', borderRadius:6 }}>
-            💡 Para subir imágenes de firma/sello puede usar servicios como <a href="https://imgbb.com" target="_blank" rel="noreferrer" style={{ color:AZ }}>ImgBB</a> o Google Drive (compartir como pública) y pegar la URL aquí.
+            💡 Lo más simple es <strong>subir la imagen</strong> con el botón (se guarda en el sistema y queda una URL corta). Si preferís, también podés pegar una URL de imagen <strong>directa</strong> (ej. de <a href="https://imgbb.com" target="_blank" rel="noreferrer" style={{ color:AZ }}>ImgBB</a>). Evitá pegar links de Google Drive del tipo <code>/file/…</code>: no cargan como imagen. Si dejás el sello vacío, el PDF usa el logo por defecto de la administración.
           </div>
           <Btn onClick={guardar} disabled={guardando}>{guardando?'Guardando...':'💾 Guardar configuración PDF'}</Btn>
         </Card>
