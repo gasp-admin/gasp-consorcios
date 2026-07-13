@@ -28,6 +28,7 @@ function flagsDe(r) {
   if (N(r.ajenas) > 0) f.push(`${N(r.ajenas)} ajenas`)
   if (N(r.duplicados) > 0) f.push(`${N(r.duplicados)} dup.`)
   if (N(r.err_arit) > 0) f.push(`${N(r.err_arit)} err. arit.`)
+  if (N(r.corridas) > 0) f.push(`⚠️ ${N(r.corridas)} fila(s) CORRIDAS`)
   return f
 }
 
@@ -162,8 +163,9 @@ export default function ControlLiquidaciones() {
       {/* Nota al pie */}
       {!loading && !msg && (
         <div style={{ marginTop: 10, fontSize: 10.5, color: GR, lineHeight: 1.5 }}>
+          <b>Filas CORRIDAS</b> = el campo propietario contiene un código de unidad y el saldo anterior quedó en 0 → la fila se desplazó una columna al importar. <b>La aritmética por UF puede cerrar igual</b>, por eso se controla aparte. Corregir re-importando el PDF con el parser v53.<br />
           * <b>Gap pagos</b> = pagos del prorrateo − total cobrado (estado financiero). Es <b>informativo</b>: el estado financiero se imputa por caja (fecha + acreditado) y puede diferir legítimamente.
-          El semáforo controla cobertura, filas ajenas, duplicados y aritmética por UF; <b>no</b> reemplaza el control de totales por columna contra el PDF.
+          El semáforo <b>no</b> reemplaza el control de totales por columna contra el PDF.
         </div>
       )}
     </Card>
