@@ -12,6 +12,7 @@ import { createContext, useContext, useEffect } from 'react'
 import { useAuth }      from '../hooks/useAuth'
 import { useConsorcio } from '../hooks/useConsorcio'
 import { usePagina }    from '../hooks/usePagina'
+import { useReclamosAlerta } from '../hooks/useReclamosAlerta'
 
 const AppContext = createContext(null)
 
@@ -19,6 +20,7 @@ export function AppProvider({ children }) {
   const auth = useAuth()
   const cons = useConsorcio(auth.session)
   const nav  = usePagina(auth.esSuperAdmin)
+  const alerta = useReclamosAlerta(cons.consorcioActivo?.id)
 
   useEffect(() => {
     if (auth.session?.user?.id) {
@@ -57,6 +59,9 @@ export function AppProvider({ children }) {
     pagina: nav.pagina, setPagina: nav.setPagina,
     menuAbierto: nav.menuAbierto, setMenuAbierto: nav.setMenuAbierto,
     isMobile: nav.isMobile, navItems: nav.navItems, secciones: nav.secciones, navActivo: nav.navActivo,
+    // Alerta de reclamos (badge + toast en tiempo real)
+    reclamosAbiertos: alerta.reclamosAbiertos, toastReclamo: alerta.toastReclamo,
+    cerrarToast: alerta.cerrarToast, recontarReclamos: alerta.recontarReclamos,
   }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
