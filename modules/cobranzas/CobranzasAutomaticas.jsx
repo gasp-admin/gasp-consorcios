@@ -147,43 +147,65 @@ export default function CobranzasAutomaticas() {
 
   // CSV bancario — detecta formato por contenido
   function parsearBancoCsv(texto) {
+    // Quitar BOM (UTF-8 with BOM) que ensucia la primera celda del header.
+    texto = texto.replace(/^\uFEFF/, '')
     const es_galicia = /Leyendas Adicionales/i.test(texto)
     const es_provA   = /Número Secuencia/i.test(texto)
+    // Detectar separador: los extractos vienen con ';' (Galicia) o ',' (otros).
+    const primera = texto.split(/\r?\n/).find(l => l.trim()) || ''
+    const sep = (primera.match(/;/g)?.length || 0) > (primera.match(/,/g)?.length || 0) ? ';' : ','
+    // Splitter que respeta comillas dobles y saca las comillas envolventes.
+    const splitLinea = (line) => {
+      const out = []; let cur = '', q = false
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i]
+        if (ch === '"') { if (q && line[i+1] === '"') { cur += '"'; i++ } else q = !q }
+        else if (ch === sep && !q) { out.push(cur); cur = '' }
+        else cur += ch
+      }
+      out.push(cur)
+      return out.map(c => c.trim())
+    }
     const lineas = texto.split(/\r?\n/)
     const result = []
     let enc = false, idx = 0
     for (const l of lineas) {
       const t = l.trim()
       if (!t) continue
-      if (/^Fecha[,\t](Descripci|Nro\.?|Número|Importe)/i.test(t)) { enc=true; continue }
+      // El header empieza con "Fecha" (con o sin comillas) seguido del separador.
+      if (!enc && /^"?Fecha"?\s*[;,\t]/i.test(t)) { enc = true; continue }
       if (!enc) continue
-      if (/^Fecha de descarga|^Empresa|^Operador/i.test(t)) break
-      const cols = t.split(',')
+      if (/^"?(Fecha de descarga|Empresa|Operador)/i.test(t)) break
+      const cols = splitLinea(t)
       if (cols.length < 3) continue
       try {
         let fecha='', importe=0, concepto='', titular='', cuit=null, canal='Transferencia'
         if (es_galicia) {
-          fecha = cols[0]?.trim(); importe = parseMtoLocal(cols[3]?.trim()); titular = cols[4]?.trim(); canal = cols[1]?.trim()
+          // [0]Fecha [1]Descripción [3]Créditos [7]Leyendas1=nombre real [8]Leyendas2=CUIT
+          fecha = cols[0]; importe = parseMtoLocal(cols[3]); canal = cols[1] || 'Transferencia'
+          titular = (cols[7] || '').replace(/[\/,]+/g, ' ').replace(/\s+/g, ' ').trim()
+          const cm = (cols[8] || '').match(/\b(\d{11})\b/); cuit = cm?.[1] || null
         } else if (es_provA) {
-          fecha = cols[1]?.trim(); importe = parseMtoLocal(cols[2]?.trim()); concepto = cols[5]?.trim()
+          fecha = cols[1]; importe = parseMtoLocal(cols[2]); concepto = cols[5] || ''
           const cm = concepto.match(/\(([0-9-]{11,13})\)/); cuit = cm?.[1]?.replace(/-/g,'') || null
           const nm = concepto.match(/(?:TRANSF\s+DE\s+)?([A-ZÁÉÍÓÚÑ,\/\.\s]+)\s*\(/i)
           titular = nm?.[1]?.trim() || ''
         } else {
           // Macro/Roela/Provincia-B
-          fecha = cols[0]?.trim(); importe = parseMtoLocal(cols[4]?.trim()||cols[1]?.trim())
-          concepto = cols[3]?.trim() || cols.slice(2).join(',').trim()
+          fecha = cols[0]; importe = parseMtoLocal(cols[4] || cols[1])
+          concepto = cols[3] || cols.slice(2).join(' ').trim()
           const cm = concepto.match(/\b(\d{11})\b/); cuit = cm?.[1] || null
           const am = concepto.match(/TRANSF\s+([A-ZÁÉÍÓÚÑ\/,\.]+)\s+\d/i)
           titular = am?.[1]?.replace(/\/.*/,'').trim() || ''
-          canal = cols[2]?.trim()||'Transferencia'
+          canal = cols[2] || 'Transferencia'
         }
         if (!importe || importe<=0) continue
         result.push({
           _id:`B-${idx++}`, tipo:'BANCO', canal,
           fechaPago:fecha, fechaAcred:fecha, importe,
           consorcioId:consorcioId, consorcioNombre:consorcioActivo?.nombre||'',
-          nroUF:null, ufLabel:'—', unidadId:null, propietario:titular||null,
+          nroUF:null, ufLabel:'—', unidadId:null,
+          propietario:titular||null, nombrePagador:titular||null,
           cuit, confianza:cuit?'media':'baja',
           saldo1er:null, saldo2do:null, venc1:null, venc2:null,
           eliminado:false, sel:false,
@@ -221,8 +243,10 @@ export default function CobranzasAutomaticas() {
       .select('id,numero,descripcion,consorcio_id,propietario_id')
       .in('consorcio_id', cIds)
     if (!dets || !ufs) return regs
-    // Construir mapa consorcio+nroUF → datos
+    // Construir mapa consorcio+nroUF → datos (para el path por nroUF de SIRO)
+    // y datosUF por unidad_id (para match exacto por CUIT/nombre, sin colisiones de numN).
     const mapaUF = {}
+    const datosUF = {}
     for (const d of dets) {
       const uf = ufs.find(u => u.id === d.unidad_id)
       if (!uf) continue
@@ -234,52 +258,100 @@ export default function CobranzasAutomaticas() {
       if (fv1) { const d2=new Date(fv1); d2.setDate(d2.getDate()+dias); fv2=d2.toISOString().slice(0,10) }
       const s1 = parseFloat(d.saldo_anterior||0) + parseFloat(d.monto||0)
       const s2 = parseFloat((s1*1.03).toFixed(2))
-      const key = `${d.consorcio_id}__${numN}`
-      if (!mapaUF[key]) mapaUF[key] = {
+      const datos = {
         unidadId:uf.id, ufLabel:uf.numero||String(numN),
         s1, s2, fv1, fv2,
         pagoPrevio:parseFloat(d.pagos_periodo||0),
         estadoUF:d.estado,
       }
+      const key = `${d.consorcio_id}__${numN}`
+      if (!mapaUF[key]) mapaUF[key] = datos
+      if (!datosUF[uf.id]) datosUF[uf.id] = datos
     }
-    // Mapa de copropietarios por apellido para fallback por nombre pagador
+    // Copropietarios (nombre + CUIT) para el cruce por titular
     const { data: copros } = await supabase.from('con_copropietarios')
-      .select('id,apellido_nombre')
-    const mapaCopro = {}
-    if (copros) for (const cp of copros) {
-      const key = cp.apellido_nombre?.toUpperCase().replace(/[^A-Z]/g,' ').trim().split(/\s+/).slice(0,2).join(' ')
-      if (key) mapaCopro[key] = cp.id
+      .select('id,apellido_nombre,cuit_cuil')
+    const coproById = {}
+    if (copros) for (const cp of copros) coproById[cp.id] = cp
+
+    // Tokens significativos de un nombre: MAYUS, sin acentos, sin conectores, ≥3 letras.
+    // Orden-independiente (resuelve "CAROLINA VENEROSO" vs "VENEROSO, CAROLINA").
+    const STOP = new Set(['DE','DEL','LA','LAS','LOS','Y','E','DA','DI','SAN','SANTA','SR','SRA','OTRO','OTROS','HNOS','VDA','DR','DRA'])
+    const tokensNombre = (s) => (s||'')
+      .toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .replace(/[^A-Z\s]/g,' ').split(/\s+/)
+      .filter(w => w.length >= 3 && !STOP.has(w))
+    const soloDig = (s) => (s||'').replace(/\D/g,'')
+
+    // Candidatos por consorcio: cada UF con propietario → {unidadId, tokens, cuit}
+    const candidatos = {}
+    for (const uf of ufs) {
+      const cp = uf.propietario_id ? coproById[uf.propietario_id] : null
+      if (!cp) continue
+      ;(candidatos[uf.consorcio_id] ||= []).push({
+        unidadId: uf.id, tokens: tokensNombre(cp.apellido_nombre), cuit: soloDig(cp.cuit_cuil),
+      })
     }
-    // Mapa unidadId → coproId para buscar por nombre
-    const mapaUFpropietario = {}
-    for (const uf of (ufs||[])) {
-      if (uf.propietario_id) mapaUFpropietario[uf.propietario_id] = uf
+    // Frecuencia de cada token por consorcio (para exigir unicidad en matches débiles)
+    const freqTok = {}
+    for (const cid in candidatos) {
+      const m = new Map()
+      for (const c of candidatos[cid]) for (const t of new Set(c.tokens)) m.set(t,(m.get(t)||0)+1)
+      freqTok[cid] = m
+    }
+    // unidadId cuyo titular mejor matchea el nombre del pagador, o null.
+    // Conservador: 2 tokens compartidos (apellido+nombre, cualquier orden) sin empate,
+    // o 1 token si es un apellido distintivo (≥6 letras y único en el consorcio).
+    const matchNombre = (cid, nombre) => {
+      const lista = candidatos[cid]; if (!lista) return null
+      const pw = tokensNombre(nombre); if (!pw.length) return null
+      let best=null, bestScore=0, bestLong=0, tie=false
+      for (const c of lista) {
+        const inter = c.tokens.filter(t => pw.includes(t))
+        if (!inter.length) continue
+        const longest = Math.max(...inter.map(t=>t.length))
+        if (inter.length>bestScore || (inter.length===bestScore && longest>bestLong)) {
+          best=c; bestScore=inter.length; bestLong=longest; tie=false
+        } else if (inter.length===bestScore && longest===bestLong) tie=true
+      }
+      if (!best || tie) return null
+      if (bestScore >= 2) return best.unidadId
+      const tk = best.tokens.find(t => pw.includes(t))
+      if (bestScore===1 && tk && tk.length>=6 && (freqTok[cid]?.get(tk)||0)===1) return best.unidadId
+      return null
     }
 
     return regs.map(r => {
       const cid = r.consorcioId || (sistema==='transferencia_siro' ? consorcioId : null)
       if (!cid) return r
       let found = r.nroUF ? mapaUF[`${cid}__${r.nroUF}`] : null
-      // Fallback: buscar por nombre del pagador si no hay nroUF o no se encontró
+      let via = found ? 'uf' : null
+      // 2) por CUIT exacto del pagador (identificador legal)
+      if (!found && r.cuit) {
+        const cd = soloDig(r.cuit)
+        const cand = cd ? (candidatos[cid]||[]).find(c => c.cuit && c.cuit===cd) : null
+        if (cand) { found = datosUF[cand.unidadId]; if (found) via='cuit' }
+      }
+      // 3) por nombre del titular (orden-independiente, conservador)
       if (!found && r.nombrePagador) {
-        const nomKey = r.nombrePagador.toUpperCase().replace(/[^A-Z]/g,' ').trim().split(/\s+/).slice(0,2).join(' ')
-        const coproId = mapaCopro[nomKey]
-        if (coproId) {
-          const ufMatch = Object.values(mapaUFpropietario).find(u => u.propietario_id===coproId && u.consorcio_id===cid)
-          if (ufMatch) {
-            const numN = parseInt((ufMatch.numero||'').replace(/\D/g,'')) || 0
-            found = mapaUF[`${cid}__${numN}`]
-          }
-        }
+        const uid = matchNombre(cid, r.nombrePagador)
+        if (uid) { found = datosUF[uid]; if (found) via='nombre' }
       }
       if (!found) return { ...r, consorcioId: cid }
+      // Confianza: SIRO como antes. BANCO SIEMPRE 'media' aunque haya UF: se revisa a mano,
+      // nunca se imputa solo (la imputacion automatica exige 'alta'). El match por CUIT/nombre
+      // solo PRE-CARGA la UF sugerida; queda a tu confirmacion en pantalla.
+      let conf = r.confianza
+      if (r.tipo==='SIRO'||r.tipo==='transferencia_siro') conf = found.unidadId ? 'alta' : 'media'
+      else conf = 'media'
       return { ...r,
         consorcioId: cid,
         unidadId:found.unidadId, ufLabel:found.ufLabel,
         saldo1er:found.s1, saldo2do:found.s2,
         venc1:found.fv1, venc2:found.fv2,
         estadoUF:found.estadoUF,
-        confianza: (r.tipo==='SIRO'||r.tipo==='transferencia_siro') ? (found.unidadId?'alta':'media') : r.confianza,
+        matchVia: via,
+        confianza: conf,
       }
     })
   }
