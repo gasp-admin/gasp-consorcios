@@ -8,7 +8,7 @@
 //     const { session, consorcioActivo, unidades } = useApp()
 //   }
 
-import { createContext, useContext, useEffect } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { useAuth }      from '../hooks/useAuth'
 import { useConsorcio } from '../hooks/useConsorcio'
 import { usePagina }    from '../hooks/usePagina'
@@ -21,6 +21,30 @@ export function AppProvider({ children }) {
   const cons = useConsorcio(auth.session)
   const nav  = usePagina(auth.esSuperAdmin)
   const alerta = useReclamosAlerta(auth.session?.user?.id)
+
+  // Navegación diferida a "Reclamos" tras cambiar de consorcio (desde el toast).
+  // Vive en el provider (no se desmonta), así el salto se completa aunque el toast se cierre.
+  const [saltoReclamos, setSaltoReclamos] = useState(null)
+
+  const irAReclamoConsorcio = useCallback((consorcioId) => {
+    if (!consorcioId) return
+    if (consorcioId === cons.consorcioActivo?.id) {
+      nav.setPagina('reclamos'); nav.setMenuAbierto?.(false); return
+    }
+    const c = cons.consorcios.find(x => x.id === consorcioId)
+    if (!c) return
+    cons.setConsorcioActivo(c)
+    cons.cargarConsorcio(c.id, auth.session?.user?.id)
+    setSaltoReclamos(consorcioId)
+  }, [cons.consorcioActivo?.id, cons.consorcios, cons.setConsorcioActivo, cons.cargarConsorcio, nav, auth.session?.user?.id])
+
+  useEffect(() => {
+    if (saltoReclamos && cons.consorcioActivo?.id === saltoReclamos) {
+      nav.setPagina('reclamos')
+      nav.setMenuAbierto?.(false)
+      setSaltoReclamos(null)
+    }
+  }, [saltoReclamos, cons.consorcioActivo?.id]) // eslint-disable-line
 
   useEffect(() => {
     if (auth.session?.user?.id) {
@@ -62,6 +86,7 @@ export function AppProvider({ children }) {
     // Alerta de reclamos (badge + toast en tiempo real)
     reclamosAbiertos: alerta.reclamosAbiertos, toastReclamo: alerta.toastReclamo,
     cerrarToast: alerta.cerrarToast, recontarReclamos: alerta.recontarReclamos,
+    irAReclamoConsorcio,
   }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
