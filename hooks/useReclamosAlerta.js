@@ -1,48 +1,51 @@
-// hooks/useReclamosAlerta.js — Alerta de reclamos para GASP Consorcios.
-// Cuenta los reclamos ABIERTOS del consorcio activo y avisa en tiempo real
-// (Supabase Realtime) cuando entra uno nuevo — típicamente vía el bot de WhatsApp.
+// hooks/useReclamosAlerta.js — Alerta GLOBAL de reclamos para GASP Consorcios.
+// Cuenta los reclamos ABIERTOS de TODOS los consorcios del administrador y avisa
+// en tiempo real (Supabase Realtime) cuando entra uno nuevo — vía el bot de WhatsApp
+// u otro origen — sin importar en qué consorcio esté posicionado el usuario.
 //
-// Expone: { reclamosAbiertos, toastReclamo, cerrarToast }
-//   - reclamosAbiertos: nro de reclamos en estado 'abierto' del consorcio activo (para el badge)
-//   - toastReclamo: objeto del último reclamo entrante para mostrar el aviso, o null
-//   - cerrarToast: cierra el aviso manualmente
+// Expone: { reclamosAbiertos, toastReclamo, cerrarToast, recontarReclamos }
+//   - reclamosAbiertos: total de reclamos 'abierto' de todos los consorcios del admin (badge)
+//   - toastReclamo: objeto del último reclamo entrante (incluye consorcio_id), o null
+//   - cerrarToast: cierra el aviso
+//   - recontarReclamos: fuerza un recuento manual
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 
-export function useReclamosAlerta(consorcioId) {
+export function useReclamosAlerta(adminId) {
   const [reclamosAbiertos, setReclamosAbiertos] = useState(0)
   const [toastReclamo, setToastReclamo]         = useState(null)
 
   const cerrarToast = useCallback(() => setToastReclamo(null), [])
 
-  // Contador inicial (y recarga al cambiar de consorcio)
-  const recontar = useCallback(async (cid) => {
-    if (!cid) { setReclamosAbiertos(0); return }
+  // Contador global: todos los reclamos 'abierto' del administrador
+  const recontar = useCallback(async (aid) => {
+    if (!aid) { setReclamosAbiertos(0); return }
     const { count } = await supabase
       .from('con_reclamos')
       .select('id', { count: 'exact', head: true })
-      .eq('consorcio_id', cid)
+      .eq('admin_id', aid)
       .eq('estado', 'abierto')
     setReclamosAbiertos(count || 0)
   }, [])
 
-  useEffect(() => { recontar(consorcioId) }, [consorcioId, recontar])
+  useEffect(() => { recontar(adminId) }, [adminId, recontar])
 
-  // Realtime: escucha INSERT/UPDATE en con_reclamos del consorcio activo
+  // Realtime: escucha por admin_id (todos los consorcios del administrador)
   useEffect(() => {
-    if (!consorcioId) return
+    if (!adminId) return
     const canal = supabase
-      .channel(`reclamos-${consorcioId}`)
+      .channel(`reclamos-admin-${adminId}`)
       .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'con_reclamos', filter: `consorcio_id=eq.${consorcioId}` },
+        { event: 'INSERT', schema: 'public', table: 'con_reclamos', filter: `admin_id=eq.${adminId}` },
         (payload) => {
-          recontar(consorcioId)
+          recontar(adminId)
           const r = payload.new
           if (r && r.estado === 'abierto') {
             setToastReclamo({
               nro: r.nro_reclamo,
               titulo: r.titulo,
+              consorcio_id: r.consorcio_id,
               unidad_id: r.unidad_id,
               solicitante: r.nombre_solicitante,
               es_emergencia: r.es_emergencia,
@@ -51,12 +54,12 @@ export function useReclamosAlerta(consorcioId) {
           }
         })
       .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'con_reclamos', filter: `consorcio_id=eq.${consorcioId}` },
-        () => recontar(consorcioId))
+        { event: 'UPDATE', schema: 'public', table: 'con_reclamos', filter: `admin_id=eq.${adminId}` },
+        () => recontar(adminId))
       .subscribe()
 
     return () => { supabase.removeChannel(canal) }
-  }, [consorcioId, recontar])
+  }, [adminId, recontar])
 
-  return { reclamosAbiertos, toastReclamo, cerrarToast, recontarReclamos: () => recontar(consorcioId) }
+  return { reclamosAbiertos, toastReclamo, cerrarToast, recontarReclamos: () => recontar(adminId) }
 }
