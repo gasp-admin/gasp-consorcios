@@ -1,9 +1,10 @@
 // components/layout/ReclamoToast.jsx — Aviso emergente de reclamo nuevo (global).
-// Se muestra cuando entra un reclamo en tiempo real en CUALQUIER consorcio del
-// administrador. Indica el consorcio de origen y, al tocarlo, cambia a ese
-// consorcio y abre la pantalla de Reclamos. Auto-desaparece a los 14 s.
+// Aparece ante un reclamo entrante en CUALQUIER consorcio del administrador.
+// Al tocarlo: si el reclamo es de otro consorcio, PRIMERO cambia de consorcio y,
+// una vez que el consorcio activo efectivamente cambió (useEffect), recién navega
+// a Reclamos — evita el problema de timing que abría el consorcio equivocado.
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { RJ, VD } from '../../lib/config'
 
@@ -13,31 +14,48 @@ export default function ReclamoToast() {
     consorcios, consorcioActivo, setConsorcioActivo, cargarConsorcio, session,
   } = useApp()
 
+  // Consorcio al que hay que saltar cuando el usuario tocó el toast (navegación diferida)
+  const [pendienteNav, setPendienteNav] = useState(null)
+
+  // Auto-cierre del toast
   useEffect(() => {
     if (!toastReclamo) return
     const t = setTimeout(cerrarToast, 14000)
     return () => clearTimeout(t)
   }, [toastReclamo, cerrarToast])
 
+  // Cuando el consorcio activo ya cambió al pendiente, navegar a Reclamos
+  useEffect(() => {
+    if (pendienteNav && consorcioActivo?.id === pendienteNav) {
+      setPagina('reclamos')
+      setMenuAbierto?.(false)
+      setPendienteNav(null)
+    }
+  }, [pendienteNav, consorcioActivo, setPagina, setMenuAbierto])
+
   if (!toastReclamo) return null
   const r = toastReclamo
   const urgente = !!r.es_emergencia
   const acento = urgente ? RJ : VD
 
-  // Nombre del consorcio de origen (desde la lista ya cargada en contexto)
   const consOrigen = consorcios?.find(c => c.id === r.consorcio_id)
   const nombreCons = consOrigen?.nombre || r.consorcio_id
   const esOtroConsorcio = r.consorcio_id && r.consorcio_id !== consorcioActivo?.id
 
   const irAlReclamo = () => {
-    // Si el reclamo es de otro consorcio, cambiar a ese consorcio primero
     if (esOtroConsorcio && consOrigen) {
+      // 1) cambiar de consorcio y cargar sus datos
       setConsorcioActivo(consOrigen)
       cargarConsorcio(consOrigen.id, session?.user?.id)
+      // 2) la navegación a Reclamos se dispara en el useEffect cuando el cambio se efectiviza
+      setPendienteNav(consOrigen.id)
+      cerrarToast()
+    } else {
+      // mismo consorcio: navegar directo
+      setPagina('reclamos')
+      setMenuAbierto?.(false)
+      cerrarToast()
     }
-    setPagina('reclamos')
-    setMenuAbierto?.(false)
-    cerrarToast()
   }
 
   return (
