@@ -7,7 +7,7 @@ import { BtnSec } from '../ui'
 import { BG, AZ } from '../../lib/config'
 
 export default function Sidebar() {
-  const { session, logout, isMobile, menuAbierto, setMenuAbierto, pagina, setPagina, navItems, secciones, consorcios, consorcioActivo, setConsorcioActivo, cargarConsorcio, unidades } = useApp()
+  const { session, logout, isMobile, menuAbierto, setMenuAbierto, pagina, setPagina, navItems, secciones, consorcios, consorcioActivo, setConsorcioActivo, cargarConsorcio, unidades, reclamosAbiertos } = useApp()
 
   return (
     <aside style={{ width:220, background:BG, display:'flex', flexDirection:'column', position:'fixed', top:0, left:0, height:'100vh', zIndex:200, overflowY:'auto', transform:isMobile&&!menuAbierto?'translateX(-100%)':'translateX(0)', transition:'transform 0.25s ease' }}>
@@ -35,6 +35,11 @@ export default function Sidebar() {
               <div key={n.id} onClick={()=>{setPagina(n.id);setMenuAbierto(false)}} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', cursor:'pointer', borderRadius:7, margin:'1px 0', background:pagina===n.id?'rgba(26,63,160,0.25)':'transparent', color:pagina===n.id?'#7aacff':'#8aaabf', fontWeight:pagina===n.id?'bold':'normal', fontSize:13, transition:'all 0.15s' }}>
                 <span style={{ fontSize:15, width:20, textAlign:'center', flexShrink:0 }}>{n.icon}</span>
                 <span style={{ flex:1 }}>{n.label}</span>
+                {n.id==='reclamos' && reclamosAbiertos>0 && (
+                  <span style={{ background:'#B91C1C', color:'#fff', fontSize:10, fontWeight:800, minWidth:18, height:18, borderRadius:9, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 5px', flexShrink:0 }}>
+                    {reclamosAbiertos>99?'99+':reclamosAbiertos}
+                  </span>
+                )}
               </div>
             ))}
           </div>
