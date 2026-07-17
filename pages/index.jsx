@@ -10,6 +10,7 @@ import { Btn } from '../components/ui'
 import Sidebar         from '../components/layout/Sidebar'
 import Topbar          from '../components/layout/Topbar'
 import MobileNavBottom from '../components/layout/MobileNavBottom'
+import ReclamoToast    from '../components/layout/ReclamoToast'
 import Dashboard       from '../modules/consorcio/Dashboard'
 
 function LoadingScreen() {
@@ -63,6 +64,7 @@ function AppLayout() {
         </div>
       </div>
       {isMobile && <MobileNavBottom />}
+      <ReclamoToast />
     </div>
   )
 }
