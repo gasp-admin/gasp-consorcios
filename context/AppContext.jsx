@@ -20,7 +20,7 @@ export function AppProvider({ children }) {
   const auth = useAuth()
   const cons = useConsorcio(auth.session)
   const nav  = usePagina(auth.esSuperAdmin)
-  const alerta = useReclamosAlerta(cons.consorcioActivo?.id)
+  const alerta = useReclamosAlerta(auth.session?.user?.id)
 
   useEffect(() => {
     if (auth.session?.user?.id) {
