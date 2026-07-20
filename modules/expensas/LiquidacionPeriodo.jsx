@@ -360,6 +360,12 @@ export default function LiquidacionPeriodo() {
         .select('unidad_id, monto, saldo_anterior, pagos_periodo, interes_mora')
         .eq('expensa_id', expAnterior[0].id)
 
+      // FUENTE DE VERDAD para consorcios con historia importada: con_liquidacion_uf.total_uf del
+      // período anterior = saldo real al cierre (puede ser negativo = saldo a favor). Se prioriza
+      // sobre reconstruir desde el detalle, cuyos pagos/saldos pueden venir raros de la migración.
+      const { data: lufAnt } = await supabase.from('con_liquidacion_uf')
+        .select('unidad_id, total_uf, pagos').eq('expensa_id', expAnterior[0].id)
+
       // También buscar cobranzas registradas en la expensa anterior (por UF)
       const { data: cobranzasAnt } = await supabase.from('con_cobranzas')
         .select('unidad_id, monto').eq('expensa_id', expAnterior[0].id)
@@ -369,14 +375,20 @@ export default function LiquidacionPeriodo() {
       }
 
       let totalCobradoAnt = 0
-      if ((detsAnt||[]).length > 0) {
-        // Caso normal: hay detalles guardados por UF
+      if ((lufAnt||[]).length > 0) {
+        // Período anterior histórico (importado): el saldo al cierre es total_uf (conserva saldo a favor)
+        for (const l of lufAnt) {
+          const pagosUF = cobranzasPorUF[l.unidad_id] || (parseFloat(l.pagos)||0)
+          saldosAnt[l.unidad_id] = { saldo: parseFloat(l.total_uf)||0, pagos: pagosUF }
+          totalCobradoAnt += pagosUF
+        }
+      } else if ((detsAnt||[]).length > 0) {
+        // Período anterior nativo: reconstruir desde el detalle (SIN Math.max → conserva saldo a favor)
         for (const d of detsAnt) {
           const pagosUF = cobranzasPorUF[d.unidad_id] || (parseFloat(d.pagos_periodo)||0)
-          const saldo = Math.max(0,
+          const saldo =
             (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) +
             (parseFloat(d.interes_mora)||0) - pagosUF
-          )
           saldosAnt[d.unidad_id] = { saldo, pagos: pagosUF }
           totalCobradoAnt += pagosUF
         }
@@ -483,17 +495,20 @@ export default function LiquidacionPeriodo() {
       const antUF = saldosAnt[u.id] || { saldo: 0, pagos: 0 }
       const saldo_anterior = antUF.saldo
       const pagos_anterior = antUF.pagos
-      const deuda = Math.max(0, saldo_anterior) // deuda pendiente del período anterior
+      const deuda = Math.max(0, saldo_anterior) // deuda pendiente (>0) → interés y estado morosa
+      // Ajuste por saldo del período anterior CON signo: si es negativo (saldo a favor) se
+      // descuenta del total a pagar; si es deuda, coincide con `deuda`.
+      const ajusteSaldoAnt = saldo_anterior
 
       // Interés sobre saldo deudor: usa interes_mora del consorcio (% mensual sobre la deuda)
       // consorcioActivo.interes_mora = 5 → 5% mensual sobre la deuda
       const tasaMora = parseFloat(consorcioActivo?.interes_mora || 0) / 100
       const interes_mora = deuda > 0 ? Math.round(deuda * tasaMora * 100) / 100 : 0
 
-      // TOTAL a pagar = expensa + redondeo (centavos UF) + deuda anterior + intereses
-      const monto_total = expensaBase + centavosUF + deuda + interes_mora
-      // 2do vencimiento: recargo solo sobre la expensa del período, deuda e interés sin recargo
-      const monto_vto2 = Math.round((expensaBase + centavosUF) * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100 + deuda + interes_mora
+      // TOTAL a pagar = expensa + redondeo (centavos UF) + saldo anterior (con signo) + intereses
+      const monto_total = expensaBase + centavosUF + ajusteSaldoAnt + interes_mora
+      // 2do vencimiento: recargo solo sobre la expensa del período, saldo anterior e interés sin recargo
+      const monto_vto2 = Math.round((expensaBase + centavosUF) * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100 + ajusteSaldoAnt + interes_mora
 
       // Calcular aporte desagregado por columna (para la planilla PDF)
       // Misma lógica de fallback que expensaBase
@@ -1091,6 +1106,9 @@ export default function LiquidacionPeriodo() {
         const { data: detsAnt } = await supabase.from('con_expensas_detalle')
           .select('unidad_id, monto, saldo_anterior, pagos_periodo, interes_mora')
           .eq('expensa_id', expAnterior[0].id)
+        // Fuente de verdad para históricos importados: con_liquidacion_uf.total_uf (saldo al cierre)
+        const { data: lufAnt2 } = await supabase.from('con_liquidacion_uf')
+          .select('unidad_id, total_uf').eq('expensa_id', expAnterior[0].id)
         // Cobranzas individuales de la expensa anterior
         const { data: cobranzasAnt2 } = await supabase.from('con_cobranzas')
           .select('unidad_id, monto').eq('expensa_id', expAnterior[0].id)
@@ -1098,15 +1116,20 @@ export default function LiquidacionPeriodo() {
         for (const co of (cobranzasAnt2||[])) {
           cobPorUF2[co.unidad_id] = (cobPorUF2[co.unidad_id]||0) + (parseFloat(co.monto)||0)
         }
-        if ((detsAnt||[]).length > 0) {
-          // Hay detalles guardados
+        if ((lufAnt2||[]).length > 0) {
+          // Período anterior histórico: saldo al cierre = total_uf (conserva saldo a favor negativo)
+          for (const l of lufAnt2) {
+            const saldo = parseFloat(l.total_uf) || 0
+            if (saldo !== 0) saldosAnt[l.unidad_id] = saldo
+          }
+        } else if ((detsAnt||[]).length > 0) {
+          // Período anterior nativo: reconstruir desde el detalle (SIN Math.max → conserva saldo a favor)
           for (const d of detsAnt) {
             const pagos = cobPorUF2[d.unidad_id] || (parseFloat(d.pagos_periodo)||0)
-            const saldo = Math.max(0,
+            const saldo =
               (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) +
               (parseFloat(d.interes_mora)||0) - pagos
-            )
-            if (saldo > 0) saldosAnt[d.unidad_id] = saldo
+            if (saldo !== 0) saldosAnt[d.unidad_id] = saldo
           }
         } else {
           // Fallback: reconstruir desde total_expensa y coeficientes
