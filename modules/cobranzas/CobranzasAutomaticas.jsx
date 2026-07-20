@@ -422,8 +422,11 @@ export default function CobranzasAutomaticas() {
         // Registrar movimiento en cta cte con leyenda que referencia el período de la liquidación
         const periodoExp = expSel.match(/\d{4}-\d{2}$/)?.[0] || ''
         const labelPeriodo = periodoExp ? periodoLabel(periodoExp) : ''
-        await supabase.from('con_movimientos_unidad').insert([{
-          id:`MOV-COB-${r.unidadId}-${Date.now()}`,
+        // estado 'vigente': con_movimientos_unidad solo admite 'vigente'|'anulado' (CHECK).
+        // 'acreditado' viola el constraint y hacía fallar el insert en silencio -> el pago
+        // no llegaba a la cta cte. Se chequea el error para no volver a perderlo callado.
+        const { error: errMov } = await supabase.from('con_movimientos_unidad').insert([{
+          id:`MOV-COB-${r.unidadId}-${Date.now()}-${ok}`,
           admin_id:session.user.id, consorcio_id:r.consorcioId,
           unidad_id:r.unidadId, expensa_id:expSel,
           tipo:'credito',
@@ -431,9 +434,10 @@ export default function CobranzasAutomaticas() {
           categoria:'pago',
           monto:r.importe,
           fecha:r.fechaAcred||r.fechaPago||hoy,
-          estado:'acreditado',
+          estado:'vigente',
           notas:`Auto ${r.tipo} — ${archNom}`,
         }])
+        if (errMov) errores.push(`UF ${r.ufLabel}: cobranza OK pero mov cta cte falló — ${errMov.message}`)
         ok++
       } else errores.push(error.message)
     }
