@@ -332,7 +332,7 @@ export default function Cobranzas() {
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
                   <thead>
                     <tr style={{ background:'#f3f4f6' }}>
-                      {['UF','Copropietario','Saldo ant.','Expensa','Mora','Pagado','Saldo total','Estado',''].map((h,i) => (
+                      {['UF','Copropietario','Saldo ant.','Expensa','Mora','Pagado','Saldo total','2º venc','Estado',''].map((h,i) => (
                         <th key={i} style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:'bold', color:GR, textTransform:'uppercase', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
                       ))}
                     </tr>
@@ -346,6 +346,11 @@ export default function Cobranzas() {
                       const monto   = parseFloat(d.monto) || 0
                       const mora    = parseFloat(d.interes_mora) || 0
                       const saldo   = Math.max(0, salAnt + monto + mora - pagado)
+                      // Importe a pagar con el 2º vencimiento: recargo DIRECTO (interes_mora_2 %)
+                      // sobre la expensa del período (no sobre la deuda ni el interés), sin prorratear por días.
+                      const im2     = parseFloat(consorcio?.interes_mora_2) || 0
+                      const recargo2 = saldo > 0 ? Math.round(monto * im2 / 100 * 100) / 100 : 0
+                      const saldo2  = saldo > 0 ? Math.round((saldo + recargo2) * 100) / 100 : 0
                       const ec = d.estado==='pagada'
                         ? {c:VD,bg:'#dcfce7'}
                         : saldo>0 ? {c:RJ,bg:'#fee2e2'} : {c:AM,bg:'#fef9c3'}
@@ -358,6 +363,7 @@ export default function Cobranzas() {
                           <td style={{ padding:'8px 10px', color:mora>0?AM:GR, fontWeight:mora>0?600:400 }}>{mora>0?fmt(mora):'—'}</td>
                           <td style={{ padding:'8px 10px', color:VD, fontWeight:600 }}>{pagado>0?fmt(pagado):'—'}</td>
                           <td style={{ padding:'8px 10px', fontWeight:700, color:saldo>0?RJ:VD }}>{fmt(saldo)}</td>
+                          <td style={{ padding:'8px 10px', fontWeight:600, color:saldo2>0?AM:GR }} title={recargo2>0?`Recargo ${im2}%: ${fmt(recargo2)}`:''}>{saldo2>0?fmt(saldo2):'—'}</td>
                           <td style={{ padding:'8px 10px' }}><Badge text={d.estado} color={ec.c} bg={ec.bg} /></td>
                           <td style={{ padding:'8px 10px' }}>
                             {d.estado !== 'pagada' && (
