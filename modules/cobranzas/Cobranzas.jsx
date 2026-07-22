@@ -60,8 +60,9 @@ export default function Cobranzas() {
     const monto = Math.round(parseFloat(form.monto) * 100) / 100
     if (isNaN(monto) || monto <= 0)
       return setMsg({ tipo:'warn', texto:'El monto debe ser un número mayor a cero' })
+    const cobId = 'COB-' + Date.now()
     const { error } = await supabase.from('con_cobranzas').insert([{
-      id: 'COB-' + Date.now(),
+      id: cobId,
       admin_id: session.user.id, consorcio_id: consorcioId, expensa_id: expSel.id,
       unidad_id: form.unidad_id, fecha: form.fecha, monto,
       medio_pago: form.medio_pago || 'transferencia',
@@ -70,20 +71,55 @@ export default function Cobranzas() {
       estado: 'acreditado'
     }])
     if (error) return setMsg({ tipo:'error', texto: error.message })
+
+    // Detectar el recargo del 2º vencimiento incluido en el pago (Opción A: se registra como
+    // débito de mora, de modo que el pago del 2º venc deje la cta cte en 0 y el recargo quede
+    // como ingreso por interés por mora).
     const det = detalles.find(d => d.unidad_id === form.unidad_id)
+    const im2 = parseFloat(consorcio?.interes_mora_2) || 0
+    let recargoAplicado = 0
     if (det) {
-      const nuevoPago = Math.round(((parseFloat(det.pagos_periodo) || 0) + monto) * 100) / 100
-      const deudaTotal = Math.round(((parseFloat(det.saldo_anterior)||0) + (parseFloat(det.monto)||0) + (parseFloat(det.interes_mora)||0)) * 100) / 100
-      const estado = nuevoPago >= deudaTotal ? 'pagada' : 'parcial'
+      const salAnt   = parseFloat(det.saldo_anterior) || 0
+      const montoExp = parseFloat(det.monto) || 0
+      const moraPrev = parseFloat(det.interes_mora) || 0
+      const pagosPrev= parseFloat(det.pagos_periodo) || 0
+      const deuda1   = Math.round((salAnt + montoExp + moraPrev - pagosPrev) * 100) / 100  // pendiente al 1º venc
+      const recargo2 = Math.round(montoExp * im2 / 100 * 100) / 100                         // recargo sobre la expensa
+      if (monto > deuda1 + 0.005 && recargo2 > 0) {
+        recargoAplicado = Math.min(recargo2, Math.round((monto - deuda1) * 100) / 100)
+      }
+      const nuevoPago  = Math.round((pagosPrev + monto) * 100) / 100
+      const nuevaMora  = Math.round((moraPrev + recargoAplicado) * 100) / 100
+      const deudaTotal = Math.round((salAnt + montoExp + nuevaMora) * 100) / 100
+      const estado = nuevoPago >= deudaTotal - 0.005 ? 'pagada' : 'parcial'
       await supabase.from('con_expensas_detalle')
-        .update({ pagos_periodo: nuevoPago, estado, fecha_pago: estado==='pagada' ? form.fecha : null })
+        .update({ pagos_periodo: nuevoPago, interes_mora: nuevaMora, estado, fecha_pago: estado==='pagada' ? form.fecha : null })
         .eq('id', det.id)
     }
+
+    // Movimiento de crédito (pago) → alimenta la cta cte. estado 'vigente' (CHECK de la tabla).
+    const { error: errMov } = await supabase.from('con_movimientos_unidad').insert([{
+      id: `MOV-COB-${form.unidad_id}-${Date.now()}`,
+      admin_id: session.user.id, consorcio_id: consorcioId, unidad_id: form.unidad_id, expensa_id: expSel.id,
+      tipo: 'credito', concepto: `Pago Exp. ${periodoLabel(expSel.periodo)} (${form.medio_pago||'transferencia'})`,
+      categoria: 'pago', monto, fecha: form.fecha, estado: 'vigente', notas: `Cobranza manual — ${cobId}`
+    }])
+    if (errMov) return setMsg({ tipo:'error', texto:`Pago registrado pero falló el movimiento de cta cte: ${errMov.message}` })
+
+    // Débito por recargo del 2º vencimiento (ingreso por interés por mora)
+    if (recargoAplicado > 0) {
+      await supabase.from('con_movimientos_unidad').insert([{
+        id: `MOV-RECV2-${form.unidad_id}-${Date.now()}`,
+        admin_id: session.user.id, consorcio_id: consorcioId, unidad_id: form.unidad_id, expensa_id: expSel.id,
+        tipo: 'debito', concepto: `Recargo 2º venc. ${periodoLabel(expSel.periodo)}`,
+        categoria: 'interes_mora', monto: recargoAplicado, fecha: form.fecha, estado: 'vigente', notas: `Recargo ${im2}% — ${cobId}`
+      }])
+    }
+
     setForm(null)
-    setMsg({ tipo:'ok', texto: `✓ Pago de ${fmt(monto)} registrado` })
-    // P2-E: Notificación automática al copropietario
+    setMsg({ tipo:'ok', texto: `✓ Pago de ${fmt(monto)} registrado${recargoAplicado>0?` (incluye ${fmt(recargoAplicado)} de recargo 2º venc.)`:''}` })
+    // Notificación automática al copropietario
     try {
-      const cobId = 'COB-' + Date.now()
       const uf = unidades.find(u => u.id === form.unidad_id)
       const cp = copropietarios.find(c => c.id === uf?.propietario_id)
       if (cp?.email) {
@@ -97,12 +133,25 @@ export default function Cobranzas() {
 
   async function eliminarCobranza(cob) {
     if (!confirm('¿Eliminar este pago?')) return
+    // Movimientos de cta cte ligados a esta cobranza (referencian el id en 'notas')
+    const { data: movs } = await supabase.from('con_movimientos_unidad')
+      .select('id, monto, categoria')
+      .eq('unidad_id', cob.unidad_id).eq('expensa_id', cob.expensa_id)
+      .like('notas', `%${cob.id}%`)
+    const recargo = (movs||[]).filter(m => m.categoria==='interes_mora')
+      .reduce((s,m) => s + (parseFloat(m.monto)||0), 0)
     await supabase.from('con_cobranzas').delete().eq('id', cob.id)
+    if ((movs||[]).length) {
+      await supabase.from('con_movimientos_unidad').delete().in('id', movs.map(m=>m.id))
+    }
     const det = detalles.find(d => d.unidad_id === cob.unidad_id)
     if (det) {
-      const nuevoPago = Math.max(0, (parseFloat(det.pagos_periodo)||0) - parseFloat(cob.monto))
+      const nuevoPago = Math.max(0, Math.round(((parseFloat(det.pagos_periodo)||0) - parseFloat(cob.monto)) * 100) / 100)
+      const nuevaMora = Math.max(0, Math.round(((parseFloat(det.interes_mora)||0) - recargo) * 100) / 100)
+      const deudaTotal = Math.round(((parseFloat(det.saldo_anterior)||0) + (parseFloat(det.monto)||0) + nuevaMora) * 100) / 100
       await supabase.from('con_expensas_detalle')
-        .update({ pagos_periodo: nuevoPago, estado: nuevoPago > 0 ? 'pagada' : 'pendiente' })
+        .update({ pagos_periodo: nuevoPago, interes_mora: nuevaMora,
+                  estado: nuevoPago >= deudaTotal - 0.005 ? 'pagada' : (nuevoPago>0 ? 'parcial' : 'pendiente') })
         .eq('id', det.id)
     }
     seleccionarExpensa(expSel)
