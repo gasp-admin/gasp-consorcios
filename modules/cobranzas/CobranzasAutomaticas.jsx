@@ -243,15 +243,15 @@ export default function CobranzasAutomaticas() {
         .select('id,nombre,cod_ep').in('cod_ep', prefijos)
       const mapPref = {}; const cidsEP = []
       for (const c of (consEP||[])) { mapPref[c.cod_ep] = c; cidsEP.push(c.id) }
-      const mapNumUF = {}   // `${consorcio}__${nro}` → true si hay UF cruzable con ese número
+      const ufPorNroEp = {}   // `${consorcio}__${n}` → unidad (nro_ep cargado, o número numérico puro)
       if (cidsEP.length) {
         const { data: ufsEP } = await supabase.from('con_unidades')
-          .select('id,numero,consorcio_id,nro_ep').in('consorcio_id', cidsEP)
+          .select('id,numero,consorcio_id,propietario_id,nro_ep').in('consorcio_id', cidsEP)
         for (const u of (ufsEP||[])) {
           const ne = (u.nro_ep||'').trim()
-          if (ne) { mapNumUF[`${u.consorcio_id}__${parseInt(ne)}`] = true }               // nro_ep cargado
-          else if (/^\d+$/.test((u.numero||'').trim()))                                    // número numérico puro
-            mapNumUF[`${u.consorcio_id}__${parseInt(u.numero)}`] = true
+          if (ne) ufPorNroEp[`${u.consorcio_id}__${parseInt(ne)}`] = u                 // nro_ep cargado
+          else if (/^\d+$/.test((u.numero||'').trim()))                                // número numérico puro
+            ufPorNroEp[`${u.consorcio_id}__${parseInt(u.numero)}`] = u
         }
       }
       regs = regs.map(r => {
@@ -259,8 +259,10 @@ export default function CobranzasAutomaticas() {
         const c = mapPref[r.prefijoEP]
         if (!c) return r   // prefijo sin consorcio cargado → queda en el activo, manual
         const suf = parseInt(r.sufijoEP) || null
-        const cruzable = suf && mapNumUF[`${c.id}__${suf}`]
-        return { ...r, consorcioId:c.id, consorcioNombre:c.nombre, nroUF: cruzable ? suf : null }
+        const uf = suf ? ufPorNroEp[`${c.id}__${suf}`] : null   // UF exacta por nro_ep
+        return { ...r, consorcioId:c.id, consorcioNombre:c.nombre,
+                 unidadIdEP: uf?.id || null, ufNumeroEP: uf?.numero || null,
+                 nroUF: uf ? suf : null }
       })
     }
     // Para transferencia_siro, el consorcioId viene del consorcio activo
@@ -360,8 +362,15 @@ export default function CobranzasAutomaticas() {
     return regs.map(r => {
       const cid = r.consorcioId || (sistema==='transferencia_siro' ? consorcioId : null)
       if (!cid) return r
-      let found = r.nroUF ? mapaUF[`${cid}__${r.nroUF}`] : null
-      let via = found ? 'uf' : null
+      let found = null, via = null
+      // EP: la UF ya fue resuelta por nro_ep (unidad_id exacto). Se busca en datosUF por
+      // unidad_id; si esa UF no tiene detalle en el período, se arma un found mínimo con la
+      // etiqueta. NO se pasa por mapaUF (indexado por número, colisiona en alfanuméricos).
+      if (r.tipo==='EP' && r.unidadIdEP) {
+        found = datosUF[r.unidadIdEP] || { unidadId:r.unidadIdEP, ufLabel:r.ufNumeroEP, s1:null, s2:null, fv1:null, fv2:null }
+        via = 'uf'
+      }
+      if (!found) { found = r.nroUF ? mapaUF[`${cid}__${r.nroUF}`] : null; if (found) via='uf' }
       // 2) por CUIT exacto del pagador (identificador legal)
       if (!found && r.cuit) {
         const cd = soloDig(r.cuit)
