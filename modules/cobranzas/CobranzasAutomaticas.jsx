@@ -134,23 +134,18 @@ export default function CobranzasAutomaticas() {
         if (/^20[2-9]\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(f)) { fp=k; break }
       }
       if (fp<0) return []
-      const ident = t.slice(1, fp)                                  // nro_ep (código de pago Expensas Pagas)
+      const ident = t.slice(1, fp)                 // prefijo(4 díg = consorcio) + sufijo(nro de UF)
       const imp = parseInt(t.slice(fp+8, fp+19)) / 100
       if (!imp || imp<=0) return []
       const canal = t.slice(fp+8).replace(/^\d+/, '').trim().replace(/\s+/g,' ') || 'EP'
-      // Cruce por nro_ep (si está cargado en la unidad). Hoy nro_ep suele estar vacío → queda 'baja'.
-      const uf = ident ? (unidades||[]).find(u => (u.nro_ep||'').trim() === ident) : null
-      const cp = uf ? (copropietarios||[]).find(c => c.id === uf.propietario_id) : null
       return [{
         _id:`E-${i}`, tipo:'EP', canal, refEP: ident,
+        prefijoEP: ident.slice(0,4), sufijoEP: ident.slice(4),   // 0035 + 00142 → consorcio + UF
         fechaPago:`${t.slice(fp+6,fp+8)}/${t.slice(fp+4,fp+6)}/${t.slice(fp,fp+4)}`,
         fechaAcred:null, importe:imp,
-        consorcioId: uf?.consorcio_id || consorcioId,
-        consorcioNombre: consorcioActivo?.nombre||'',
-        nroUF: uf?.numero || null, ufLabel: uf?.numero || '—',
-        unidadId: uf?.id || null, propietario: cp?.apellido_nombre || null,
-        confianza: uf ? 'alta' : 'baja',
-        saldo1er:null, saldo2do:null, venc1:null, venc2:null,
+        consorcioId: consorcioId, consorcioNombre: consorcioActivo?.nombre||'',
+        nroUF:null, ufLabel:'—', unidadId:null, propietario:null,
+        confianza:'baja', saldo1er:null, saldo2do:null, venc1:null, venc2:null,
         eliminado:false, sel:false,
       }]
     })
@@ -238,6 +233,21 @@ export default function CobranzasAutomaticas() {
 
   // Enriquecer con datos de BD — cruza UFs y obtiene saldos/vencimientos
   async function enriquecerConBD(regs) {
+    // Expensas Pagas: derivar el consorcio (prefijo → con_consorcios.cod_ep) y el nº de UF
+    // (sufijo) ANTES del cruce, así cada pago va a su consorcio real y su UF por número.
+    const prefijos = [...new Set(regs.filter(r=>r.tipo==='EP' && r.prefijoEP).map(r=>r.prefijoEP))]
+    if (prefijos.length) {
+      const { data: consEP } = await supabase.from('con_consorcios')
+        .select('id,nombre,cod_ep').in('cod_ep', prefijos)
+      const mapPref = {}
+      for (const c of (consEP||[])) mapPref[c.cod_ep] = c
+      regs = regs.map(r => {
+        if (r.tipo!=='EP' || !r.prefijoEP) return r
+        const c = mapPref[r.prefijoEP]
+        if (!c) return r   // prefijo sin consorcio cargado → queda en el activo, manual
+        return { ...r, consorcioId:c.id, consorcioNombre:c.nombre, nroUF: parseInt(r.sufijoEP)||null }
+      })
+    }
     // Para transferencia_siro, el consorcioId viene del consorcio activo
     const cIds = [...new Set([
       ...regs.filter(r=>r.consorcioId).map(r=>r.consorcioId),
@@ -354,6 +364,7 @@ export default function CobranzasAutomaticas() {
       // solo PRE-CARGA la UF sugerida; queda a tu confirmacion en pantalla.
       let conf = r.confianza
       if (r.tipo==='SIRO'||r.tipo==='transferencia_siro') conf = found.unidadId ? 'alta' : 'media'
+      else if (r.tipo==='EP') conf = (via==='uf' && found.unidadId) ? 'alta' : 'media'
       else conf = 'media'
       return { ...r,
         consorcioId: cid,
