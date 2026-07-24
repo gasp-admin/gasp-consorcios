@@ -122,24 +122,35 @@ export default function CobranzasAutomaticas() {
     })
   }
 
-  // Expensas Pagas — posicional
+  // Expensas Pagas — posicional (archivo RD: tipo(1) + nro_ep(var) + fecha AAAAMMDD(8) + importe(11 centavos) + resto + canal)
   function parsearEP(texto) {
     return texto.split(/\r?\n/).flatMap((line, i) => {
       const t = line.trim()
       if (t.length < 40 || /^[19]187/.test(t)) return []
+      // Buscar el inicio de la fecha AAAAMMDD (el nro_ep de adelante tiene largo variable).
       let fp = -1
-      for (let k=2;k<10;k++) if (t.slice(k,k+4)==='2026'){fp=k;break;}
+      for (let k=1;k<16;k++) {
+        const f = t.slice(k,k+8)
+        if (/^20[2-9]\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(f)) { fp=k; break }
+      }
       if (fp<0) return []
+      const ident = t.slice(1, fp)                                  // nro_ep (código de pago Expensas Pagas)
       const imp = parseInt(t.slice(fp+8, fp+19)) / 100
       if (!imp || imp<=0) return []
-      const canal = t.slice(fp+30).trim().replace(/\s+/,' ') || 'EP'
+      const canal = t.slice(fp+8).replace(/^\d+/, '').trim().replace(/\s+/g,' ') || 'EP'
+      // Cruce por nro_ep (si está cargado en la unidad). Hoy nro_ep suele estar vacío → queda 'baja'.
+      const uf = ident ? (unidades||[]).find(u => (u.nro_ep||'').trim() === ident) : null
+      const cp = uf ? (copropietarios||[]).find(c => c.id === uf.propietario_id) : null
       return [{
-        _id:`E-${i}`, tipo:'EP', canal,
+        _id:`E-${i}`, tipo:'EP', canal, refEP: ident,
         fechaPago:`${t.slice(fp+6,fp+8)}/${t.slice(fp+4,fp+6)}/${t.slice(fp,fp+4)}`,
         fechaAcred:null, importe:imp,
-        consorcioId:consorcioId, consorcioNombre:consorcioActivo?.nombre||'',
-        nroUF:null, ufLabel:'—', unidadId:null, propietario:null,
-        confianza:'baja', saldo1er:null, saldo2do:null, venc1:null, venc2:null,
+        consorcioId: uf?.consorcio_id || consorcioId,
+        consorcioNombre: consorcioActivo?.nombre||'',
+        nroUF: uf?.numero || null, ufLabel: uf?.numero || '—',
+        unidadId: uf?.id || null, propietario: cp?.apellido_nombre || null,
+        confianza: uf ? 'alta' : 'baja',
+        saldo1er:null, saldo2do:null, venc1:null, venc2:null,
         eliminado:false, sel:false,
       }]
     })
