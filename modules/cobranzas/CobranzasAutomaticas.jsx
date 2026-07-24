@@ -233,19 +233,34 @@ export default function CobranzasAutomaticas() {
 
   // Enriquecer con datos de BD — cruza UFs y obtiene saldos/vencimientos
   async function enriquecerConBD(regs) {
-    // Expensas Pagas: derivar el consorcio (prefijo → con_consorcios.cod_ep) y el nº de UF
-    // (sufijo) ANTES del cruce, así cada pago va a su consorcio real y su UF por número.
+    // Expensas Pagas: derivar el consorcio (prefijo → con_consorcios.cod_ep) y la UF por el sufijo.
+    // El sufijo cruza con la UF SOLO si la unidad tiene número numérico puro (ej. Punta Médanos)
+    // o un nro_ep cargado. Las numeraciones alfanuméricas ("1 A", "EP 6") NO se cruzan por número
+    // para evitar falsos positivos (parseInt("EP 6")=6 matchearía el sufijo 6 por casualidad).
     const prefijos = [...new Set(regs.filter(r=>r.tipo==='EP' && r.prefijoEP).map(r=>r.prefijoEP))]
     if (prefijos.length) {
       const { data: consEP } = await supabase.from('con_consorcios')
         .select('id,nombre,cod_ep').in('cod_ep', prefijos)
-      const mapPref = {}
-      for (const c of (consEP||[])) mapPref[c.cod_ep] = c
+      const mapPref = {}; const cidsEP = []
+      for (const c of (consEP||[])) { mapPref[c.cod_ep] = c; cidsEP.push(c.id) }
+      const mapNumUF = {}   // `${consorcio}__${nro}` → true si hay UF cruzable con ese número
+      if (cidsEP.length) {
+        const { data: ufsEP } = await supabase.from('con_unidades')
+          .select('id,numero,consorcio_id,nro_ep').in('consorcio_id', cidsEP)
+        for (const u of (ufsEP||[])) {
+          const ne = (u.nro_ep||'').trim()
+          if (ne) { mapNumUF[`${u.consorcio_id}__${parseInt(ne)}`] = true }               // nro_ep cargado
+          else if (/^\d+$/.test((u.numero||'').trim()))                                    // número numérico puro
+            mapNumUF[`${u.consorcio_id}__${parseInt(u.numero)}`] = true
+        }
+      }
       regs = regs.map(r => {
         if (r.tipo!=='EP' || !r.prefijoEP) return r
         const c = mapPref[r.prefijoEP]
         if (!c) return r   // prefijo sin consorcio cargado → queda en el activo, manual
-        return { ...r, consorcioId:c.id, consorcioNombre:c.nombre, nroUF: parseInt(r.sufijoEP)||null }
+        const suf = parseInt(r.sufijoEP) || null
+        const cruzable = suf && mapNumUF[`${c.id}__${suf}`]
+        return { ...r, consorcioId:c.id, consorcioNombre:c.nombre, nroUF: cruzable ? suf : null }
       })
     }
     // Para transferencia_siro, el consorcioId viene del consorcio activo
