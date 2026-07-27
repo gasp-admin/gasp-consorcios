@@ -343,7 +343,7 @@ export default function LiquidacionPeriodo() {
     // Cargar saldos anteriores de la última expensa cerrada
     let saldosAnt = {}
     const { data: expAnterior } = await supabase.from('con_expensas')
-      .select('id, saldo_caja_final, total_cobrado').eq('consorcio_id', consorcioId)
+      .select('id, saldo_caja_final, total_cobrado, fuente').eq('consorcio_id', consorcioId)
       .neq('id', expSel?.id || '').eq('estado','cerrada')
       .order('periodo', { ascending: false }).limit(1)
 
@@ -375,7 +375,12 @@ export default function LiquidacionPeriodo() {
       }
 
       let totalCobradoAnt = 0
-      if ((lufAnt||[]).length > 0) {
+      // Si el período anterior es NATIVO (fuente='gasp'), la fuente de verdad del saldo al cierre es
+      // con_expensas_detalle (saldo_anterior+monto+interes-pagos). con_liquidacion_uf puede tener un
+      // espejo residual de un import previo (total_uf sin netear los pagos) que arrastraría el monto
+      // completo como deuda. Solo se prioriza con_liquidacion_uf para períodos históricos importados.
+      const esAnteriorNativo = (expAnterior[0].fuente === 'gasp')
+      if (!esAnteriorNativo && (lufAnt||[]).length > 0) {
         // Período anterior histórico (importado): el saldo al cierre es total_uf (conserva saldo a favor)
         for (const l of lufAnt) {
           const pagosUF = cobranzasPorUF[l.unidad_id] || (parseFloat(l.pagos)||0)
@@ -390,6 +395,13 @@ export default function LiquidacionPeriodo() {
             (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) +
             (parseFloat(d.interes_mora)||0) - pagosUF
           saldosAnt[d.unidad_id] = { saldo, pagos: pagosUF }
+          totalCobradoAnt += pagosUF
+        }
+      } else if ((lufAnt||[]).length > 0) {
+        // Fallback defensivo: período sin detalle por UF pero con espejo en con_liquidacion_uf
+        for (const l of lufAnt) {
+          const pagosUF = cobranzasPorUF[l.unidad_id] || (parseFloat(l.pagos)||0)
+          saldosAnt[l.unidad_id] = { saldo: parseFloat(l.total_uf)||0, pagos: pagosUF }
           totalCobradoAnt += pagosUF
         }
       } else {
