@@ -2031,7 +2031,7 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
             <Btn color="#dc2626" style={{ background:'#dc2626', color:'#fff' }} onClick={async () => {
               if (!window.confirm('¿Confirma la anulación de la liquidación del período ' + expSel?.periodo + '?\nEsta acción no se puede deshacer.')) return
               try {
-                setProcessando && setProcessando(true)
+                setProcesando(true)
                 // 1. Borrar detalles UF
                 await supabase.from('con_expensas_detalle').delete().eq('expensa_id', expSel?.id)
                 // 2. Borrar movimientos generados en este período
@@ -2049,6 +2049,8 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                 setMsg({ tipo:'ok', texto:'✓ Liquidación anulada. El período quedó en estado abierto para una nueva liquidación.' })
               } catch(err) {
                 setMsg({ tipo:'error', texto:'Error al anular: ' + err.message })
+              } finally {
+                setProcesando(false)
               }
             }}>🔄 Anular liquidación y volver a empezar</Btn>
           </div>
