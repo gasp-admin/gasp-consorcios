@@ -388,13 +388,17 @@ export default function LiquidacionPeriodo() {
           totalCobradoAnt += pagosUF
         }
       } else if ((detsAnt||[]).length > 0) {
-        // Período anterior nativo: reconstruir desde el detalle (SIN Math.max → conserva saldo a favor)
+        // Período anterior nativo. Modelo concordante con Administración Global:
+        //   saldo   = expensa del mes anterior (deuda previa + expensa, SIN interés) → col "saldo anterior"
+        //   interes = interés/recargo del mes anterior (d.interes_mora)              → col "interés"
+        //   pagos   = pagos del mes anterior                                         → col "pagos"
+        // La deuda (saldo − pagos, con signo) y el interés se compensan en el total (ver prorrateo).
         for (const d of detsAnt) {
           const pagosUF = cobranzasPorUF[d.unidad_id] || (parseFloat(d.pagos_periodo)||0)
-          const saldo =
-            (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) +
-            (parseFloat(d.interes_mora)||0) - pagosUF
-          saldosAnt[d.unidad_id] = { saldo, pagos: pagosUF }
+          const expensaAnt = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0)
+          saldosAnt[d.unidad_id] = {
+            saldo: expensaAnt, interes: parseFloat(d.interes_mora)||0, pagos: pagosUF, nativo: true
+          }
           totalCobradoAnt += pagosUF
         }
       } else if ((lufAnt||[]).length > 0) {
@@ -507,17 +511,29 @@ export default function LiquidacionPeriodo() {
       const antUF = saldosAnt[u.id] || { saldo: 0, pagos: 0 }
       const saldo_anterior = antUF.saldo
       const pagos_anterior = antUF.pagos
-      const deuda = Math.max(0, saldo_anterior) // deuda pendiente (>0) → interés y estado morosa
-      // Ajuste por saldo del período anterior CON signo: si es negativo (saldo a favor) se
-      // descuenta del total a pagar; si es deuda, coincide con `deuda`.
-      const ajusteSaldoAnt = saldo_anterior
-
-      // Interés sobre saldo deudor: usa interes_mora del consorcio (% mensual sobre la deuda)
-      // consorcioActivo.interes_mora = 5 → 5% mensual sobre la deuda
       const tasaMora = parseFloat(consorcioActivo?.interes_mora || 0) / 100
-      const interes_mora = deuda > 0 ? Math.round(deuda * tasaMora * 100) / 100 : 0
 
-      // TOTAL a pagar = expensa + redondeo (centavos UF) + saldo anterior (con signo) + intereses
+      let deuda, ajusteSaldoAnt, interes_mora, saldo_arrastre
+      if (antUF.nativo) {
+        // Modelo Administración Global (período anterior nativo):
+        //   deuda = saldo anterior − pagos (CON signo; si pagó el interés en 2º vto queda negativa).
+        //   interés = el del mes anterior (ya devengado); deuda e interés se compensan en el total.
+        //   saldo_arrastre = deuda + interés = lo que realmente queda debiendo (se persiste al cerrar).
+        interes_mora = antUF.interes || 0
+        deuda = saldo_anterior - pagos_anterior
+        ajusteSaldoAnt = deuda
+        saldo_arrastre = deuda + interes_mora
+      } else {
+        // Modelo histórico: total_uf ya es saldo neto acumulado; se cobra interés (mensual directo)
+        // sobre la deuda arrastrada, sumado aparte al total.
+        deuda = Math.max(0, saldo_anterior)
+        ajusteSaldoAnt = saldo_anterior
+        interes_mora = deuda > 0 ? Math.round(deuda * tasaMora * 100) / 100 : 0
+        saldo_arrastre = ajusteSaldoAnt + interes_mora
+      }
+
+      // TOTAL a pagar = expensa + redondeo (centavos UF) + saldo anterior (con signo) + interés.
+      // En nativos deuda e interés se compensan (interés ya devengado); en históricos el interés es nuevo.
       const monto_total = expensaBase + centavosUF + ajusteSaldoAnt + interes_mora
       // 2do vencimiento: recargo solo sobre la expensa del período, saldo anterior e interés sin recargo
       const monto_vto2 = Math.round((expensaBase + centavosUF) * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100 + ajusteSaldoAnt + interes_mora
@@ -558,6 +574,7 @@ export default function LiquidacionPeriodo() {
         pagos_anterior,
         deuda,
         interes_mora,
+        saldo_arrastre,
       }
     })
 
@@ -1168,12 +1185,12 @@ export default function LiquidacionPeriodo() {
         consorcio_id: consorcioId,
         expensa_id: expSel.id,
         unidad_id: d.unidad_id,
-        monto: d.monto,              // monto CON centavos de identificación de UF
+        monto: (parseFloat(d.expensa_base)||0) + (parseFloat(d.redondeo)||0),  // expensa del período CON centavos (base del arrastre)
         redondeo: d.redondeo,        // centavos del número de UF (ej: 0.03 para UF 3)
-        saldo_anterior: d.saldo_anterior || saldosAnt[d.unidad_id] || 0,
+        saldo_anterior: (d.saldo_arrastre !== undefined ? d.saldo_arrastre : (d.saldo_anterior || saldosAnt[d.unidad_id] || 0)),  // arrastre al mes siguiente = deuda + interés neto
         pagos_periodo: 0,
         interes_mora: 0,
-        estado: (d.saldo_anterior || saldosAnt[d.unidad_id] || 0) > 0 ? 'morosa' : 'pendiente',
+        estado: ((d.saldo_arrastre !== undefined ? d.saldo_arrastre : (d.saldo_anterior || saldosAnt[d.unidad_id] || 0)) > 0.005) ? 'morosa' : 'pendiente',
       }))
 
       const { error } = await supabase.from('con_expensas_detalle').insert(detalles)
@@ -1206,10 +1223,11 @@ export default function LiquidacionPeriodo() {
             gastos,
             detalles: distribucion.map(d => ({
               unidad_id: d.unidad_id,
-              monto: d.monto,
-              saldo_anterior: d.saldo_anterior || 0,
-              pagos_periodo: 0,
-              interes_mora: 0,
+              monto: (parseFloat(d.expensa_base)||0) + (parseFloat(d.redondeo)||0),  // expensa del período
+              saldo_anterior: d.saldo_anterior || 0,   // expensa del mes anterior (col "saldo anterior")
+              pagos_periodo: d.pagos_anterior || 0,     // pagos del mes anterior (col "pagos")
+              interes_mora: d.interes_mora || 0,        // interés del mes anterior (col "interés")
+              deuda: d.deuda,                           // deuda con signo (compensa el interés en el PDF)
               redondeo: d.redondeo || 0,
             })),
             unidades,
