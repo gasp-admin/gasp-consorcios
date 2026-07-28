@@ -8,7 +8,7 @@ import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/con
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
-import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
+import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios, generarDeudaCIG } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Expensas() {
@@ -23,6 +23,7 @@ export default function Expensas() {
   const [formGasto, setFormGasto] = useState(null)
   const [msg, setMsg]           = useState(null)
   const [tab, setTab]           = useState('detalle')
+  const [galiciaActivo, setGaliciaActivo] = useState(false)
   const F = f => setForm(x=>({...x,...f}))
 
   async function cargar() {
@@ -96,6 +97,37 @@ export default function Expensas() {
     }
     generarPDFLiquidacion({ consorcioActivo:conData||{nombre:consorcioId}, expensa:expFresca||expensa, gastos:gRes.data||[], detalles:dRes.data||[], unidades, copropietarios, adminPerfil, lufsHist })
   }
+  async function generarArchivoGalicia(exp) {
+    try {
+      setMsg({ tipo:'info', texto:'⏳ Generando archivo Galicia…' })
+      const d = await generarDeudaCIG(exp.id, session?.access_token)
+      // Descargar la cinta .txt para subir en Office Banking (Cobros → Cobranza Integrada)
+      const blob = new Blob([d.contenido], { type:'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = d.filename
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+      const omit = (d.omitidos_sin_cuit || []).length
+      setMsg({
+        tipo: omit > 0 ? 'error' : 'ok',
+        texto: `✓ ${d.filename} — ${d.total_registros} UF · total ${fmt(d.total_importe)} · archivo N° ${d.nro_archivo}.`
+          + (omit > 0 ? ` ⚠️ ${omit} UF omitidas por falta de CUIT: ${(d.omitidos_sin_cuit||[]).join(', ')}` : '')
+      })
+    } catch (e) {
+      setMsg({ tipo:'error', texto:'Galicia: ' + (e.message || 'error al generar el archivo') })
+    }
+  }
+
+  // El botón "Archivo Galicia" solo aparece en consorcios con CIG activo
+  useEffect(() => {
+    if (!consorcioId) { setGaliciaActivo(false); return }
+    supabase.from('con_config_cobranza').select('galicia_activo')
+      .eq('consorcio_id', consorcioId).maybeSingle()
+      .then(({ data }) => setGaliciaActivo(!!data?.galicia_activo))
+      .catch(() => setGaliciaActivo(false))
+  }, [consorcioId])
+
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId])
 
   const CATEGORIAS=['limpieza','mantenimiento','seguro','seguros','honorarios','honorarios_admin','servicios_publicos','electricidad','gas','reparaciones','administracion','gastos_bancarios','impuesto_municipal','sueldos','cargas_sociales','otro']
@@ -296,6 +328,16 @@ export default function Expensas() {
                   </div>
                 </div>
                 <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
+                  {galiciaActivo && esCerradaItem && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); generarArchivoGalicia(exp) }}
+                      title="Generar el archivo de deuda para Cobranza Integrada Galicia (.txt para Office Banking)"
+                      style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px',
+                        background:'#fff', color:'#047857', border:'1px solid #a7f3d0',
+                        borderRadius:7, fontSize:12, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>
+                      📄 Galicia
+                    </button>
+                  )}
                   <button
                     onClick={(e) => { e.stopPropagation(); generarPDF(exp) }}
                     title="Generar el PDF de la liquidación (generado por el sistema)"
