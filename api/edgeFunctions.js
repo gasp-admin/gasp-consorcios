@@ -40,6 +40,10 @@ export const importarLiquidacionHistorica = (payload, token) =>
 export const siroProxy = (accion, extra = {}, token) =>
   callEF('siro-proxy', { accion, ...extra }, token)
 
+// Cobranza Integrada Galicia (CIG) — genera la cinta de publicación de deuda de un período
+export const generarDeudaCIG = (expensaId, token) =>
+  callEF('generar-deuda-cig', { expensa_id: expensaId }, token)
+
 // Envío de liquidaciones y notificaciones
 export const enviarLiquidacion = (payload, token) =>
   callEF('enviar-liquidacion', payload, token)
