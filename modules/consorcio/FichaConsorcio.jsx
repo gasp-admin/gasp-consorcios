@@ -49,9 +49,14 @@ export default function FichaConsorcio() {
   const [msg, setMsg]           = useState(null)
   const [analizandoReg, setAnalizandoReg] = useState(false)
   const [msgReg, setMsgReg]     = useState(null)
+  const [codigoNuevo, setCodigoNuevo] = useState('')
 
   useEffect(() => {
-    if (esNuevo) setForm(emptyForm(null))
+    if (esNuevo) {
+      setForm(emptyForm(null))
+      const maxNum = Math.max(0, ...(consorcios||[]).map(c => parseInt(String(c.id||'').replace(/^CON/i,''), 10) || 0))
+      setCodigoNuevo(String(maxNum + 1))
+    }
     else if (consorcioActivo) setForm(emptyForm(consorcioActivo))
   }, [consorcioActivo?.id, esNuevo])
 
@@ -61,8 +66,12 @@ export default function FichaConsorcio() {
     if (!form.nombre?.trim()) { setMsg({ tipo:'err', txt:'⚠️ El nombre del consorcio es obligatorio.' }); return }
     setGuardando(true); setMsg(null)
     try {
-      const maxNum = Math.max(0, ...(consorcios||[]).map(c => parseInt(String(c.id||'').replace(/^CON/i,''), 10) || 0))
-      const nuevoId = 'CON' + (maxNum + 1)
+      const cod = String(codigoNuevo || '').trim().replace(/^CON/i,'').trim()
+      if (!cod) { setMsg({ tipo:'err', txt:'⚠️ Ingresá el código del consorcio.' }); setGuardando(false); return }
+      const nuevoId = 'CON' + cod
+      if ((consorcios||[]).some(c => String(c.id||'').toUpperCase() === nuevoId.toUpperCase())) {
+        setMsg({ tipo:'err', txt:`⚠️ Ya existe un consorcio con el ID ${nuevoId}. Elegí otro código.` }); setGuardando(false); return
+      }
       const adminId = (consorcios||[])[0]?.admin_id || session?.user?.id
       if (!adminId) throw new Error('No se pudo determinar el administrador.')
       const payload = { id: nuevoId, admin_id: adminId }
@@ -147,9 +156,17 @@ export default function FichaConsorcio() {
       {/* Encabezado */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 18, color: AZ }}>{esNuevo ? '➕ Nuevo Consorcio' : '📋 Ficha del Consorcio'}</h2>
-        <span style={{ fontSize: 11, color: GR, background: '#f0f4ff', padding: '3px 10px', borderRadius: 6 }}>
-          ID: {esNuevo ? '(se asignará automáticamente)' : consorcioActivo.id}
-        </span>
+        {esNuevo ? (
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ fontSize: 12, color: '#5a6a8a', fontWeight:600 }}>ID: CON</span>
+            <input value={codigoNuevo} onChange={e=>{ setCodigoNuevo(e.target.value.replace(/[^0-9A-Za-z]/g,'')); setMsg(null) }}
+              placeholder="1285" style={{ width:90, fontSize:13, padding:'5px 8px', border:'1px solid #d0d9e8', borderRadius:6 }} />
+          </div>
+        ) : (
+          <span style={{ fontSize: 11, color: GR, background: '#f0f4ff', padding: '3px 10px', borderRadius: 6 }}>
+            ID: {consorcioActivo.id}
+          </span>
+        )}
       </div>
 
       {msg && (
