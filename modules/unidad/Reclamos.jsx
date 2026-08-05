@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Reclamos() {
-  const { session, unidades, copropietarios, consorcioActivo} = useApp()
+  const { session, unidades, copropietarios, consorcioActivo, consorcios } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
@@ -25,7 +25,11 @@ export default function Reclamos() {
   const [detalle, setDetalle]       = useState(null)
   const [respuesta, setRespuesta]   = useState('')
   const [msg, setMsg]               = useState(null)
+  const [filtroCons, setFiltroCons] = useState('')
+  const [unidadesMap, setUnidadesMap] = useState({})
+  const [coprMap, setCoprMap]       = useState({})
   const hoy = new Date().toISOString().split('T')[0]
+  const nombreConsorcio = (cid) => consorcios?.find(c => c.id === cid)?.nombre || cid || '—'
 
   const TIPOS      = [['reclamo','🔴 Reclamo'],['consulta','💬 Consulta'],['sugerencia','💡 Sugerencia'],['urgente','🚨 Urgente']]
   const ESTADOS    = [['abierto','🔵 Abierto'],['en_proceso','🟡 En proceso'],['resuelto','🟢 Resuelto'],['cerrado','⚫ Cerrado'],['derivado','🔀 Derivado']]
@@ -36,14 +40,25 @@ export default function Reclamos() {
 
   async function cargar() {
     let q = supabase.from('con_reclamos').select('*')
-      .eq('admin_id', uid).eq('consorcio_id', consorcioId)
-      .order('created_at', { ascending:false }).limit(200)
+      .eq('admin_id', uid)
+      .order('created_at', { ascending:false }).limit(500)
     if (filtroEstado)    q = q.eq('estado', filtroEstado)
     if (filtroPrioridad) q = q.eq('prioridad', filtroPrioridad)
     const { data } = await q
-    setReclamos(data || [])
+    const recs = data || []
+    setReclamos(recs)
+    const ufIds = [...new Set(recs.map(r=>r.unidad_id).filter(Boolean))]
+    const cpIds = [...new Set(recs.map(r=>r.copropietario_id).filter(Boolean))]
+    if (ufIds.length) {
+      const { data: ufs } = await supabase.from('con_unidades').select('id, numero, consorcio_id, propietario_id').in('id', ufIds)
+      const m = {}; (ufs||[]).forEach(u => m[u.id] = u); setUnidadesMap(m)
+    } else setUnidadesMap({})
+    if (cpIds.length) {
+      const { data: cps } = await supabase.from('con_copropietarios').select('id, apellido_nombre').in('id', cpIds)
+      const m = {}; (cps||[]).forEach(cp => m[cp.id] = cp.apellido_nombre); setCoprMap(m)
+    } else setCoprMap({})
   }
-  useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtroEstado, filtroPrioridad])
+  useEffect(() => { if (uid) cargar() }, [uid, filtroEstado, filtroPrioridad])
 
   async function guardar() {
     if (!form?.titulo?.trim()) return setMsg({ tipo:'warn', texto:'El asunto es requerido' })
@@ -75,9 +90,13 @@ export default function Reclamos() {
   }
 
   const fmt = d => d ? new Date(d).toLocaleDateString('es-AR') : '—'
-  const filtrados = reclamos.filter(r => !busqueda ||
-    (r.titulo||'').toLowerCase().includes(busqueda.toLowerCase()) ||
-    (r.descripcion||'').toLowerCase().includes(busqueda.toLowerCase()))
+  const consPresentes = [...new Set(reclamos.map(r=>r.consorcio_id).filter(Boolean))]
+  const filtrados = reclamos.filter(r =>
+    (!filtroCons || r.consorcio_id === filtroCons) &&
+    (!busqueda ||
+      (r.titulo||'').toLowerCase().includes(busqueda.toLowerCase()) ||
+      (r.descripcion||'').toLowerCase().includes(busqueda.toLowerCase()) ||
+      nombreConsorcio(r.consorcio_id).toLowerCase().includes(busqueda.toLowerCase())))
 
   const kpis = [
     { l:'Abiertos',     v:reclamos.filter(r=>r.estado==='abierto').length,     c:AZ },
@@ -93,7 +112,7 @@ export default function Reclamos() {
         <div style={{ flex:1 }}>
           <div style={{ fontWeight:700, fontSize:15 }}>{detalle.titulo}</div>
           <div style={{ fontSize:12, color:GR }}>
-            {fmt(detalle.created_at)} · UF {unidades.find(u=>u.id===detalle.unidad_id)?.numero || '—'} ·
+            🏢 {nombreConsorcio(detalle.consorcio_id)} · {fmt(detalle.created_at)} · UF {unidadesMap[detalle.unidad_id]?.numero || '—'} ·
             <span style={{ color: COLORS_EST[detalle.estado], fontWeight:600 }}> {detalle.estado}</span>
           </div>
         </div>
@@ -194,13 +213,15 @@ export default function Reclamos() {
 
       {/* Filtros */}
       <Card style={{ marginBottom:14 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr auto', gap:10, alignItems:'end' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1.2fr 1fr 1fr 1fr auto', gap:10, alignItems:'end' }}>
           <div>
             <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Buscar</div>
             <input value={busqueda} onChange={e=>setBusqueda(e.target.value)}
-              placeholder="Asunto, descripción..."
+              placeholder="Consorcio, asunto, descripción..."
               style={{ width:'100%', padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:12.5, boxSizing:'border-box' }} />
           </div>
+          <Sel label="Consorcio" value={filtroCons} onChange={setFiltroCons}
+            opts={[{v:'',l:`Todos (${reclamos.length})`},...consPresentes.map(cid=>({v:cid,l:nombreConsorcio(cid)}))]} />
           <Sel label="Estado" value={filtroEstado} onChange={setFiltroEstado}
             opts={[{v:'',l:'Todos los estados'},...ESTADOS.map(([v,l])=>({v,l}))]} />
           <Sel label="Prioridad" value={filtroPrioridad} onChange={setFiltroPrioridad}
@@ -222,15 +243,15 @@ export default function Reclamos() {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
             <thead>
               <tr style={{ background:'#f8fafc', borderBottom:'1.5px solid #e5e7eb' }}>
-                {['N°','Fecha','UF — Vecino','Asunto','Cat.','Prioridad','Estado',''].map((h,i)=>(
+                {['N°','Fecha','Consorcio · UF · Vecino','Asunto','Cat.','Prioridad','Estado',''].map((h,i)=>(
                   <th key={i} style={{ padding:'8px 12px', textAlign:'left', fontWeight:600, color:'#374151', fontSize:11.5 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtrados.map(r => {
-                const uf = unidades.find(u=>u.id===r.unidad_id)
-                const cp = copropietarios.find(c=>c.id===uf?.propietario_id)
+                const uf = unidadesMap[r.unidad_id]
+                const cpNombre = coprMap[r.copropietario_id] || (uf && coprMap[uf.propietario_id]) || '—'
                 return (
                   <tr key={r.id} style={{ borderBottom:'1px solid #f3f4f6', cursor:'pointer' }}
                     onClick={()=>{ setDetalle(r); setRespuesta(r.respuesta_admin||'') }}>
@@ -240,8 +261,9 @@ export default function Reclamos() {
                     </td>
                     <td style={{ padding:'8px 12px', color:GR, fontSize:11, whiteSpace:'nowrap' }}>{fmt(r.created_at)}</td>
                     <td style={{ padding:'8px 12px' }}>
+                      <div style={{ fontSize:11, fontWeight:700, color:AZ }}>🏢 {nombreConsorcio(r.consorcio_id)}</div>
                       {uf && <div style={{ fontWeight:600 }}>UF {uf.numero}</div>}
-                      <div style={{ fontSize:11, color:GR }}>{cp?.apellido_nombre||'—'}</div>
+                      <div style={{ fontSize:11, color:GR }}>{cpNombre}</div>
                     </td>
                     <td style={{ padding:'8px 12px', maxWidth:200 }}>
                       <div style={{ fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.titulo}</div>
