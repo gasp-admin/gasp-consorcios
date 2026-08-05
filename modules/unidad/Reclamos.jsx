@@ -46,7 +46,7 @@ export default function Reclamos() {
   useEffect(() => { if (consorcioId) cargar() }, [consorcioId, filtroEstado, filtroPrioridad])
 
   async function guardar() {
-    if (!form?.asunto?.trim()) return setMsg({ tipo:'warn', texto:'El asunto es requerido' })
+    if (!form?.titulo?.trim()) return setMsg({ tipo:'warn', texto:'El asunto es requerido' })
     const payload = {
       ...form,
       id: form.id || `REC-${consorcioId}-${Date.now()}`,
@@ -61,14 +61,14 @@ export default function Reclamos() {
   }
 
   async function cambiarEstado(rec, nuevoEstado) {
-    await supabase.from('con_reclamos').update({
+    const { error } = await supabase.from('con_reclamos').update({
       estado: nuevoEstado,
-      fecha_resolucion: nuevoEstado === 'resuelto' ? hoy : null,
-      fecha_cierre:     nuevoEstado === 'cerrado'  ? hoy : null,
+      fecha_cierre: nuevoEstado === 'cerrado' ? hoy : null,
       updated_at: new Date().toISOString(),
     }).eq('id', rec.id)
+    if (error) return setMsg({ tipo:'error', texto: 'Error al cambiar estado: ' + error.message })
     if (respuesta.trim() && detalle?.id === rec.id) {
-      await supabase.from('con_reclamos').update({ respuesta: respuesta.trim() }).eq('id', rec.id)
+      await supabase.from('con_reclamos').update({ respuesta_admin: respuesta.trim(), fecha_respuesta: hoy }).eq('id', rec.id)
     }
     setMsg({ tipo:'ok', texto:`✓ Estado → ${nuevoEstado}` })
     setRespuesta(''); setDetalle(null); cargar()
@@ -76,7 +76,7 @@ export default function Reclamos() {
 
   const fmt = d => d ? new Date(d).toLocaleDateString('es-AR') : '—'
   const filtrados = reclamos.filter(r => !busqueda ||
-    r.asunto.toLowerCase().includes(busqueda.toLowerCase()) ||
+    (r.titulo||'').toLowerCase().includes(busqueda.toLowerCase()) ||
     (r.descripcion||'').toLowerCase().includes(busqueda.toLowerCase()))
 
   const kpis = [
@@ -91,7 +91,7 @@ export default function Reclamos() {
       <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
         <BtnSec onClick={()=>{ setDetalle(null); setRespuesta('') }}>← Volver</BtnSec>
         <div style={{ flex:1 }}>
-          <div style={{ fontWeight:700, fontSize:15 }}>{detalle.asunto}</div>
+          <div style={{ fontWeight:700, fontSize:15 }}>{detalle.titulo}</div>
           <div style={{ fontSize:12, color:GR }}>
             {fmt(detalle.created_at)} · UF {unidades.find(u=>u.id===detalle.unidad_id)?.numero || '—'} ·
             <span style={{ color: COLORS_EST[detalle.estado], fontWeight:600 }}> {detalle.estado}</span>
@@ -127,7 +127,7 @@ export default function Reclamos() {
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
           <div>
             <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Tipo</div>
-            <select value={form.tipo||'reclamo'} onChange={e=>setForm(x=>({...x,tipo:e.target.value}))}
+            <select value={form.categoria||'reclamo'} onChange={e=>setForm(x=>({...x,categoria:e.target.value}))}
               style={{ width:'100%', padding:'8px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13 }}>
               {TIPOS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
             </select>
@@ -138,7 +138,7 @@ export default function Reclamos() {
               return {v:u.id,l:`UF ${u.numero} — ${cp?.apellido_nombre||'Sin prop.'}`}
             })]} />
           <div style={{ gridColumn:'span 2' }}>
-            <Input label="Asunto" value={form.asunto||''} onChange={v=>setForm(x=>({...x,asunto:v}))} required />
+            <Input label="Asunto" value={form.titulo||''} onChange={v=>setForm(x=>({...x,titulo:v}))} required />
           </div>
           <div>
             <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Categoría</div>
@@ -177,7 +177,7 @@ export default function Reclamos() {
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
         <div style={{ fontWeight:700, fontSize:15 }}>🎫 Reclamos y consultas</div>
-        <Btn small onClick={()=>setForm({ tipo:'reclamo', prioridad:'normal', estado:'abierto' })}>+ Nuevo reclamo</Btn>
+        <Btn small onClick={()=>setForm({ categoria:'reclamo', prioridad:'normal', estado:'abierto' })}>+ Nuevo reclamo</Btn>
       </div>
       <div style={{ fontSize:12, color:GR, marginBottom:16 }}>Gestión de tickets de copropietarios</div>
       <Msg data={msg} />
@@ -233,7 +233,7 @@ export default function Reclamos() {
                 const cp = copropietarios.find(c=>c.id===uf?.propietario_id)
                 return (
                   <tr key={r.id} style={{ borderBottom:'1px solid #f3f4f6', cursor:'pointer' }}
-                    onClick={()=>{ setDetalle(r); setRespuesta(r.respuesta||'') }}>
+                    onClick={()=>{ setDetalle(r); setRespuesta(r.respuesta_admin||'') }}>
                     <td style={{ padding:'8px 12px', color:'#374151', fontSize:12, fontWeight:700, whiteSpace:'nowrap' }}>
                       {r.nro_reclamo ? '#' + r.nro_reclamo : '—'}
                       {r.es_emergencia && <span style={{display:'block',background:'#fee2e2',color:'#dc2626',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,marginTop:2}}>🚨 EMERGENCIA</span>}
@@ -244,8 +244,8 @@ export default function Reclamos() {
                       <div style={{ fontSize:11, color:GR }}>{cp?.apellido_nombre||'—'}</div>
                     </td>
                     <td style={{ padding:'8px 12px', maxWidth:200 }}>
-                      <div style={{ fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.asunto}</div>
-                      <div style={{ fontSize:10, color:GR, textTransform:'capitalize' }}>{r.tipo} {r.categoria?`· ${r.categoria}`:''}</div>
+                      <div style={{ fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.titulo}</div>
+                      <div style={{ fontSize:10, color:GR, textTransform:'capitalize' }}>{r.categoria||'general'}</div>
                     </td>
                     <td style={{ padding:'8px 12px', fontSize:11, color:GR, textTransform:'capitalize' }}>{r.categoria||'—'}</td>
                     <td style={{ padding:'8px 12px' }}>
