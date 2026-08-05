@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function ListadoConsorcios() {
-  const { session, consorcioActivo, consorcios, cargando } = useApp()
+  const { session, consorcioActivo, consorcios, cargando, setPagina } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
@@ -140,9 +140,18 @@ export default function ListadoConsorcios() {
 
   return (
     <div>
-      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>🏛️ Mis Consorcios</div>
-      <div style={{ fontSize:12, color:GR, marginBottom:12 }}>
-        {consorcios.length} consorcio{consorcios.length!==1?'s':''} administrado{consorcios.length!==1?'s':''}
+      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:12 }}>
+        <div>
+          <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>🏛️ Mis Consorcios</div>
+          <div style={{ fontSize:12, color:GR }}>
+            {consorcios.length} consorcio{consorcios.length!==1?'s':''} administrado{consorcios.length!==1?'s':''}
+          </div>
+        </div>
+        <button onClick={() => setPagina('nuevo_consorcio')}
+          style={{ padding:'8px 16px', fontSize:13, fontWeight:700, background:VD, color:'#fff',
+            border:'none', borderRadius:8, cursor:'pointer', whiteSpace:'nowrap' }}>
+          ➕ Nuevo consorcio
+        </button>
       </div>
 
       <BarraListado
