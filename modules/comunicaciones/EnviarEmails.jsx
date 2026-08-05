@@ -21,6 +21,7 @@ export default function EnviarEmails() {
   const [emailLog, setEmailLog]   = useState([])
   const [adjunto, setAdjunto]     = useState(null) // { nombre, tipo, base64 }
   const [mensajeExtra, setMensajeExtra] = useState('')
+  const [iaLoading, setIaLoading] = useState(null)
 
   async function cargarExpensas() {
     const { data } = await supabase.from('con_expensas').select('*')
@@ -35,6 +36,26 @@ export default function EnviarEmails() {
       .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
       .order('created_at', { ascending: false }).limit(30)
     setEmailLog(data || [])
+  }
+
+  async function asistirIA(accion) {
+    if (!mensajeExtra?.trim()) return setMsg({ tipo:'warn', texto:'Escribí algo en el mensaje primero.' })
+    setIaLoading(accion); setMsg(null)
+    try {
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const res = await fetch(`${SUPA_URL}/functions/v1/asistente-redaccion`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' },
+        body: JSON.stringify({ texto: mensajeExtra, accion })
+      })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error || 'No se pudo procesar')
+      setMensajeExtra(data.texto)
+      setMsg({ tipo:'ok', texto: (accion==='desarrollar' ? '✓ Texto desarrollado por IA' : '✓ Texto corregido por IA') + ' — revisalo antes de enviar' })
+    } catch(e) {
+      setMsg({ tipo:'error', texto:'Error IA: ' + e.message })
+    }
+    setIaLoading(null)
   }
 
   async function enviar(esTest) {
@@ -122,7 +143,7 @@ export default function EnviarEmails() {
           </div>
         </div>
 
-        {/* Mensaje personalizado */}
+        {/* Mensaje personalizado + IA */}
         <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'14px 16px', marginBottom:16 }}>
           <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:8 }}>✍️ Mensaje en el cuerpo del email (opcional)</div>
           <div style={{ fontSize:12, color:GR, marginBottom:8 }}>
@@ -132,7 +153,15 @@ export default function EnviarEmails() {
             placeholder="Ej: Estimados propietarios, nos presentamos como la nueva administración del consorcio..."
             rows={5}
             style={{ width:'100%', padding:'9px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box', resize:'vertical', fontFamily:'inherit' }} />
-          <div style={{ fontSize:11, color:GR, marginTop:4 }}>{mensajeExtra.length} caracteres · los saltos de línea se respetan</div>
+          <div style={{ display:'flex', gap:8, marginTop:8, alignItems:'center', flexWrap:'wrap' }}>
+            <Btn small color={AZ} onClick={() => asistirIA('corregir')} disabled={!!iaLoading}>
+              {iaLoading==='corregir' ? '⏳ Corrigiendo...' : '✨ Corregir'}
+            </Btn>
+            <Btn small color="#6d28d9" onClick={() => asistirIA('desarrollar')} disabled={!!iaLoading}>
+              {iaLoading==='desarrollar' ? '⏳ Desarrollando...' : '📝 Desarrollar con IA'}
+            </Btn>
+            <span style={{ fontSize:11, color:GR }}>{mensajeExtra.length} caracteres · la IA reescribe el texto; revisalo antes de enviar</span>
+          </div>
         </div>
 
         {/* Adjunto opcional */}
