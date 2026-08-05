@@ -32,7 +32,7 @@ const saldoDet = d => Math.max(0,
 const AZ = '#1A3FA0', VD = '#1B6B35', RJ = '#B91C1C', AM = '#C07D10', GR = '#6B7280'
 
 
-function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail }) {
+function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail, adminId }) {
   const [asunto, setAsunto]   = useState('')
   const [detalle, setDetalle] = useState('')
   const [tipo, setTipo]       = useState('reclamo')
@@ -53,10 +53,12 @@ function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail }) {
     setEnviando(true)
     try {
       const { error } = await supabase.from('con_reclamos').insert([{
+        id: 'REC-' + Date.now(),
+        admin_id: adminId,
         consorcio_id: consorcioId,
         copropietario_id: copropietarioId,
         unidad_id: unidadId,
-        tipo, asunto, descripcion: detalle,
+        categoria: tipo, titulo: asunto, descripcion: detalle,
         estado: 'abierto',
         created_at: new Date().toISOString(),
       }])
@@ -346,8 +348,8 @@ export default function Portal() {
         consorcio_id: unidad?.consorcio_id,
         unidad_id: unidad?.id,
         copropietario_id: coprop?.id,
-        tipo: 'pago_informado',
-        asunto: `Aviso de pago — ${coprop?.apellido_nombre}`,
+        categoria: 'pago_informado',
+        titulo: `Aviso de pago — ${coprop?.apellido_nombre}`,
         descripcion: `PAGO INFORMADO POR PROPIETARIO:\nMonto: $${formPago.monto}\nFecha: ${formPago.fecha}\nMedio: ${formPago.medio||'No especificado'}\nComprobante: ${formPago.comprobante||'Sin comprobante adjunto'}\nObservaciones: ${formPago.obs||'—'}`,
         estado: 'abierto',
         prioridad: 'normal',
@@ -1119,6 +1121,7 @@ export default function Portal() {
                 copropietarioId={coprop?.id}
                 consorcioId={unidad?.consorcio_id}
                 adminEmail={adminPerfil?.email}
+                adminId={unidad?.admin_id}
               />
             </div>
           </div>
