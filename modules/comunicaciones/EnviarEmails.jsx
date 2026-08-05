@@ -20,6 +20,7 @@ export default function EnviarEmails() {
   const [msg, setMsg]             = useState(null)
   const [emailLog, setEmailLog]   = useState([])
   const [adjunto, setAdjunto]     = useState(null) // { nombre, tipo, base64 }
+  const [mensajeExtra, setMensajeExtra] = useState('')
 
   async function cargarExpensas() {
     const { data } = await supabase.from('con_expensas').select('*')
@@ -56,6 +57,7 @@ export default function EnviarEmails() {
           admin_id: session.user.id,
           test_email: esTest ? testEmail : undefined,
           adjunto: adjunto ? { nombre: adjunto.nombre, tipo: adjunto.tipo, base64: adjunto.base64 } : undefined,
+          mensaje_extra: mensajeExtra?.trim() ? mensajeExtra : undefined,
         })
       })
       const data = await res.json()
@@ -118,6 +120,19 @@ export default function EnviarEmails() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Mensaje personalizado */}
+        <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'14px 16px', marginBottom:16 }}>
+          <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:8 }}>✍️ Mensaje en el cuerpo del email (opcional)</div>
+          <div style={{ fontSize:12, color:GR, marginBottom:8 }}>
+            Texto libre que aparece al inicio del email, antes de la liquidación (presentación, aviso, información adicional). Se incluye en el mail de todos los destinatarios.
+          </div>
+          <textarea value={mensajeExtra} onChange={e => setMensajeExtra(e.target.value)}
+            placeholder="Ej: Estimados propietarios, nos presentamos como la nueva administración del consorcio..."
+            rows={5}
+            style={{ width:'100%', padding:'9px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box', resize:'vertical', fontFamily:'inherit' }} />
+          <div style={{ fontSize:11, color:GR, marginTop:4 }}>{mensajeExtra.length} caracteres · los saltos de línea se respetan</div>
         </div>
 
         {/* Adjunto opcional */}
