@@ -42,7 +42,8 @@ function emptyForm(c) {
 }
 
 export default function FichaConsorcio() {
-  const { consorcioActivo, setConsorcioActivo, setConsorcios } = useApp()
+  const { consorcioActivo, setConsorcioActivo, setConsorcios, consorcios, session, pagina, setPagina } = useApp()
+  const esNuevo = pagina === 'nuevo_consorcio'
   const [form, setForm]         = useState(null)
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg]           = useState(null)
@@ -50,12 +51,36 @@ export default function FichaConsorcio() {
   const [msgReg, setMsgReg]     = useState(null)
 
   useEffect(() => {
-    if (consorcioActivo) setForm(emptyForm(consorcioActivo))
-  }, [consorcioActivo?.id])
+    if (esNuevo) setForm(emptyForm(null))
+    else if (consorcioActivo) setForm(emptyForm(consorcioActivo))
+  }, [consorcioActivo?.id, esNuevo])
 
   function upd(k, v) { setForm(f => ({ ...f, [k]: v })); setMsg(null) }
 
+  async function crearNuevo() {
+    if (!form.nombre?.trim()) { setMsg({ tipo:'err', txt:'⚠️ El nombre del consorcio es obligatorio.' }); return }
+    setGuardando(true); setMsg(null)
+    try {
+      const maxNum = Math.max(0, ...(consorcios||[]).map(c => parseInt(String(c.id||'').replace(/^CON/i,''), 10) || 0))
+      const nuevoId = 'CON' + (maxNum + 1)
+      const adminId = (consorcios||[])[0]?.admin_id || session?.user?.id
+      if (!adminId) throw new Error('No se pudo determinar el administrador.')
+      const payload = { id: nuevoId, admin_id: adminId }
+      CAMPOS.forEach(k => { const v = form[k]; payload[k] = (v === '' || v === null || v === undefined) ? null : v })
+      const { error } = await supabase.from('con_consorcios').insert(payload)
+      if (error) throw error
+      const creado = { ...payload }
+      setConsorcios(prev => [...(prev||[]), creado])
+      setConsorcioActivo(creado)
+      setMsg({ tipo:'ok', txt:`✅ Consorcio creado con ID ${nuevoId}. Completá el resto de los datos y guardá.` })
+      setPagina('ficha_consorcio')
+    } catch(e) {
+      setMsg({ tipo:'err', txt:'❌ Error al crear el consorcio: ' + e.message })
+    } finally { setGuardando(false) }
+  }
+
   async function guardar() {
+    if (esNuevo) return crearNuevo()
     if (!consorcioActivo?.id) return
     setGuardando(true); setMsg(null)
     try {
@@ -113,7 +138,7 @@ export default function FichaConsorcio() {
     } finally { setAnalizandoReg(false) }
   }
 
-  if (!consorcioActivo) return <Card><p style={{ color: GR }}>Seleccione un consorcio primero.</p></Card>
+  if (!esNuevo && !consorcioActivo) return <Card><p style={{ color: GR }}>Seleccione un consorcio primero.</p></Card>
   if (!form) return <Card><p style={{ color: GR }}>Cargando...</p></Card>
 
   return (
@@ -121,9 +146,9 @@ export default function FichaConsorcio() {
 
       {/* Encabezado */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h2 style={{ margin: 0, fontSize: 18, color: AZ }}>📋 Ficha del Consorcio</h2>
+        <h2 style={{ margin: 0, fontSize: 18, color: AZ }}>{esNuevo ? '➕ Nuevo Consorcio' : '📋 Ficha del Consorcio'}</h2>
         <span style={{ fontSize: 11, color: GR, background: '#f0f4ff', padding: '3px 10px', borderRadius: 6 }}>
-          ID: {consorcioActivo.id}
+          ID: {esNuevo ? '(se asignará automáticamente)' : consorcioActivo.id}
         </span>
       </div>
 
@@ -327,7 +352,7 @@ export default function FichaConsorcio() {
           </div>
           <div>
             <label style={LBL}>ID carpeta Drive (interno)</label>
-            <input style={{ ...FLD, background: '#f7f9fc', color: '#888' }} value={consorcioActivo.drive_folder_id || '—'} readOnly />
+            <input style={{ ...FLD, background: '#f7f9fc', color: '#888' }} value={(esNuevo ? '' : consorcioActivo?.drive_folder_id) || '—'} readOnly />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={LBL}>Notas internas (formato, observaciones)</label>
@@ -341,7 +366,7 @@ export default function FichaConsorcio() {
             onClick={guardar}
             disabled={guardando}
             style={{ background: VD, color: '#fff', padding: '10px 28px', fontSize: 13, fontWeight: 700, borderRadius: 8 }}>
-            {guardando ? 'Guardando...' : '💾 Guardar cambios'}
+            {guardando ? (esNuevo ? 'Creando...' : 'Guardando...') : (esNuevo ? '➕ Crear consorcio' : '💾 Guardar cambios')}
           </Btn>
         </div>
 
