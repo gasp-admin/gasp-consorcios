@@ -12,8 +12,7 @@ import { generarPDFLiquidacion } from '../lib/exportPdf'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-  { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 )
 
 const fmt  = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })
@@ -120,15 +119,7 @@ function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail, adminId }
 
 export default function Portal() {
   const router = useRouter()
-  const [token, setToken] = useState(null)
-  useEffect(() => {
-    let t = router.query?.token
-    if (Array.isArray(t)) t = t[0]
-    if (!t && typeof window !== 'undefined') {
-      try { t = new URLSearchParams(window.location.search).get('token') } catch (e) {}
-    }
-    if (t) setToken(String(t).trim())
-  }, [router.query?.token, router.isReady])
+  const { token } = router.query
 
   const [loading, setLoading]         = useState(true)
   const [error, setError]             = useState(null)
