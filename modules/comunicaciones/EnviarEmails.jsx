@@ -22,6 +22,8 @@ export default function EnviarEmails() {
   const [adjunto, setAdjunto]     = useState(null) // { nombre, tipo, base64 }
   const [mensajeExtra, setMensajeExtra] = useState('')
   const [iaLoading, setIaLoading] = useState(null)
+  const [avisarWa, setAvisarWa]   = useState(false)
+  const [telWaPrueba, setTelWaPrueba] = useState('')
 
   async function cargarExpensas() {
     const { data } = await supabase.from('con_expensas').select('*')
@@ -84,9 +86,29 @@ export default function EnviarEmails() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Error en el servidor')
       setResultado(data)
-      setMsg({ tipo:'ok', texto: esTest
+
+      let msgWa = ''
+      if (avisarWa) {
+        if (esTest && !telWaPrueba.trim()) {
+          msgWa = ' · 📱 WhatsApp: ingresá un teléfono de prueba para el aviso'
+        } else {
+          try {
+            const resWa = await fetch(`${SUPA_URL}/functions/v1/enviar-aviso-wa`, {
+              method: 'POST',
+              headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' },
+              body: JSON.stringify({ expensa_id: expSel, admin_id: session.user.id, test_telefono: esTest ? telWaPrueba.trim() : undefined })
+            })
+            const dataWa = await resWa.json()
+            msgWa = dataWa.ok
+              ? ` · 📱 WhatsApp: ${dataWa.enviados} enviados${dataWa.sinTel?`, ${dataWa.sinTel} sin tel`:''}${dataWa.errores?`, ${dataWa.errores} err`:''}`
+              : ` · ⚠️ WhatsApp: ${dataWa.error}`
+          } catch(ew) { msgWa = ` · ⚠️ WhatsApp falló: ${ew.message}` }
+        }
+      }
+
+      setMsg({ tipo:'ok', texto: (esTest
         ? `✓ Email de prueba enviado a ${testEmail}`
-        : `✓ Enviados: ${data.enviados} | Sin email: ${data.sinEmail} | Errores: ${data.errores}` })
+        : `✓ Enviados: ${data.enviados} | Sin email: ${data.sinEmail} | Errores: ${data.errores}`) + msgWa })
       cargarLog()
     } catch(e) {
       setMsg({ tipo:'error', texto: 'Error: ' + e.message })
@@ -210,6 +232,22 @@ export default function EnviarEmails() {
           <div style={{ fontSize:11, color:'#92400e', marginTop:6 }}>
             El email de prueba llega a la dirección ingresada con los datos de la primera UF.
           </div>
+        </div>
+
+        {/* Aviso WhatsApp */}
+        <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8, padding:'14px 16px', marginBottom:16 }}>
+          <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontWeight:600, fontSize:13, color:'#166534' }}>
+            <input type="checkbox" checked={avisarWa} onChange={e => setAvisarWa(e.target.checked)} />
+            📱 Avisar también por WhatsApp
+          </label>
+          <div style={{ fontSize:11, color:'#166534', marginTop:6 }}>
+            Envía el template aprobado "aviso_liquidacion" a cada UF con teléfono en WhatsApp (nombre, período, total, vencimiento y link al portal). Las UF sin teléfono se saltean.
+          </div>
+          {avisarWa && (
+            <input value={telWaPrueba} onChange={e => setTelWaPrueba(e.target.value)}
+              placeholder="Teléfono de prueba (ej. 5492254614043) — solo para Enviar prueba"
+              style={{ width:'100%', marginTop:8, padding:'8px 11px', border:'1px solid #86efac', borderRadius:7, fontSize:12.5, boxSizing:'border-box' }} />
+          )}
         </div>
 
         {/* Envío masivo */}
