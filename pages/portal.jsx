@@ -162,30 +162,13 @@ export default function Portal() {
   async function cargar(tk) {
     setLoading(true)
     try {
-      const { data: uf, error: e1 } = await supabase
-        .from('con_unidades').select('*').eq('portal_token', tk).single()
-      if (e1 || !uf) { setError('Link no válido o expirado.'); setLoading(false); return }
+      // Carga vía endpoint del propio dominio (/api/portal). El WebView in-app de Android
+      // bloquea supabase.co; el servidor de Vercel hace las consultas y devuelve los datos.
+      const resp = await fetch('/api/portal?accion=init&token=' + encodeURIComponent(tk))
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.error || !data.uf) { setError('Link no válido o expirado. [DBG http=' + resp.status + (data && data.error ? ' err=' + data.error : '') + (data && data.detalle ? ' det=' + data.detalle : '') + ']'); setLoading(false); return }
+      const { uf, cp, con, adm, cuentas, dets, cobs } = data
       setUnidad(uf)
-
-      const [
-        { data: cp }, { data: con }, { data: adm },
-        { data: cuentas }, { data: dets }, { data: cobs }
-      ] = await Promise.all([
-        supabase.from('con_copropietarios').select('*').eq('id', uf.propietario_id).single(),
-        supabase.from('con_consorcios').select('*').eq('id', uf.consorcio_id).single(),
-        supabase.from('con_admin_perfil').select('*').eq('admin_id', uf.admin_id).single(),
-        supabase.from('con_cuentas_banco').select('*')
-          .eq('consorcio_id', uf.consorcio_id).eq('activa', true).limit(1),
-        supabase.from('con_expensas_detalle').select(`
-          id, expensa_id, monto, saldo_anterior, pagos_periodo, interes_mora, estado,
-          con_expensas:expensa_id (id, periodo, fecha_vencimiento, estado, tipo, total_expensa, total_gastos)
-        `).eq('unidad_id', uf.id).order('created_at', { ascending: false }).limit(24),
-        supabase.from('con_cobranzas').select(`
-          id, monto, fecha, medio_pago, recibo_numero, observaciones,
-          con_expensas:expensa_id (periodo)
-        `).eq('unidad_id', uf.id).in('estado',['vigente','acreditado','cobrado']).order('fecha', { ascending: false }).limit(30),
-      ])
-
       setCoprop(cp); setConsorcio(con); setAdminPerfil(adm)
       setCuentaBanco(cuentas?.[0] || null)
       setDetalles((dets||[]).filter(d =>
@@ -313,10 +296,9 @@ export default function Portal() {
   async function cargarCtaCte(ufId) {
     setLoadingCta(true); setErrorCta(null)
     try {
-      const { data, error } = await supabase.functions.invoke('get-cuenta-corriente', {
-        body: { unidad_id: ufId },
-      })
-      if (error) throw error
+      const resp = await fetch('/api/portal?accion=cta&token=' + encodeURIComponent(token))
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) throw new Error('http ' + resp.status)
       if (data?.error) throw new Error(data.error)
       const lineas = (data?.lineas || []).map(l => ({
         fecha:    l.fecha,
