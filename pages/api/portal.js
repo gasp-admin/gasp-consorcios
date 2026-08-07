@@ -1,42 +1,44 @@
 // pages/api/portal.js
 // Endpoint server-side del portal del propietario.
-// El WebView in-app de Android bloquea las requests a supabase.co (y/o localStorage),
-// por lo que el portal no puede consultar Supabase desde el navegador. Este endpoint
-// corre en el servidor de Vercel (mismo dominio que el portal) y hace las consultas ahí;
-// el portal solo hace fetch a `/api/portal` (mismo dominio), que el WebView no bloquea.
+// El WebView in-app de Android bloquea las requests a supabase.co, por lo que el portal
+// no puede consultar Supabase desde el navegador. Este endpoint corre en el servidor de
+// Vercel (mismo dominio que el portal) y hace las consultas ahí; el portal solo hace
+// fetch a `/api/portal` (mismo dominio), que el WebView no bloquea.
 //
-// Seguridad: toda acción exige el portal_token (la credencial del propietario). Sin token
-// válido no se devuelve nada. Las consultas se limitan a la unidad/consorcio de ese token.
+// Usa la SERVICE ROLE key (server-side, nunca expuesta al cliente): pasa por encima de RLS
+// y evita la función get_admin_id_efectivo, que el rol anon no puede ejecutar.
 //
+// Seguridad: toda acción exige el portal_token (credencial del propietario). Las consultas
+// se limitan a la unidad/consorcio de ese token; las escrituras se atan a esa unidad.
 // NO toca el cliente Supabase del portal (pages/portal.jsx) — eso rompía el build de Vercel.
 
 import { createClient } from '@supabase/supabase-js'
 
-const SUPA_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL
-const ANON_KEY  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-// Si la service key está configurada en Vercel, se usa (evita RLS); si no, cae a anon
-// (el portal ya lee estas tablas con anon, así que RLS lo permite igual).
-const SRV_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY || ANON_KEY
+const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const SRV_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY || ANON_KEY
 
 const db = createClient(SUPA_URL, SRV_KEY, { auth: { persistSession: false } })
 
 async function resolverUnidad(token) {
   const tk = Array.isArray(token) ? token[0] : String(token || '').trim()
-  if (!tk) return { uf: null, detalle: 'sin_token' }
-  const { data, error } = await db.from('con_unidades').select('*').eq('portal_token', tk).single()
-  if (error) return { uf: null, detalle: 'q:' + (error.message || error.code || 'err') }
-  return { uf: data || null, detalle: data ? null : 'no_encontrada' }
+  if (!tk) return null
+  const { data } = await db.from('con_unidades').select('*').eq('portal_token', tk).single()
+  return data || null
 }
 
 export default async function handler(req, res) {
   try {
-    if (!SUPA_URL || !SRV_KEY) return res.status(500).json({ error: 'sin_env', detalle: 'URL=' + (!!SUPA_URL) + ' KEY=' + (!!SRV_KEY) })
-    const accion = (req.query?.accion) || 'init'
-    const token  = req.query?.token
+    if (!SUPA_URL || !SRV_KEY) return res.status(500).json({ error: 'config' })
 
-    const { uf, detalle } = await resolverUnidad(token)
-    if (!uf) return res.status(404).json({ error: 'link_invalido', detalle })
+    const isPost = req.method === 'POST'
+    const accion = (isPost ? req.body?.accion : req.query?.accion) || 'init'
+    const token  = isPost ? req.body?.token : req.query?.token
 
+    const uf = await resolverUnidad(token)
+    if (!uf) return res.status(404).json({ error: 'link_invalido' })
+
+    // ── init: carga inicial del portal ──
     if (accion === 'init') {
       const [
         { data: cp }, { data: con }, { data: adm },
@@ -58,8 +60,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ uf, cp, con, adm, cuentas, dets, cobs })
     }
 
+    // ── cta: cuenta corriente (llama a la EF desde el servidor) ──
     if (accion === 'cta') {
-      // Llama a la Edge Function get-cuenta-corriente DESDE EL SERVIDOR (el WebView no llega a supabase.co)
       const r = await fetch(`${SUPA_URL}/functions/v1/get-cuenta-corriente`, {
         method: 'POST',
         headers: {
@@ -71,6 +73,44 @@ export default async function handler(req, res) {
       })
       const data = await r.json().catch(() => ({}))
       return res.status(200).json(data)
+    }
+
+    // ── liq: detalle de un período (para el PDF de liquidación) ──
+    if (accion === 'liq') {
+      const expId = req.query?.exp
+      if (!expId) return res.status(400).json({ error: 'sin_exp' })
+      const { data: exp } = await db.from('con_expensas').select('*').eq('id', expId).single()
+      if (!exp || exp.consorcio_id !== uf.consorcio_id) return res.status(403).json({ error: 'exp_ajena' })
+      const [
+        { data: gastos }, { data: dets }, { data: ufs }, { data: cps }, { data: lufs },
+      ] = await Promise.all([
+        db.from('con_gastos').select('categoria, concepto, monto, proveedor_nombre, comprobante').eq('expensa_id', expId).order('categoria'),
+        db.from('con_expensas_detalle').select('*').eq('expensa_id', expId),
+        db.from('con_unidades').select('*').eq('consorcio_id', uf.consorcio_id),
+        db.from('con_copropietarios').select('*').eq('consorcio_id', uf.consorcio_id),
+        db.from('con_liquidacion_uf').select('unidad_id, total_uf, saldo_anterior, pagos, deuda, interes, expensa_calculada, ajustes').eq('consorcio_id', uf.consorcio_id).eq('periodo', exp.periodo),
+      ])
+      return res.status(200).json({ gastos, dets, ufs, cps, exp, lufs })
+    }
+
+    // ── reclamo: crear reclamo / informar pago (POST) ──
+    if (accion === 'reclamo' && isPost) {
+      const b = req.body || {}
+      const row = {
+        id: (b.prefijo || 'REC') + '-' + Date.now(),
+        admin_id: uf.admin_id,
+        consorcio_id: uf.consorcio_id,
+        unidad_id: uf.id,
+        copropietario_id: uf.propietario_id,
+        categoria: b.categoria || 'otro',
+        titulo: String(b.titulo || '').slice(0, 200),
+        descripcion: String(b.descripcion || '').slice(0, 4000),
+        estado: 'abierto',
+        prioridad: b.prioridad || 'normal',
+      }
+      const { error } = await db.from('con_reclamos').insert([row])
+      if (error) return res.status(500).json({ error: 'insert', detalle: error.message })
+      return res.status(200).json({ ok: true })
     }
 
     return res.status(400).json({ error: 'accion_desconocida' })
