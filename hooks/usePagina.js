@@ -16,6 +16,7 @@ export const NAV_ITEMS = [
   { id: 'cert_libre_deuda',         label: 'Certificado Libre Deuda', icon: '📜', sec: 'Consorcio' },
   { id: 'rendicion_cuentas',        label: 'Rendición de cuentas',    icon: '📊', sec: 'Expensas' },
   { id: 'liquidacion',              label: 'Liquidar período',        icon: '📝', sec: 'Expensas' },
+  { id: 'simulador_prorrateo',      label: 'Simular prorrateo',       icon: '🧮', sec: 'Expensas' },
   { id: 'expensas',                 label: 'Períodos',                icon: '📅', sec: 'Expensas' },
   { id: 'periodos',                 label: 'Control períodos',        icon: '🔒', sec: 'Expensas' },
   { id: 'historial_liquidaciones',  label: 'Historial Liquidaciones', icon: '📂', sec: 'Expensas' },
