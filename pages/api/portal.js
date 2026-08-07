@@ -22,18 +22,20 @@ const db = createClient(SUPA_URL, SRV_KEY, { auth: { persistSession: false } })
 
 async function resolverUnidad(token) {
   const tk = Array.isArray(token) ? token[0] : String(token || '').trim()
-  if (!tk) return null
-  const { data } = await db.from('con_unidades').select('*').eq('portal_token', tk).single()
-  return data || null
+  if (!tk) return { uf: null, detalle: 'sin_token' }
+  const { data, error } = await db.from('con_unidades').select('*').eq('portal_token', tk).single()
+  if (error) return { uf: null, detalle: 'q:' + (error.message || error.code || 'err') }
+  return { uf: data || null, detalle: data ? null : 'no_encontrada' }
 }
 
 export default async function handler(req, res) {
   try {
+    if (!SUPA_URL || !SRV_KEY) return res.status(500).json({ error: 'sin_env', detalle: 'URL=' + (!!SUPA_URL) + ' KEY=' + (!!SRV_KEY) })
     const accion = (req.query?.accion) || 'init'
     const token  = req.query?.token
 
-    const uf = await resolverUnidad(token)
-    if (!uf) return res.status(404).json({ error: 'link_invalido' })
+    const { uf, detalle } = await resolverUnidad(token)
+    if (!uf) return res.status(404).json({ error: 'link_invalido', detalle })
 
     if (accion === 'init') {
       const [
