@@ -12,7 +12,16 @@ import { generarPDFLiquidacion } from '../lib/exportPdf'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      // Storage en memoria: el portal es publico (anon key), no necesita sesion.
+      // Evita que Supabase toque localStorage, que el WebView in-app de Android bloquea.
+      storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    },
+  }
 )
 
 const fmt  = n => '$' + (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })
