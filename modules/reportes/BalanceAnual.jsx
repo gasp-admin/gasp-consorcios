@@ -8,6 +8,23 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
+// ── Categorías estándar del balance (normalización de rubros/categorías) ──
+const BA_CATS_ORDER = ['Personal','Mantenimiento','Servicios','Seguros','Impuestos','Administración','Otros']
+const BA_CATS_LABEL = {
+  Personal:'Personal', Mantenimiento:'Mantenimiento', Servicios:'Servicios',
+  Seguros:'Seguros', Impuestos:'Impuestos', 'Administración':'Administración', Otros:'Otros',
+}
+const baNormCat = (txt) => {
+  const t = (txt || '').toString().toUpperCase()
+  if (/SUELDO|REMUNERAC|PERSONAL|CARGAS SOC|JORNAL|AGUINALDO/.test(t)) return 'Personal'
+  if (/MANTENIM|REPARAC|OBRA|ASCENSOR/.test(t))                       return 'Mantenimiento'
+  if (/SERVICIO|CONTRATO|ABONO|\bLUZ\b|\bGAS\b|\bAGUA\b|ENERG/.test(t)) return 'Servicios'
+  if (/SEGURO|POLIZA|PÓLIZA/.test(t))                                 return 'Seguros'
+  if (/IMPUESTO|TASA|MUNICIPAL|PROVINCIAL|RENTAS|ARBA/.test(t))        return 'Impuestos'
+  if (/ADMINIST|HONORARI|BANCARI|TRAMITE|COMISI/.test(t))             return 'Administración'
+  return 'Otros'
+}
+
 export default function BalanceAnual() {
   const { session, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo } = useApp()
   const uid = session?.user?.id
