@@ -32,7 +32,7 @@ const saldoDet = d => Math.max(0,
 const AZ = '#1A3FA0', VD = '#1B6B35', RJ = '#B91C1C', AM = '#C07D10', GR = '#6B7280'
 
 
-function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail, adminId }) {
+function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail, adminId, token }) {
   const [asunto, setAsunto]   = useState('')
   const [detalle, setDetalle] = useState('')
   const [tipo, setTipo]       = useState('reclamo')
@@ -52,17 +52,13 @@ function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail, adminId }
     if (!asunto.trim() || !detalle.trim()) return setMsg('Completá el asunto y el detalle')
     setEnviando(true)
     try {
-      const { error } = await supabase.from('con_reclamos').insert([{
-        id: 'REC-' + Date.now(),
-        admin_id: adminId,
-        consorcio_id: consorcioId,
-        copropietario_id: copropietarioId,
-        unidad_id: unidadId,
-        categoria: tipo, titulo: asunto, descripcion: detalle,
-        estado: 'abierto',
-        created_at: new Date().toISOString(),
-      }])
-      if (error) throw error
+      const resp = await fetch('/api/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'reclamo', token, prefijo: 'REC', categoria: tipo, titulo: asunto, descripcion: detalle }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.error) throw new Error(data.error || 'error')
       setEnviado(true)
       setAsunto(''); setDetalle(''); setMsg(null)
     } catch (e) {
@@ -166,7 +162,7 @@ export default function Portal() {
       // bloquea supabase.co; el servidor de Vercel hace las consultas y devuelve los datos.
       const resp = await fetch('/api/portal?accion=init&token=' + encodeURIComponent(tk))
       const data = await resp.json().catch(() => ({}))
-      if (!resp.ok || data.error || !data.uf) { setError('Link no válido o expirado. [DBG http=' + resp.status + (data && data.error ? ' err=' + data.error : '') + (data && data.detalle ? ' det=' + data.detalle : '') + ']'); setLoading(false); return }
+      if (!resp.ok || data.error || !data.uf) { setError('Link no válido o expirado.'); setLoading(false); return }
       const { uf, cp, con, adm, cuentas, dets, cobs } = data
       setUnidad(uf)
       setCoprop(cp); setConsorcio(con); setAdminPerfil(adm)
@@ -181,6 +177,7 @@ export default function Portal() {
 
   const [todosDetalles, setTodosDetalles]   = useState([])
   const [todasUnidades, setTodasUnidades]   = useState([])
+  const [lufsHist, setLufsHist]             = useState([])
   const [todosCoprop, setTodosCoprop]       = useState([])
   const [generandoPDF, setGenerandoPDF]     = useState(false)
   const [expensaActual, setExpensaActual]   = useState(null)
@@ -191,23 +188,14 @@ export default function Portal() {
     const det = detalles.find(d => d.con_expensas?.periodo === per)
     const expId = det?.expensa_id
     if (!expId) { setLoadingGastos(false); return }
-    const [
-      { data: gastos }, { data: todsDets }, { data: todsUfs },
-      { data: todsCps }, { data: expData }
-    ] = await Promise.all([
-      supabase.from('con_gastos')
-        .select('categoria, concepto, monto, proveedor_nombre, comprobante')
-        .eq('expensa_id', expId).order('categoria'),
-      supabase.from('con_expensas_detalle').select('*').eq('expensa_id', expId),
-      supabase.from('con_unidades').select('*').eq('consorcio_id', unidad.consorcio_id),
-      supabase.from('con_copropietarios').select('*').eq('consorcio_id', unidad.consorcio_id),
-      supabase.from('con_expensas').select('*').eq('id', expId).single(),
-    ])
-    setGastosPeriodo(gastos||[])
-    setTodosDetalles(todsDets||[])
-    setTodasUnidades(todsUfs||[])
-    setTodosCoprop(todsCps||[])
-    setExpensaActual(expData||null)
+    const resp = await fetch('/api/portal?accion=liq&token=' + encodeURIComponent(token) + '&exp=' + encodeURIComponent(expId))
+    const data = await resp.json().catch(() => ({}))
+    setGastosPeriodo(data.gastos || [])
+    setTodosDetalles(data.dets || [])
+    setTodasUnidades(data.ufs || [])
+    setTodosCoprop(data.cps || [])
+    setExpensaActual(data.exp || null)
+    setLufsHist(data.lufs || [])
     setLoadingGastos(false)
     setTimeout(() => {
       const el = document.getElementById('planilla-liq')
@@ -219,16 +207,6 @@ export default function Portal() {
     if (!expensaActual || !consorcio) return
     setGenerandoPDF(true)
     try {
-      // Para consorcios históricos, cargar todos los lufs del período para el PDF
-      let lufsHist = []
-      if (consorcio.modelo_cc === 'historico' && expensaActual?.periodo) {
-        const { data: lufsData } = await supabase
-          .from('con_liquidacion_uf')
-          .select('unidad_id, total_uf, saldo_anterior, pagos, deuda, interes, expensa_calculada, ajustes')
-          .eq('consorcio_id', consorcio.id)
-          .eq('periodo', expensaActual.periodo)
-        lufsHist = lufsData || []
-      }
       generarPDFLiquidacion({
         consorcioActivo: consorcio,
         expensa: expensaActual,
@@ -324,19 +302,15 @@ export default function Portal() {
     setEnviandoPago(true)
     try {
       // Insertar aviso en con_reclamos (con tipo especial de pago)
-      const { error } = await supabase.from('con_reclamos').insert([{
-        id: 'PAY-' + Date.now(),
-        admin_id: unidad?.admin_id,
-        consorcio_id: unidad?.consorcio_id,
-        unidad_id: unidad?.id,
-        copropietario_id: coprop?.id,
-        categoria: 'pago_informado',
-        titulo: `Aviso de pago — ${coprop?.apellido_nombre}`,
-        descripcion: `PAGO INFORMADO POR PROPIETARIO:\nMonto: $${formPago.monto}\nFecha: ${formPago.fecha}\nMedio: ${formPago.medio||'No especificado'}\nComprobante: ${formPago.comprobante||'Sin comprobante adjunto'}\nObservaciones: ${formPago.obs||'—'}`,
-        estado: 'abierto',
-        prioridad: 'normal',
-      }])
-      if (error) throw error
+      const resp = await fetch('/api/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'reclamo', token, prefijo: 'PAY', categoria: 'pago_informado',
+          titulo: `Aviso de pago — ${coprop?.apellido_nombre}`,
+          descripcion: `PAGO INFORMADO POR PROPIETARIO:\nMonto: $${formPago.monto}\nFecha: ${formPago.fecha}\nMedio: ${formPago.medio||'No especificado'}\nComprobante: ${formPago.comprobante||'Sin comprobante adjunto'}\nObservaciones: ${formPago.obs||'—'}` }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.error) throw new Error(data.error || 'error')
       setMsgPago({ tipo:'ok', texto:'✓ Aviso enviado al administrador. Se verificará su pago a la brevedad.' })
       setFormPago(null)
     } catch(e) {
@@ -1104,6 +1078,7 @@ export default function Portal() {
                 consorcioId={unidad?.consorcio_id}
                 adminEmail={adminPerfil?.email}
                 adminId={unidad?.admin_id}
+                token={token}
               />
             </div>
           </div>
