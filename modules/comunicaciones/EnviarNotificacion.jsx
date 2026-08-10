@@ -60,12 +60,16 @@ export default function EnviarNotificacion() {
     setEnviando(true); setMsg(null); setResultado(null)
     try {
       const { data: { session: sess } } = await supabase.auth.getSession()
+      // En prueba se envía una sola muestra; en real: vacío = todas, o las UFs seleccionadas.
+      const ufsEnvio = esTest
+        ? (todos ? (ufsConEmail[0] ? [ufsConEmail[0].id] : []) : (selUFs[0] ? [selUFs[0]] : []))
+        : (todos ? [] : selUFs)
       const payload = {
         admin_id:      uid,
         consorcio_id:  consorcioId,
         asunto:        asunto.trim(),
         cuerpo:        cuerpo.trim(),
-        unidades_ids:  (todos || esTest) ? [] : selUFs,
+        unidades_ids:  ufsEnvio,
         test_email:    esTest ? testEmail : undefined,
         adjunto:       adjunto ? { nombre: adjunto.nombre, tipo: adjunto.tipo, base64: adjunto.base64 } : null,
         drive_link:    (inclDrive && driveFolderUrl) ? driveFolderUrl : null,
