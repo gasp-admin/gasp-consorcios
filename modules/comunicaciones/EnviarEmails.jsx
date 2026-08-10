@@ -72,6 +72,11 @@ export default function EnviarEmails() {
     }
 
     setEnviando(true); setResultado(null); setMsg(null)
+    // En prueba se envía una sola muestra (la UF seleccionada, o la primera con email/selección);
+    // en envío real: vacío = todas, o las UFs seleccionadas.
+    const ufsEnvio = esTest
+      ? (todos ? (ufsConEmail[0] ? [ufsConEmail[0].id] : []) : (selUFs[0] ? [selUFs[0]] : []))
+      : (todos ? [] : selUFs)
     try {
       const { data: { session: sess } } = await supabase.auth.getSession()
       const res = await fetch(`${SUPA_URL}/functions/v1/enviar-liquidacion`, {
@@ -87,7 +92,7 @@ export default function EnviarEmails() {
           test_email: esTest ? testEmail : undefined,
           adjunto: adjunto ? { nombre: adjunto.nombre, tipo: adjunto.tipo, base64: adjunto.base64 } : undefined,
           mensaje_extra: mensajeExtra?.trim() ? mensajeExtra : undefined,
-          unidades_ids: (todos || esTest) ? [] : selUFs,
+          unidades_ids: ufsEnvio,
         })
       })
       const data = await res.json()
@@ -103,7 +108,7 @@ export default function EnviarEmails() {
             const resWa = await fetch(`${SUPA_URL}/functions/v1/enviar-aviso-wa`, {
               method: 'POST',
               headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' },
-              body: JSON.stringify({ expensa_id: expSel, admin_id: session.user.id, test_telefono: esTest ? telWaPrueba.trim() : undefined, unidades_ids: (todos || esTest) ? [] : selUFs })
+              body: JSON.stringify({ expensa_id: expSel, admin_id: session.user.id, test_telefono: esTest ? telWaPrueba.trim() : undefined, unidades_ids: ufsEnvio })
             })
             const dataWa = await resWa.json()
             msgWa = dataWa.ok
