@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
-import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/config'
+import { SUPA_URL, SUPA_KEY, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/config'
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
@@ -26,6 +26,8 @@ export default function EnviarNotificacion() {
   const [enviando, setEnviando]   = useState(false)
   const [msg, setMsg]             = useState(null)
   const [resultado, setResultado] = useState(null)
+  const [avisarWa, setAvisarWa]   = useState(false)
+  const [telWaPrueba, setTelWaPrueba] = useState('')
 
   const driveFolderUrl = consorcioActivo?.drive_folder_url || null
   const ufsConEmail = unidades.filter(u => {
@@ -75,6 +77,26 @@ export default function EnviarNotificacion() {
         drive_link:    (inclDrive && driveFolderUrl) ? driveFolderUrl : null,
       }
       const res  = await enviarNotificacion(payload, sess?.access_token)
+
+      let msgWa = ''
+      if (avisarWa) {
+        if (esTest && !telWaPrueba.trim()) {
+          msgWa = ' · 📱 WhatsApp: ingresá un teléfono de prueba'
+        } else {
+          try {
+            const resWa = await fetch(`${SUPA_URL}/functions/v1/enviar-notificacion-wa`, {
+              method: 'POST',
+              headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': SUPA_KEY },
+              body: JSON.stringify({ admin_id: uid, consorcio_id: consorcioId, cuerpo: cuerpo.trim(), test_telefono: esTest ? telWaPrueba.trim() : undefined, unidades_ids: ufsEnvio }),
+            })
+            const dataWa = await resWa.json()
+            msgWa = dataWa.ok
+              ? ` · 📱 WhatsApp: ${dataWa.enviados} enviados${dataWa.sinTel?`, ${dataWa.sinTel} sin tel`:''}${dataWa.errores?`, ${dataWa.errores} err`:''}`
+              : ` · ⚠️ WhatsApp: ${dataWa.error}`
+          } catch(ew) { msgWa = ` · ⚠️ WhatsApp falló: ${ew.message}` }
+        }
+      }
+      setMsg({ tipo:'ok', texto: (esTest ? `✓ Notificación de prueba enviada a ${testEmail}` : '✓ Notificación enviada') + msgWa })
       setCuerpo(''); setAdjunto(null)
     } catch(e) {
       setMsg({ tipo:'error', texto: 'Error: ' + e.message })
@@ -219,6 +241,21 @@ export default function EnviarNotificacion() {
           <div>📬 Destinatarios: <strong>{totalSeleccionadas} unidades</strong>{todos?' (todas)':''}</div>
           {adjunto && <div>📎 Adjunto: <strong>{adjunto.nombre}</strong></div>}
           {inclDrive && driveFolderUrl && <div>📁 Se incluirá el link a Drive del consorcio</div>}
+        </div>
+
+        <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8, padding:'12px 14px', marginBottom:12 }}>
+          <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontWeight:600, fontSize:13, color:'#166534' }}>
+            <input type="checkbox" checked={avisarWa} onChange={e=>setAvisarWa(e.target.checked)} />
+            📱 Avisar también por WhatsApp
+          </label>
+          <div style={{ fontSize:11, color:'#166534', marginTop:6 }}>
+            Envía el cuerpo de la notificación por WhatsApp (template "aviso_general") a las UF con teléfono — respeta la selección de arriba. Las UF sin teléfono se saltean.
+          </div>
+          {avisarWa && (
+            <input value={telWaPrueba} onChange={e=>setTelWaPrueba(e.target.value)}
+              placeholder="Teléfono de prueba (ej. 5492254614043) — solo para Test"
+              style={{ width:'100%', marginTop:8, padding:'8px 11px', border:'1px solid #86efac', borderRadius:7, fontSize:12.5, boxSizing:'border-box' }} />
+          )}
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:10, marginBottom:10, alignItems:'end' }}>
