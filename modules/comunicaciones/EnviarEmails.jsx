@@ -24,6 +24,8 @@ export default function EnviarEmails() {
   const [iaLoading, setIaLoading] = useState(null)
   const [avisarWa, setAvisarWa]   = useState(false)
   const [telWaPrueba, setTelWaPrueba] = useState('')
+  const [selUFs, setSelUFs]       = useState([])
+  const [todos, setTodos]         = useState(true)
 
   async function cargarExpensas() {
     const { data } = await supabase.from('con_expensas').select('*')
@@ -63,7 +65,11 @@ export default function EnviarEmails() {
   async function enviar(esTest) {
     if (!expSel) return setMsg({ tipo:'warn', texto:'Seleccioná un período primero' })
     if (esTest && !testEmail) return setMsg({ tipo:'warn', texto:'Ingresá el email de prueba' })
-    if (!esTest && !confirm('¿Enviar la liquidación a TODOS los copropietarios con email registrado?')) return
+    if (!esTest) {
+      const target = todos ? ufsConEmail.length : selUFs.length
+      if (target === 0) return setMsg({ tipo:'warn', texto: todos ? 'No hay UFs con email registrado' : 'No seleccionaste ninguna UF' })
+      if (!confirm(`¿Enviar la liquidación a ${target} ${todos ? 'UFs con email (todas)' : 'UF(s) seleccionada(s)'}?`)) return
+    }
 
     setEnviando(true); setResultado(null); setMsg(null)
     try {
@@ -81,6 +87,7 @@ export default function EnviarEmails() {
           test_email: esTest ? testEmail : undefined,
           adjunto: adjunto ? { nombre: adjunto.nombre, tipo: adjunto.tipo, base64: adjunto.base64 } : undefined,
           mensaje_extra: mensajeExtra?.trim() ? mensajeExtra : undefined,
+          unidades_ids: (todos || esTest) ? [] : selUFs,
         })
       })
       const data = await res.json()
@@ -96,7 +103,7 @@ export default function EnviarEmails() {
             const resWa = await fetch(`${SUPA_URL}/functions/v1/enviar-aviso-wa`, {
               method: 'POST',
               headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' },
-              body: JSON.stringify({ expensa_id: expSel, admin_id: session.user.id, test_telefono: esTest ? telWaPrueba.trim() : undefined })
+              body: JSON.stringify({ expensa_id: expSel, admin_id: session.user.id, test_telefono: esTest ? telWaPrueba.trim() : undefined, unidades_ids: (todos || esTest) ? [] : selUFs })
             })
             const dataWa = await resWa.json()
             msgWa = dataWa.ok
@@ -119,10 +126,11 @@ export default function EnviarEmails() {
   useEffect(() => { if (consorcioId) { cargarExpensas(); cargarLog() } }, [consorcioId])
 
   const expActual = expensas.find(e => e.id === expSel)
-  const conEmail  = unidades.filter(u => {
-    // contar UFs con email — aproximado
-    return true
-  }).length
+  const ufsConEmail = unidades.filter(u => {
+    const cp = copropietarios.find(c => c.id === u.propietario_id)
+    return cp?.email || cp?.email_notificacion
+  })
+  const conEmail = ufsConEmail.length
 
   return (
     <div>
@@ -163,6 +171,48 @@ export default function EnviarEmails() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Destinatarios */}
+        <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'14px 16px', marginBottom:16 }}>
+          <div style={{ fontWeight:600, fontSize:13, color:AZ, marginBottom:10 }}>👥 Destinatarios</div>
+          <div style={{ display:'flex', gap:16, marginBottom:10, flexWrap:'wrap' }}>
+            <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, cursor:'pointer' }}>
+              <input type="radio" checked={todos} onChange={()=>{ setTodos(true); setSelUFs([]) }} />
+              <span>Todas las UFs con email ({ufsConEmail.length})</span>
+            </label>
+            <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, cursor:'pointer' }}>
+              <input type="radio" checked={!todos} onChange={()=>setTodos(false)} />
+              <span>Seleccionar UFs específicas</span>
+            </label>
+          </div>
+          {!todos && (
+            <div style={{ border:'1px solid #e5e7eb', borderRadius:8, maxHeight:220, overflowY:'auto', padding:8 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8, fontSize:12 }}>
+                <span style={{ color:GR }}>{selUFs.length} seleccionadas</span>
+                <div style={{ display:'flex', gap:8 }}>
+                  <button type="button" onClick={()=>setSelUFs(ufsConEmail.map(u=>u.id))}
+                    style={{ fontSize:11, color:AZ, background:'none', border:'none', cursor:'pointer', textDecoration:'underline' }}>Todas</button>
+                  <button type="button" onClick={()=>setSelUFs([])}
+                    style={{ fontSize:11, color:GR, background:'none', border:'none', cursor:'pointer', textDecoration:'underline' }}>Ninguna</button>
+                </div>
+              </div>
+              {ufsConEmail.map(u => {
+                const cp = copropietarios.find(c => c.id === u.propietario_id)
+                const checked = selUFs.includes(u.id)
+                return (
+                  <label key={u.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 6px', borderRadius:6, cursor:'pointer', background: checked ? '#f0f4ff' : 'transparent' }}>
+                    <input type="checkbox" checked={checked}
+                      onChange={e => setSelUFs(prev => e.target.checked ? [...prev, u.id] : prev.filter(x=>x!==u.id))} />
+                    <span style={{ fontSize:12, flex:1 }}>
+                      <strong>UF {u.numero}</strong> {u.piso?`· Piso ${u.piso}`:''} — {cp?.apellido_nombre||'Sin propietario'}
+                    </span>
+                    <span style={{ fontSize:10, color:GR }}>{cp?.email_notificacion||cp?.email||''}</span>
+                  </label>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* Mensaje personalizado + IA */}
@@ -241,7 +291,7 @@ export default function EnviarEmails() {
             📱 Avisar también por WhatsApp
           </label>
           <div style={{ fontSize:11, color:'#166534', marginTop:6 }}>
-            Envía el template aprobado "aviso_liquidacion" a cada UF con teléfono en WhatsApp (nombre, período, total, vencimiento y link al portal). Las UF sin teléfono se saltean.
+            Envía el template aprobado "aviso_liquidacion" (nombre, período, total, vencimiento y link al portal) a las UF con teléfono — respeta la selección de destinatarios de arriba. Las UF sin teléfono se saltean.
           </div>
           {avisarWa && (
             <input value={telWaPrueba} onChange={e => setTelWaPrueba(e.target.value)}
@@ -253,11 +303,12 @@ export default function EnviarEmails() {
         {/* Envío masivo */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <div style={{ fontSize:13, color:GR }}>
-            Enviará a todos los copropietarios con email registrado.
-            Los que no tienen email quedarán sin enviar.
+            {todos
+              ? `Enviará a las ${ufsConEmail.length} UFs con email registrado.`
+              : `Enviará a ${selUFs.length} UF${selUFs.length===1?'':'s'} seleccionada${selUFs.length===1?'':'s'}.`}
           </div>
           <Btn color={AZ} onClick={() => enviar(false)} disabled={enviando}>
-            {enviando ? '⏳ Enviando...' : '📨 Enviar a todos'}
+            {enviando ? '⏳ Enviando...' : (todos ? '📨 Enviar a todos' : `📨 Enviar a ${selUFs.length}`)}
           </Btn>
         </div>
       </Card>
