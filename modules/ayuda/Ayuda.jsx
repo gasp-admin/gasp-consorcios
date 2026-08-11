@@ -20,7 +20,7 @@ const SECCIONES = [
       },
       {
         p: '¿Cómo selecciono un consorcio?',
-        r: `En la parte superior de la pantalla hay un selector desplegable con los 26 consorcios habilitados. Hacé click y elegí el consorcio. Todos los módulos trabajan sobre el consorcio seleccionado.`,
+        r: `En la parte superior de la pantalla hay un selector desplegable con los consorcios habilitados (27 actualmente). Hacé click y elegí el consorcio. Todos los módulos trabajan sobre el consorcio seleccionado.`,
       },
       {
         p: '¿Puedo instalar GASP Consorcios en el celular?',
@@ -51,7 +51,7 @@ const SECCIONES = [
       },
       {
         p: '¿Qué es el modelo de cuentas corrientes?',
-        r: `Cada consorcio importado con PDF histórico usa el modelo "histórico". Esto significa que las cuentas corrientes se calculan a partir del estado financiero del PDF de Mis Expensas. El portal del copropietario muestra el saldo neto correctamente.`,
+        r: `Hay dos modelos. **Histórico**: para consorcios importados desde el PDF de Mis Expensas — la cuenta corriente se calcula a partir del estado financiero del PDF. **Normal**: para consorcios cargados y liquidados directamente en el sistema — la cuenta corriente se arma con las liquidaciones y cobranzas propias. En ambos casos el portal del copropietario muestra el saldo neto correctamente.`,
       },
     ],
   },
@@ -79,6 +79,37 @@ const SECCIONES = [
       {
         p: '¿Cómo genero una nueva liquidación mensual?',
         r: `Menú → Expensas → Nueva liquidación. Completá el período, los grupos de gastos y los items. El sistema calcula el prorrateo por coeficiente. Podés exportar a PDF o enviar por email a los copropietarios.`,
+      },
+      {
+        p: '¿Cómo estimo el costo de una obra por unidad?',
+        r: `Menú → Expensas → **Simular prorrateo**. Ingresá el monto total (por ejemplo, el costo de una obra) y elegí el coeficiente de reparto (fiscal, gastos generales, fondo de obras, gastos particulares o cochera). El sistema muestra al instante cuánto le tocaría a cada unidad, **sin generar ninguna liquidación ni tocar datos**. Podés exportar el estimado a PDF (con encabezado y aviso de simulación) o a Excel para presentarlo a los propietarios.`,
+      },
+    ],
+  },
+  {
+    id: 'comunicaciones',
+    icon: '📨',
+    titulo: 'Comunicaciones (Email y WhatsApp)',
+    items: [
+      {
+        p: '¿Cómo envío la liquidación por email a los copropietarios?',
+        r: `Menú → Comunicaciones → **Enviar Liquidación**. Elegí el período, escribí un mensaje opcional (podés usar la ayuda de IA para redactarlo) y elegí los destinatarios. Podés adjuntar un archivo. Antes del envío masivo, usá **Enviar prueba** con tu email para ver cómo queda.`,
+      },
+      {
+        p: '¿Cómo elijo a qué unidades enviar?',
+        r: `Tanto en Enviar Liquidación como en Enviar Notificación, en **👥 Destinatarios** tenés dos opciones:\n• **Todas las UFs con email** (por defecto)\n• **Seleccionar UFs específicas**: tildás las unidades y el envío (email y WhatsApp) va solo a esas.\nEn modo prueba se envía una sola muestra a tu email/teléfono de prueba, no a todas.`,
+      },
+      {
+        p: '¿Cómo aviso por WhatsApp que la liquidación está disponible?',
+        r: `En Enviar Liquidación, tildá **📱 Avisar también por WhatsApp**. Al enviar el email se manda además un WhatsApp a cada UF con teléfono, con el período, total, vencimiento y un botón al portal. Respeta la selección de UFs; las UF sin teléfono se saltean. Poné tu número en "teléfono de prueba" para probarlo antes.`,
+      },
+      {
+        p: '¿Cómo envío una notificación general (asamblea, aviso, corte de servicio)?',
+        r: `Menú → Comunicaciones → **Enviar Notificación**. Escribí asunto y cuerpo, elegí destinatarios y, si querés, adjuntá archivos o el link a la carpeta de Drive del consorcio. Tildá **📱 Avisar también por WhatsApp** para enviar además el aviso por WhatsApp (respeta la selección de UFs).`,
+      },
+      {
+        p: '¿Por qué los mensajes de WhatsApp tienen un formato fijo?',
+        r: `WhatsApp (Meta) exige que todo mensaje que inicia el negocio salga de una **plantilla aprobada**. Por eso el aviso de liquidación y el aviso general usan un texto aprobado con variables (nombre, período/consorcio, monto, etc.). Si el propietario **responde** el mensaje, se abre una conversación de 24 h y el asistente (bot) lo atiende automáticamente.`,
       },
     ],
   },
@@ -116,7 +147,7 @@ const SECCIONES = [
     items: [
       {
         p: '¿Cómo accede un copropietario a su portal?',
-        r: `Cada copropietario accede en:\nconsorcios.administracionpinamar.com/portal\nIngresa con su email. Si no tiene contraseña, usa "Olvidé mi contraseña" para generarla. El sistema le muestra su consorcio, unidad, estado de deuda y cuenta corriente.`,
+        r: `Cada copropietario accede con un **link único y personal** que recibe por email o WhatsApp (por ejemplo, en el aviso de liquidación). No necesita usuario ni contraseña: el link ya lo identifica. Al abrirlo ve su consorcio, unidad, estado de deuda, cuenta corriente, liquidaciones y pagos.`,
       },
       {
         p: '¿Qué ve el copropietario en su portal?',
@@ -128,7 +159,11 @@ const SECCIONES = [
       },
       {
         p: '¿Cómo genero el acceso para un copropietario nuevo?',
-        r: `Menú → Consorcio → Copropietarios → seleccioná el copropietario → botón "Enviar acceso al portal". El sistema genera un email con el link de activación. El copropietario elige su contraseña.`,
+        r: `El link del portal es único por unidad y se genera solo. Le llega al copropietario en cada envío de liquidación (email y, si está activado, WhatsApp), con un botón para acceder al portal. También podés copiar el link desde el módulo Unidades y compartirlo directamente. No requiere usuario ni contraseña.`,
+      },
+      {
+        p: 'Un copropietario dice que el link no le abre desde el celular',
+        r: `El link del portal abre correctamente desde el navegador integrado de las apps (WhatsApp, Gmail) en el celular, además de en cualquier navegador completo. Si un propietario reporta "Link no válido" desde el teléfono, pedile que verifique que copió el link completo, o que lo abra desde el navegador del celular. El acceso ya está resuelto para funcionar dentro de esas apps.`,
       },
     ],
   },
