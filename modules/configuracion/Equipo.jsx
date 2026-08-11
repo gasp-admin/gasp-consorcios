@@ -54,33 +54,41 @@ export default function Equipo() {
   }
   useEffect(() => { if (uid) cargar() }, [uid])
 
+  // Da de alta al colaborador vía Edge Function: crea la cuenta con contraseña temporal,
+  // lo agrega a con_equipo (activo) y le envía el email con las credenciales.
+  async function altaColaborador(email, rol, nombre) {
+    try {
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const r = await fetch(`${SUPA_URL}/functions/v1/enviar-invitacion-equipo`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': SUPA_KEY },
+        body: JSON.stringify({ admin_id: uid, email, rol, nombre: nombre || null }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.ok) { setMsg({ t:'e', m: 'No se pudo dar de alta: ' + (d.error || 'error') }); return { ok:false } }
+      const cred = 'Email: ' + d.email + ' · Contraseña temporal: ' + d.password
+      setMsg({ t:'ok', m: 'Colaborador dado de alta. ' + (d.email_enviado
+        ? 'Se le envió el email con las credenciales. '
+        : 'El email no salió — pasale las credenciales a mano. ') + '(' + cred + ')' })
+      return { ok:true }
+    } catch (e) {
+      setMsg({ t:'e', m: 'Error: ' + e.message }); return { ok:false }
+    }
+  }
+
   async function invitar() {
     if (!form?.email) return setMsg({ t:'w', m:'Ingresa el email del colaborador' })
     if (!form?.rol)   return setMsg({ t:'w', m:'Selecciona un rol' })
     setLoading(true); setMsg(null)
-    const emailInv = form.email, rolInv = form.rol
-    const { error } = await supabase.from('con_invitaciones').insert({ admin_id: uid, email: emailInv, rol: rolInv })
-    if (error) setMsg({ t:'e', m: error.message })
-    else {
-      // Enviar el email de invitación con el link de acceso
-      let emailMsg = ''
-      try {
-        const { data: { session: sess } } = await supabase.auth.getSession()
-        const r = await fetch(`${SUPA_URL}/functions/v1/enviar-invitacion-equipo`, {
-          method: 'POST',
-          headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': SUPA_KEY },
-          body: JSON.stringify({ admin_id: uid, email: emailInv, rol: rolInv }),
-        })
-        const d = await r.json().catch(() => ({}))
-        emailMsg = d.ok
-          ? ' Se le envió un email con el link de acceso.'
-          : ' Pero el email no se pudo enviar (' + (d.error || 'error') + '); compartile el link manualmente.'
-      } catch (e) { emailMsg = ' Pero el email no se pudo enviar; compartile el link manualmente.' }
+    const res = await altaColaborador(form.email, form.rol, form.nombre)
+    if (res.ok) { setForm(null); cargar() }
+    setLoading(false)
+  }
 
-      setMsg({ t:'ok', m: 'Invitación registrada para ' + emailInv + '.' + emailMsg })
-      setForm(null)
-      cargar()
-    }
+  async function activarInvitacion(i) {
+    setLoading(true); setMsg(null)
+    const res = await altaColaborador(i.email, i.rol, null)
+    if (res.ok) cargar()
     setLoading(false)
   }
 
@@ -296,6 +304,10 @@ export default function Equipo() {
                   Rol: {ROL_LABEL[i.rol]} — Vence: {new Date(i.expires_at).toLocaleDateString('es-AR')}
                 </div>
               </div>
+              <button onClick={() => activarInvitacion(i)} disabled={loading}
+                style={{ padding:'5px 12px', background:'#1d4ed8', color:'#fff', border:'none', borderRadius:6, cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                Enviar acceso
+              </button>
               <button onClick={() => cancelarInv(i.id)}
                 style={{ padding:'5px 12px', background:'#fee2e2', color:'#dc2626', border:'none', borderRadius:6, cursor:'pointer', fontSize:12, fontWeight:600 }}>
                 Cancelar
