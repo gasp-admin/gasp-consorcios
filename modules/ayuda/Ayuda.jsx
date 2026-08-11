@@ -38,6 +38,10 @@ const SECCIONES = [
     titulo: 'Gestión de Consorcios',
     items: [
       {
+        p: '¿Cómo doy de alta un consorcio nuevo?',
+        r: `Menú → Consorcios → **Agregar consorcio** (botón en el listado de consorcios). Completá nombre, datos fiscales y de contacto. Después cargá las unidades funcionales con sus coeficientes en el módulo Unidades y asigná los copropietarios. Este tipo de consorcio usa el modelo **normal**: la cuenta corriente se arma con las liquidaciones y cobranzas que generás en el sistema, sin necesidad de importar un PDF histórico. (Los consorcios que ya venían de Mis Expensas usan el modelo histórico.)`,
+      },
+      {
         p: '¿Cómo cargo o actualizo los datos de un consorcio?',
         r: `Menú → Consorcio → ✏️ Ficha del consorcio. Allí podés editar razón social, domicilio, datos bancarios, póliza de seguro (número, aseguradora, fechas), reglamento de copropiedad y configuración de expensas. Los datos de póliza aparecen automáticamente en la Agenda de Vencimientos.`,
       },
@@ -235,6 +239,21 @@ const SECCIONES = [
 ]
 
 const NOVEDADES = [
+  { fecha: 'Agosto 2026', items: [
+    'Aviso de liquidación por WhatsApp: al enviar la liquidación por email, se avisa también por WhatsApp con el total, vencimiento y link al portal',
+    'Notificaciones generales por WhatsApp (asambleas, avisos, cortes de servicio)',
+    'Selector de destinatarios: enviar liquidaciones y notificaciones a todas las UFs o solo a unidades específicas',
+    'Simulador de Prorrateo: estimar el costo de una obra por unidad antes de liquidar, con exportación a PDF y Excel',
+    'Portal del Copropietario: los links de acceso ahora abren correctamente desde el celular (WhatsApp, Gmail)',
+    'Balance Anual por categorías de gastos',
+    'Corrección de duplicación de pagos en la cuenta corriente',
+  ]},
+  { fecha: 'Julio 2026', items: [
+    'Alta de consorcios nuevos directo en el sistema (modelo nativo, sin necesidad de importar PDF)',
+    'Bot de WhatsApp para copropietarios: consultas de saldo y registro automático de reclamos',
+    'Panel de conversaciones de WhatsApp con alertas en tiempo real',
+    'Módulo de Reclamos global: todos los consorcios en una sola vista',
+  ]},
   { fecha: 'Junio 2026', items: [
     'Módulo de Ayuda y Centro de Soporte (este módulo)',
     'Agenda de Vencimientos en Dashboard con widget de próximos vencimientos',
