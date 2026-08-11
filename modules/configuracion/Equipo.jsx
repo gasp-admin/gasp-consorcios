@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
+import { SUPA_URL, SUPA_KEY } from '../../lib/config'
 
 const ROLES_DISP = [
   { v:'administrativo', l:'Administrativo', desc:'Ver, editar, liquidar, cobrar' },
@@ -57,10 +58,26 @@ export default function Equipo() {
     if (!form?.email) return setMsg({ t:'w', m:'Ingresa el email del colaborador' })
     if (!form?.rol)   return setMsg({ t:'w', m:'Selecciona un rol' })
     setLoading(true); setMsg(null)
-    const { error } = await supabase.from('con_invitaciones').insert({ admin_id: uid, email: form.email, rol: form.rol })
+    const emailInv = form.email, rolInv = form.rol
+    const { error } = await supabase.from('con_invitaciones').insert({ admin_id: uid, email: emailInv, rol: rolInv })
     if (error) setMsg({ t:'e', m: error.message })
     else {
-      setMsg({ t:'ok', m: 'Invitacion registrada para ' + form.email + '. Compartile el link de acceso al sistema.' })
+      // Enviar el email de invitación con el link de acceso
+      let emailMsg = ''
+      try {
+        const { data: { session: sess } } = await supabase.auth.getSession()
+        const r = await fetch(`${SUPA_URL}/functions/v1/enviar-invitacion-equipo`, {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': SUPA_KEY },
+          body: JSON.stringify({ admin_id: uid, email: emailInv, rol: rolInv }),
+        })
+        const d = await r.json().catch(() => ({}))
+        emailMsg = d.ok
+          ? ' Se le envió un email con el link de acceso.'
+          : ' Pero el email no se pudo enviar (' + (d.error || 'error') + '); compartile el link manualmente.'
+      } catch (e) { emailMsg = ' Pero el email no se pudo enviar; compartile el link manualmente.' }
+
+      setMsg({ t:'ok', m: 'Invitación registrada para ' + emailInv + '.' + emailMsg })
       setForm(null)
       cargar()
     }
@@ -176,7 +193,7 @@ export default function Equipo() {
           <div style={{ display:'flex', gap:8 }}>
             <button onClick={invitar} disabled={loading}
               style={{ background:'#1d4ed8', color:'#fff', border:'none', borderRadius:7, padding:'9px 20px', fontWeight:600, cursor:'pointer', fontSize:13 }}>
-              {loading ? 'Guardando...' : 'Registrar invitacion'}
+              {loading ? 'Enviando...' : 'Enviar invitación por email'}
             </button>
             <button onClick={() => setForm(null)}
               style={{ background:'#f3f4f6', color:'#374151', border:'none', borderRadius:7, padding:'9px 20px', cursor:'pointer', fontSize:13 }}>
@@ -184,7 +201,7 @@ export default function Equipo() {
             </button>
           </div>
           <div style={{ marginTop:10, fontSize:11, color:'#6b7280' }}>
-            Compartile el enlace de acceso al sistema. Una vez registrado con ese email, tendra acceso automatico segun su rol.
+            Se le enviará un email con el link de acceso al sistema. Una vez que se registre con ese email, tendrá acceso automático según su rol.
           </div>
         </div>
       )}
