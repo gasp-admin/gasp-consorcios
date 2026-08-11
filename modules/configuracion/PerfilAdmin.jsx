@@ -24,6 +24,20 @@ export default function PerfilAdmin() {
   const [msg, setMsg]             = useState(null)
   const [tabActiva, setTabActiva] = useState('datos')
   const [subiendo, setSubiendo]   = useState(null) // 'sello' | 'firma' | null
+  const [pass1, setPass1] = useState('')
+  const [pass2, setPass2] = useState('')
+  const [cambiandoPass, setCambiandoPass] = useState(false)
+  const [msgPass, setMsgPass] = useState(null)
+
+  async function cambiarPassword() {
+    if (!pass1 || pass1.length < 6) return setMsgPass({ tipo:'warn', texto:'La contraseña debe tener al menos 6 caracteres' })
+    if (pass1 !== pass2)            return setMsgPass({ tipo:'warn', texto:'Las contraseñas no coinciden' })
+    setCambiandoPass(true); setMsgPass(null)
+    const { error } = await supabase.auth.updateUser({ password: pass1 })
+    if (error) setMsgPass({ tipo:'error', texto: 'No se pudo cambiar: ' + error.message })
+    else { setMsgPass({ tipo:'ok', texto: 'Contraseña actualizada correctamente' }); setPass1(''); setPass2('') }
+    setCambiandoPass(false)
+  }
   const selloRef = useRef(null)
   const firmaRef = useRef(null)
 
@@ -163,6 +177,16 @@ export default function PerfilAdmin() {
           <Btn onClick={guardar} disabled={guardando}>{guardando?'Guardando...':'💾 Guardar configuración PDF'}</Btn>
         </Card>
       )}
+
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ fontSize:13, color:AZ, marginBottom:12, fontWeight:600 }}>🔒 Cambiar contraseña</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+          <Input label="Nueva contraseña" type="password" value={pass1} onChange={setPass1} placeholder="Mínimo 6 caracteres" />
+          <Input label="Repetir contraseña" type="password" value={pass2} onChange={setPass2} placeholder="Repetir" />
+        </div>
+        {msgPass && <div style={{ fontSize:12, marginBottom:10, fontWeight:500, color: msgPass.tipo==='ok'?'#15803d':(msgPass.tipo==='error'?'#B91C1C':'#92400e') }}>{msgPass.texto}</div>}
+        <Btn onClick={cambiarPassword} disabled={cambiandoPass || !pass1 || !pass2}>{cambiandoPass?'Cambiando...':'Cambiar contraseña'}</Btn>
+      </Card>
 
       <Card>
         <div style={{ fontSize:13, color:'#6b7280', marginBottom:8, fontWeight:600 }}>Sesión activa</div>
