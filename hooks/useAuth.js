@@ -7,6 +7,7 @@ import { SUPERADMIN } from '../lib/config'
 
 export function useAuth() {
   const [session, setSession]           = useState(null)
+  const [adminId, setAdminId]           = useState(null)  // admin_id EFECTIVO (propio, o del dueño si es miembro del equipo)
   const [cargando, setCargando]         = useState(true)
   const [esSuperAdmin, setEsSuperAdmin] = useState(false)
   const [email, setEmail]               = useState('')
@@ -14,15 +15,25 @@ export function useAuth() {
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError]     = useState('')
 
+  async function resolverAdminId(s) {
+    if (!s?.user?.id) { setAdminId(null); return }
+    try {
+      const { data, error } = await supabase.rpc('get_admin_id_efectivo', { user_id: s.user.id })
+      setAdminId(error ? s.user.id : (data || s.user.id))
+    } catch { setAdminId(s.user.id) }
+  }
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       const s = data?.session || null
       setSession(s)
-      if (s) setEsSuperAdmin(s.user?.email === SUPERADMIN)
+      if (s) { setEsSuperAdmin(s.user?.email === SUPERADMIN); resolverAdminId(s) }
+      else setAdminId(null)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s)
       setEsSuperAdmin(s?.user?.email === SUPERADMIN)
+      resolverAdminId(s)
     })
     return () => subscription?.unsubscribe()
   }, [])
@@ -38,6 +49,7 @@ export function useAuth() {
     }
     const { data } = await supabase.auth.getSession()
     setSession(data?.session || null)
+    await resolverAdminId(data?.session)
     setLoginLoading(false)
     return true
   }
@@ -45,8 +57,9 @@ export function useAuth() {
   async function logout() {
     await supabase.auth.signOut()
     setSession(null)
+    setAdminId(null)
     setEsSuperAdmin(false)
   }
 
-  return { session, cargando, setCargando, esSuperAdmin, email, setEmail, pass, setPass, loginLoading, loginError, login, logout }
+  return { session, adminId, cargando, setCargando, esSuperAdmin, email, setEmail, pass, setPass, loginLoading, loginError, login, logout }
 }
