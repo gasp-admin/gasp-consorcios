@@ -8,7 +8,7 @@
 //     const { session, consorcioActivo, unidades } = useApp()
 //   }
 
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react'
 import { useAuth }      from '../hooks/useAuth'
 import { useConsorcio } from '../hooks/useConsorcio'
 import { usePagina }    from '../hooks/usePagina'
@@ -65,9 +65,18 @@ export function AppProvider({ children }) {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
   }, [])
 
+  // Sesión EFECTIVA: user.id es el admin_id efectivo (propio, o el del dueño si es miembro del
+  // equipo). Así todos los módulos que usan session.user.id como admin_id operan sobre los datos
+  // correctos sin necesidad de modificarlos uno por uno. El uid real queda en `usuarioId`.
+  const sessionEfectiva = useMemo(() => (
+    (auth.session && auth.adminId && auth.adminId !== auth.session.user.id)
+      ? { ...auth.session, user: { ...auth.session.user, id: auth.adminId } }
+      : auth.session
+  ), [auth.session, auth.adminId])
+
   const value = {
     // Auth
-    session: auth.session, adminId: auth.adminId, cargando: auth.cargando, esSuperAdmin: auth.esSuperAdmin,
+    session: sessionEfectiva, usuarioId: auth.session?.user?.id, adminId: auth.adminId, cargando: auth.cargando, esSuperAdmin: auth.esSuperAdmin,
     email: auth.email, setEmail: auth.setEmail, pass: auth.pass, setPass: auth.setPass,
     loginLoading: auth.loginLoading, loginError: auth.loginError, login: auth.login, logout: auth.logout,
     // Consorcio
