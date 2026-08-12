@@ -5,7 +5,7 @@
 import { useState, useCallback } from 'react'
 import { getConsorcios, getUnidades, getCopropietarios, getExpensas, getProveedores, getAdminPerfil, saveConsorcio as apiSaveConsorcio } from '../api/index'
 
-export function useConsorcio(session) {
+export function useConsorcio(session, adminId) {
   const [consorcios, setConsorcios]             = useState([])
   const [consorcioActivo, setConsorcioActivo]   = useState(null)
   const [unidades, setUnidades]                 = useState([])
@@ -41,10 +41,11 @@ export function useConsorcio(session) {
 
   async function guardarConsorcio() {
     if (!formCon?.nombre) { setMsgCon({ tipo: 'warn', texto: 'El nombre es obligatorio' }); return }
-    await apiSaveConsorcio(formCon, session?.user?.id)
+    const aid = adminId || session?.user?.id
+    await apiSaveConsorcio(formCon, aid)
     setFormCon(null)
     setMsgCon({ tipo: 'ok', texto: '✓ Consorcio guardado' })
-    await cargarConsorcios(session?.user?.id, null)
+    await cargarConsorcios(aid, null)
   }
 
   return { consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, setMsgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio }
