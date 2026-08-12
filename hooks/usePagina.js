@@ -52,6 +52,7 @@ export const NAV_ITEMS = [
   { id: 'importar',                 label: 'Importar datos',          icon: '📥', sec: 'Configuración' },
   { id: 'importar_pdf',             label: 'Migrar desde PDF (IA)',    icon: '🤖', sec: 'Configuración' },
   { id: 'equipo',                   label: 'Equipo',                  icon: '👥', sec: 'Configuración' },
+  { id: 'actividad',                label: 'Actividad del equipo',    icon: '📋', sec: 'Configuración' },
   { id: 'perfil',                   label: 'Mi perfil',               icon: '⚙️', sec: 'Configuración' },
   { id: 'ayuda',                    label: 'Centro de ayuda',         icon: '❓', sec: 'Ayuda' },
 ]
