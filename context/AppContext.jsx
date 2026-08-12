@@ -18,7 +18,7 @@ const AppContext = createContext(null)
 
 export function AppProvider({ children }) {
   const auth = useAuth()
-  const cons = useConsorcio(auth.session)
+  const cons = useConsorcio(auth.session, auth.adminId)
   const nav  = usePagina(auth.esSuperAdmin)
   const alerta = useReclamosAlerta(auth.session?.user?.id)
 
@@ -47,12 +47,12 @@ export function AppProvider({ children }) {
   }, [saltoReclamos, cons.consorcioActivo?.id]) // eslint-disable-line
 
   useEffect(() => {
-    if (auth.session?.user?.id) {
-      cons.cargarConsorcios(auth.session.user.id, auth.setCargando)
-    } else {
+    if (auth.adminId) {
+      cons.cargarConsorcios(auth.adminId, auth.setCargando)
+    } else if (auth.session === null) {
       auth.setCargando(false)
     }
-  }, [auth.session?.user?.id]) // eslint-disable-line
+  }, [auth.adminId, auth.session]) // eslint-disable-line
 
   useEffect(() => {
     const check = () => nav.setIsMobile(window.innerWidth < 769)
@@ -67,7 +67,7 @@ export function AppProvider({ children }) {
 
   const value = {
     // Auth
-    session: auth.session, cargando: auth.cargando, esSuperAdmin: auth.esSuperAdmin,
+    session: auth.session, adminId: auth.adminId, cargando: auth.cargando, esSuperAdmin: auth.esSuperAdmin,
     email: auth.email, setEmail: auth.setEmail, pass: auth.pass, setPass: auth.setPass,
     loginLoading: auth.loginLoading, loginError: auth.loginError, login: auth.login, logout: auth.logout,
     // Consorcio
