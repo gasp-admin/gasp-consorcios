@@ -20,15 +20,12 @@ export function useAuth() {
     if (!s?.user?.id) { setAdminId(null); setRol(null); return }
     try {
       const { data, error } = await supabase.rpc('get_admin_id_efectivo', { user_id: s.user.id })
-      const admin = error ? s.user.id : (data || s.user.id)
-      setAdminId(admin)
-      if (admin === s.user.id) {
-        setRol('admin')                       // admin principal: todos los permisos
-      } else {
-        const { data: eq } = await supabase.from('con_equipo')
-          .select('rol').eq('usuario_id', s.user.id).eq('activo', true).maybeSingle()
-        setRol(eq?.rol || 'asistente')        // fallback al rol más restrictivo
-      }
+      setAdminId(error ? s.user.id : (data || s.user.id))
+      // El rol sale de con_equipo (igual que get_mi_rol en la base). Si no está en ningún
+      // equipo, es un admin principal independiente => 'admin' (todos los permisos).
+      const { data: eq } = await supabase.from('con_equipo')
+        .select('rol').eq('usuario_id', s.user.id).eq('activo', true).maybeSingle()
+      setRol(eq?.rol || 'admin')
     } catch { setAdminId(s.user.id); setRol('admin') }
   }
 
