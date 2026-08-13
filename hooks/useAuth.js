@@ -8,6 +8,7 @@ import { SUPERADMIN } from '../lib/config'
 export function useAuth() {
   const [session, setSession]           = useState(null)
   const [adminId, setAdminId]           = useState(null)  // admin_id EFECTIVO (propio, o del dueño si es miembro del equipo)
+  const [rol, setRol]                   = useState(null)  // 'admin' (principal) | 'administrativo' | 'contador' | 'asistente'
   const [cargando, setCargando]         = useState(true)
   const [esSuperAdmin, setEsSuperAdmin] = useState(false)
   const [email, setEmail]               = useState('')
@@ -16,11 +17,19 @@ export function useAuth() {
   const [loginError, setLoginError]     = useState('')
 
   async function resolverAdminId(s) {
-    if (!s?.user?.id) { setAdminId(null); return }
+    if (!s?.user?.id) { setAdminId(null); setRol(null); return }
     try {
       const { data, error } = await supabase.rpc('get_admin_id_efectivo', { user_id: s.user.id })
-      setAdminId(error ? s.user.id : (data || s.user.id))
-    } catch { setAdminId(s.user.id) }
+      const admin = error ? s.user.id : (data || s.user.id)
+      setAdminId(admin)
+      if (admin === s.user.id) {
+        setRol('admin')                       // admin principal: todos los permisos
+      } else {
+        const { data: eq } = await supabase.from('con_equipo')
+          .select('rol').eq('usuario_id', s.user.id).eq('activo', true).maybeSingle()
+        setRol(eq?.rol || 'asistente')        // fallback al rol más restrictivo
+      }
+    } catch { setAdminId(s.user.id); setRol('admin') }
   }
 
   useEffect(() => {
@@ -58,8 +67,9 @@ export function useAuth() {
     await supabase.auth.signOut()
     setSession(null)
     setAdminId(null)
+    setRol(null)
     setEsSuperAdmin(false)
   }
 
-  return { session, adminId, cargando, setCargando, esSuperAdmin, email, setEmail, pass, setPass, loginLoading, loginError, login, logout }
+  return { session, adminId, rol, cargando, setCargando, esSuperAdmin, email, setEmail, pass, setPass, loginLoading, loginError, login, logout }
 }
