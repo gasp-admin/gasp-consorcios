@@ -9,7 +9,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Unidades() {
-  const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo } = useApp()
+  const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo, puede } = useApp()
   const uid = session?.user?.id
   const consorcioId = consorcioActivo?.id
   const [unidades, setUnidades] = useState([])
@@ -23,6 +23,7 @@ export default function Unidades() {
     setUnidades(data || [])
   }
   async function guardar() {
+    if (!puede('editar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite editar datos.' })
     if (!form.numero) return setMsg({ tipo:'warn', texto:'El número de UF es obligatorio' })
     const id = form.id || nextId(unidades, 'UF')
     const { error } = await supabase.from('con_unidades').upsert(
@@ -31,6 +32,7 @@ export default function Unidades() {
     setForm(null); setMsg({ tipo:'ok', texto:'✓ Unidad guardada' }); cargar()
   }
   async function eliminar(id) {
+    if (!puede('editar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite editar datos.' })
     if (!confirm('¿Eliminar esta UF?')) return
     await supabase.from('con_unidades').delete().eq('id', id); cargar()
   }
@@ -82,6 +84,7 @@ export default function Unidades() {
   // entre todas las UFs que tienen coeficiente > 0 en esa columna.
   // Aplica a todas las columnas configuradas: porcentaje_fiscal + las multicol.
   async function reajustarCoeficientes() {
+    if (!puede('editar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite editar datos.' })
     if (unidades.length === 0) return
     if (!confirm(
       '¿Reajustar coeficientes para que cada columna sume exactamente 100%?\n\n' +
