@@ -8,6 +8,13 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
+// Orden por el Nro del PDF (nro_uf_pdf), numérico, para coincidir con la liquidación.
+function ordUF(a, b) {
+  const na = parseInt(a?.nro_uf_pdf, 10), nb = parseInt(b?.nro_uf_pdf, 10)
+  if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb
+  return String(a?.nro_uf_pdf ?? a?.numero ?? '').localeCompare(String(b?.nro_uf_pdf ?? b?.numero ?? ''), 'es', { numeric: true })
+}
+
 export default function Unidades() {
   const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo, puede } = useApp()
   const uid = session?.user?.id
@@ -19,8 +26,8 @@ export default function Unidades() {
 
   async function cargar() {
     const { data } = await supabase.from('con_unidades').select('*')
-      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId).order('numero')
-    setUnidades(data || [])
+      .eq('admin_id', session.user.id).eq('consorcio_id', consorcioId)
+    setUnidades((data || []).slice().sort(ordUF))
   }
   async function guardar() {
     if (!puede('editar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite editar datos.' })
