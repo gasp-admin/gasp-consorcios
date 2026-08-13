@@ -9,7 +9,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function LiquidacionPeriodo() {
-  const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo } = useApp()
+  const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, puede, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo } = useApp()
   const uid = session?.user?.id
   const consorcioId = consorcioActivo?.id
   const [paso, setPaso]           = useState(1) // 1=período, 2=gastos, 3=distribución, 4=cierre
@@ -129,6 +129,7 @@ export default function LiquidacionPeriodo() {
 
   // Importar comprobantes seleccionados como gastos del período
   async function importarComprobantes() {
+    if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
     const seleccionados = compImportables.filter(c => compSeleccionados[c.id])
     if (seleccionados.length === 0) return setMsg({ tipo:'warn', texto:'Seleccioná al menos un comprobante para importar' })
 
@@ -195,6 +196,7 @@ export default function LiquidacionPeriodo() {
   }
 
   async function nuevaExpensa() {
+    if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
     // Calcular próximo período
     const hoyDate = new Date()
     const mes     = String(hoyDate.getMonth() + 1).padStart(2,'0')
@@ -233,6 +235,7 @@ export default function LiquidacionPeriodo() {
 
   // ── PASO 2: Gastos ─────────────────────────────────────────────────────────
   async function guardarGasto() {
+    if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
     if (!formGasto?.concepto?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el concepto' })
     if (!formGasto?.monto || parseFloat(formGasto.monto) <= 0) return setMsg({ tipo:'warn', texto:'Ingresá el monto' })
 
@@ -264,6 +267,7 @@ export default function LiquidacionPeriodo() {
   }
 
   async function eliminarGasto(id) {
+    if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
     if (!confirm('¿Eliminar este gasto?')) return
     await supabase.from('con_gastos').delete().eq('id', id)
     await cargarGastos(expSel.id)
@@ -314,6 +318,7 @@ export default function LiquidacionPeriodo() {
   }
 
   async function calcularDistribucion() {
+    if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
     // Resetear valores financieros al inicio del cálculo
     setCobradoActual(0)
     setSaldoCajaAnterior(0)
@@ -597,6 +602,7 @@ export default function LiquidacionPeriodo() {
   }, [expSel])
 
   async function guardarNotas() {
+    if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
     if (!expSel?.id) return
     setCargandoNotas(true)
     await supabase.from('con_expensas').update({ notas_periodo: notasPeriodo }).eq('id', expSel.id)
@@ -1086,6 +1092,7 @@ export default function LiquidacionPeriodo() {
 
   // ── PASO 4: Confirmar y cerrar ─────────────────────────────────────────────
   async function confirmarYCerrar() {
+    if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
     if (!confirm(`¿Confirmar y cerrar el período ${expSel?.periodo}?\n\nSe generarán ${distribucion.length} comprobantes individuales y el período quedará cerrado.`)) return
 
     setProcesando(true)
