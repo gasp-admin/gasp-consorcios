@@ -42,7 +42,7 @@ function emptyForm(c) {
 }
 
 export default function FichaConsorcio() {
-  const { consorcioActivo, setConsorcioActivo, setConsorcios, consorcios, session, pagina, setPagina } = useApp()
+  const { consorcioActivo, setConsorcioActivo, setConsorcios, consorcios, session, pagina, setPagina, puede } = useApp()
   const esNuevo = pagina === 'nuevo_consorcio'
   const [form, setForm]         = useState(null)
   const [guardando, setGuardando] = useState(false)
@@ -63,6 +63,7 @@ export default function FichaConsorcio() {
   function upd(k, v) { setForm(f => ({ ...f, [k]: v })); setMsg(null) }
 
   async function crearNuevo() {
+    if (!puede('editar')) { setMsg({ tipo:'err', txt:'Tu rol no permite editar datos del consorcio.' }); return }
     if (!form.nombre?.trim()) { setMsg({ tipo:'err', txt:'⚠️ El nombre del consorcio es obligatorio.' }); return }
     setGuardando(true); setMsg(null)
     try {
