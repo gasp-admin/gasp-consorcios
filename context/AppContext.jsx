@@ -11,7 +11,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react'
 import { useAuth }      from '../hooks/useAuth'
 import { useConsorcio } from '../hooks/useConsorcio'
-import { usePagina }    from '../hooks/usePagina'
+import { usePagina, puedeRol } from '../hooks/usePagina'
 import { useReclamosAlerta } from '../hooks/useReclamosAlerta'
 
 const AppContext = createContext(null)
@@ -19,7 +19,7 @@ const AppContext = createContext(null)
 export function AppProvider({ children }) {
   const auth = useAuth()
   const cons = useConsorcio(auth.session, auth.adminId)
-  const nav  = usePagina(auth.esSuperAdmin)
+  const nav  = usePagina(auth.esSuperAdmin, auth.rol)
   const alerta = useReclamosAlerta(auth.session?.user?.id)
 
   // Navegación diferida a "Reclamos" tras cambiar de consorcio (desde el toast).
@@ -74,9 +74,12 @@ export function AppProvider({ children }) {
       : auth.session
   ), [auth.session, auth.adminId])
 
+  const rolEfectivo = auth.rol || 'admin'
+  const puede = (accion) => puedeRol(rolEfectivo, accion)
+
   const value = {
     // Auth
-    session: sessionEfectiva, usuarioId: auth.session?.user?.id, adminId: auth.adminId, cargando: auth.cargando, esSuperAdmin: auth.esSuperAdmin,
+    session: sessionEfectiva, usuarioId: auth.session?.user?.id, adminId: auth.adminId, rol: rolEfectivo, puede, cargando: auth.cargando, esSuperAdmin: auth.esSuperAdmin,
     email: auth.email, setEmail: auth.setEmail, pass: auth.pass, setPass: auth.setPass,
     loginLoading: auth.loginLoading, loginError: auth.loginError, login: auth.login, logout: auth.logout,
     // Consorcio
