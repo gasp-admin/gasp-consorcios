@@ -4,6 +4,15 @@
 
 import { supabase } from '../lib/supabase'
 
+// Ordena las UF por el Nro del PDF (nro_uf_pdf) de forma numérica, para coincidir con
+// el orden de la liquidación. Fallback a 'numero' con orden natural si no hay nro_uf_pdf.
+function ordUF(a, b, gv = (x) => x) {
+  const na = parseInt(gv(a)?.nro_uf_pdf, 10), nb = parseInt(gv(b)?.nro_uf_pdf, 10)
+  if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb
+  return String(gv(a)?.nro_uf_pdf ?? gv(a)?.numero ?? '')
+    .localeCompare(String(gv(b)?.nro_uf_pdf ?? gv(b)?.numero ?? ''), 'es', { numeric: true })
+}
+
 // CONSORCIOS
 export async function getConsorcios(adminId) {
   const { data, error } = await supabase.from('con_consorcios').select('*').eq('admin_id', adminId).eq('activo', true).order('nombre')
@@ -25,9 +34,9 @@ export async function saveConsorcio(form, adminId) {
 
 // UNIDADES
 export async function getUnidades(adminId, consorcioId) {
-  const { data, error } = await supabase.from('con_unidades').select('*').eq('admin_id', adminId).eq('consorcio_id', consorcioId).order('numero')
+  const { data, error } = await supabase.from('con_unidades').select('*').eq('admin_id', adminId).eq('consorcio_id', consorcioId)
   if (error) throw error
-  return data || []
+  return (data || []).slice().sort((a, b) => ordUF(a, b))
 }
 
 export async function saveUnidad(unidad) {
@@ -70,9 +79,9 @@ export async function getExpensas(adminId, consorcioId) {
 }
 
 export async function getDetallesExpensa(expensaId) {
-  const { data, error } = await supabase.from('con_expensas_detalle').select('*, con_unidades(numero, porcentaje_fiscal)').eq('expensa_id', expensaId).order('created_at')
+  const { data, error } = await supabase.from('con_expensas_detalle').select('*, con_unidades(numero, nro_uf_pdf, porcentaje_fiscal)').eq('expensa_id', expensaId)
   if (error) throw error
-  return data || []
+  return (data || []).slice().sort((a, b) => ordUF(a, b, (x) => x?.con_unidades))
 }
 
 export async function getGastosExpensa(expensaId) {
