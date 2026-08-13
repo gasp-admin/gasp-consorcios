@@ -4,6 +4,16 @@
 
 import { useState } from 'react'
 
+// Matriz de permisos por rol. 'ver' lo tienen todos.
+export const PERMISOS = {
+  admin_principal: ['ver','editar','liquidar','cobrar','pagar','comunicar','exportar','configurar'],
+  admin:           ['ver','editar','liquidar','cobrar','pagar','comunicar','exportar','configurar'],
+  administrativo:  ['ver','editar','liquidar','cobrar','pagar','comunicar','exportar'],
+  contador:        ['ver','exportar'],
+  asistente:       ['ver'],
+}
+export const puedeRol = (rol, accion) => (PERMISOS[rol] || ['ver']).includes(accion)
+
 export const NAV_ITEMS = [
   { id: 'dashboard',                label: 'Dashboard',               icon: '📊', sec: 'Inicio' },
   { id: 'listado_consorcios',       label: 'Mis Consorcios',          icon: '🏛️', sec: 'Consorcio' },
@@ -47,24 +57,25 @@ export const NAV_ITEMS = [
   { id: 'consultar_enviados',       label: 'Consultar enviados',      icon: '📂', sec: 'Comunicaciones' },
   { id: 'email_tracking',           label: 'Seguimiento liquidaciones',icon: '📬', sec: 'Comunicaciones' },
   { id: 'agenda_venc',              label: 'Agenda vencimientos',     icon: '📅', sec: 'Comunicaciones' },
-  { id: 'plan_cuentas',             label: 'Plan de cuentas',         icon: '📑', sec: 'Configuración' },
-  { id: 'grupos_liquidacion',       label: 'Grupos de liquidación',   icon: '🗂️', sec: 'Configuración' },
-  { id: 'importar',                 label: 'Importar datos',          icon: '📥', sec: 'Configuración' },
-  { id: 'importar_pdf',             label: 'Migrar desde PDF (IA)',    icon: '🤖', sec: 'Configuración' },
-  { id: 'equipo',                   label: 'Equipo',                  icon: '👥', sec: 'Configuración' },
-  { id: 'actividad',                label: 'Actividad del equipo',    icon: '📋', sec: 'Configuración' },
+  { id: 'plan_cuentas',             label: 'Plan de cuentas',         icon: '📑', sec: 'Configuración', perm: 'configurar' },
+  { id: 'grupos_liquidacion',       label: 'Grupos de liquidación',   icon: '🗂️', sec: 'Configuración', perm: 'configurar' },
+  { id: 'importar',                 label: 'Importar datos',          icon: '📥', sec: 'Configuración', perm: 'configurar' },
+  { id: 'importar_pdf',             label: 'Migrar desde PDF (IA)',    icon: '🤖', sec: 'Configuración', perm: 'configurar' },
+  { id: 'equipo',                   label: 'Equipo',                  icon: '👥', sec: 'Configuración', perm: 'configurar' },
+  { id: 'actividad',                label: 'Actividad del equipo',    icon: '📋', sec: 'Configuración', perm: 'exportar' },
   { id: 'perfil',                   label: 'Mi perfil',               icon: '⚙️', sec: 'Configuración' },
   { id: 'ayuda',                    label: 'Centro de ayuda',         icon: '❓', sec: 'Ayuda' },
 ]
 
 export const NAV_SUPERADMIN = { id: 'clientes', label: 'Clientes GASP', icon: '🏢', sec: 'Configuración' }
 
-export function usePagina(esSuperAdmin = false) {
+export function usePagina(esSuperAdmin = false, rol = 'admin') {
   const [pagina, setPagina]           = useState('dashboard')
   const [menuAbierto, setMenuAbierto] = useState(false)
   const [isMobile, setIsMobile]       = useState(false)
 
-  const navItems  = esSuperAdmin ? [...NAV_ITEMS, NAV_SUPERADMIN] : NAV_ITEMS
+  const base      = esSuperAdmin ? [...NAV_ITEMS, NAV_SUPERADMIN] : NAV_ITEMS
+  const navItems  = base.filter(n => !n.perm || puedeRol(rol, n.perm))
   const secciones = [...new Set(navItems.map(n => n.sec))]
   const navActivo = navItems.find(n => n.id === pagina)
 
