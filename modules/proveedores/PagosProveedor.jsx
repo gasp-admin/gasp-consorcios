@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function PagosProveedor() {
-  const { session, proveedores, consorcioActivo} = useApp()
+  const { session, proveedores, consorcioActivo, puede } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
@@ -38,6 +38,7 @@ export default function PagosProveedor() {
   }
 
   async function guardar() {
+    if (!puede('pagar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite registrar o modificar pagos a proveedores.' })
     if (!form?.proveedor_id) return setMsg({ tipo:'warn', texto:'Seleccioná un proveedor' })
     if (!form?.monto || parseFloat(form.monto)<=0) return setMsg({ tipo:'warn', texto:'Ingresá el monto' })
     if (!form?.fecha) return setMsg({ tipo:'warn', texto:'Ingresá la fecha' })
@@ -80,6 +81,7 @@ export default function PagosProveedor() {
   }
 
   async function eliminarPago(p) {
+    if (!puede('pagar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite registrar o modificar pagos a proveedores.' })
     if (!confirm(`¿Eliminar este pago de ${fmt(p.monto)}?\nSi estaba asociado a un comprobante, el saldo no se actualiza automáticamente.`)) return
     await supabase.from('con_pagos_proveedor').delete().eq('id', p.id)
     cargar()
@@ -212,7 +214,7 @@ export default function PagosProveedor() {
             )}
           </div>
           <div style={{ display:'flex', gap:8 }}>
-            <Btn onClick={guardar} disabled={guardando} style={{ background:VD, color:'#fff' }}>{guardando?'⏳':'✓ Registrar pago'}</Btn>
+            <Btn onClick={guardar} disabled={guardando || !puede('pagar')} style={{ background:VD, color:'#fff' }}>{guardando?'⏳':'✓ Registrar pago'}</Btn>
             <BtnSec onClick={()=>{setForm(null);setMsg(null)}}>Cancelar</BtnSec>
           </div>
         </Card>
