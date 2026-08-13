@@ -59,26 +59,26 @@ export default function Unidades() {
 
   function handlePDF() {
     const cols = [
-      {key:'uf',label:'UF'},{key:'tipo',label:'Tipo'},{key:'piso',label:'Piso'},
+      {key:'uf',label:'UF'},{key:'tipo',label:'Tipo'},{key:'piso',label:'Piso'},{key:'extra',label:'Extra'},
       {key:'sup',label:'Sup.',align:'right'},{key:'coef',label:'Coef.%',align:'right'},
       {key:'propietario',label:'Propietario'},{key:'estado',label:'Estado'},
     ]
     const rows = filtradas.map(u=>{
       const cp=copropietarios.find(c=>c.id===u.propietario_id)
-      return {uf:u.numero,tipo:u.tipo,piso:u.piso||'—',sup:u.superficie_cubierta?u.superficie_cubierta+' m²':'—',
+      return {uf:u.numero,tipo:u.tipo,piso:u.piso||'—',extra:u.extra||'—',sup:u.superficie_cubierta?u.superficie_cubierta+' m²':'—',
         coef:u.porcentaje_fiscal?Number(u.porcentaje_fiscal).toFixed(4)+'%':'—',
         propietario:cp?.apellido_nombre||'—',estado:u.estado||'—'}
     })
     exportarPDF({titulo:'Listado de Unidades Funcionales',columnas:cols,filas:rows,logoB64:LOGO_ADM_B64,
-      totales:{uf:'TOTAL',tipo:'',piso:'',sup:'',coef:totalCoef.toFixed(4)+'%',propietario:`${filtradas.length} UFs`,estado:''}})
+      totales:{uf:'TOTAL',tipo:'',piso:'',extra:'',sup:'',coef:totalCoef.toFixed(4)+'%',propietario:`${filtradas.length} UFs`,estado:''}})
   }
   function handleExcel() {
-    const cols = [{key:'uf',label:'UF'},{key:'tipo',label:'Tipo'},{key:'piso',label:'Piso'},
+    const cols = [{key:'uf',label:'UF'},{key:'tipo',label:'Tipo'},{key:'piso',label:'Piso'},{key:'extra',label:'Extra'},
       {key:'sup',label:'Sup.'},{key:'coef',label:'Coef.%'},{key:'propietario',label:'Propietario'},
       {key:'nro_ep',label:'N° EP'},{key:'nro_siro',label:'N° SIRO'},{key:'estado',label:'Estado'}]
     const rows = filtradas.map(u=>{
       const cp=copropietarios.find(c=>c.id===u.propietario_id)
-      return {uf:u.numero,tipo:u.tipo,piso:u.piso||'',sup:u.superficie_cubierta||'',
+      return {uf:u.numero,tipo:u.tipo,piso:u.piso||'',extra:u.extra||'',sup:u.superficie_cubierta||'',
         coef:u.porcentaje_fiscal||'',propietario:cp?.apellido_nombre||'',
         nro_ep:u.nro_ep||'',nro_siro:u.nro_siro||'',estado:u.estado||''}
     })
@@ -208,6 +208,7 @@ export default function Unidades() {
             <Input label="Número / Código" value={form.numero} onChange={v=>F({numero:v})} placeholder="1A, 2B, PB-1..." required />
             <Sel label="Tipo" value={form.tipo} onChange={v=>F({tipo:v})} opts={TIPOS} />
             <Input label="Piso" value={form.piso} onChange={v=>F({piso:v})} placeholder="PB, 1°, 2°..." />
+            <Input label="Extra" value={form.extra} onChange={v=>F({extra:v})} placeholder="Dato sistema anterior" />
             <Input label="Sup. cubierta (m²)" value={form.superficie_cubierta} onChange={v=>F({superficie_cubierta:v})} type="number" />
             <Input label="Coeficiente fiscal %" value={form.porcentaje_fiscal} onChange={v=>F({porcentaje_fiscal:v})} type="number" placeholder="8.333..." required />
             <Sel label="Estado" value={form.estado} onChange={v=>F({estado:v})} opts={ESTADOS} />
@@ -298,7 +299,7 @@ export default function Unidades() {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead>
               <tr style={{ background:'#f3f4f6' }}>
-                {['UF','Tipo','Piso','Sup.','Coef. %','Copropietario','Cob. Auto','Estado',''].map((h,i) => (
+                {['UF','Tipo','Piso','Extra','Sup.','Coef. %','Copropietario','Cob. Auto','Estado',''].map((h,i) => (
                   <th key={i} style={{ padding:'8px 12px', textAlign:'left', fontSize:11, fontWeight:'bold', color:GR, textTransform:'uppercase', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
                 ))}
               </tr>
@@ -312,6 +313,7 @@ export default function Unidades() {
                     <td style={{ padding:'10px 12px', fontWeight:700, color:AZ }}>{u.numero}</td>
                     <td style={{ padding:'10px 12px', textTransform:'capitalize' }}>{u.tipo}</td>
                     <td style={{ padding:'10px 12px' }}>{u.piso||'—'}</td>
+                    <td style={{ padding:'10px 12px', whiteSpace:'pre' }}>{u.extra||'—'}</td>
                     <td style={{ padding:'10px 12px' }}>{u.superficie_cubierta?u.superficie_cubierta+' m²':'—'}</td>
                     <td style={{ padding:'10px 12px', fontWeight:600 }}>{u.porcentaje_fiscal?Number(u.porcentaje_fiscal).toFixed(4)+'%':'—'}</td>
                     <td style={{ padding:'10px 12px' }}>{cp?.apellido_nombre||'—'}</td>
