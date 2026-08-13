@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, enviarNotificacion, g
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function EnviarNotificacion() {
-  const { session, consorcioActivo, unidades, copropietarios, adminPerfil } = useApp()
+  const { session, consorcioActivo, unidades, copropietarios, adminPerfil, puede } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
@@ -50,6 +50,7 @@ export default function EnviarNotificacion() {
   }
 
   async function enviar(esTest) {
+    if (!puede('comunicar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite enviar comunicaciones.' })
     if (!asunto.trim()) return setMsg({ tipo:'warn', texto:'El asunto es requerido' })
     if (!cuerpo.trim())  return setMsg({ tipo:'warn', texto:'El cuerpo del mensaje es requerido' })
     if (esTest && !testEmail) return setMsg({ tipo:'warn', texto:'Ingresá el email de prueba' })
