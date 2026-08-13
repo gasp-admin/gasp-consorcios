@@ -9,7 +9,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Cobranzas() {
-  const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo } = useApp()
+  const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, puede, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo } = useApp()
   const uid = session?.user?.id
   const consorcioId = consorcioActivo?.id
   const [expensas, setExpensas]         = useState([])
@@ -55,6 +55,7 @@ export default function Cobranzas() {
   }
 
   async function registrarPago() {
+    if (!puede('cobrar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite registrar o modificar cobranzas.' })
     if (!form?.unidad_id || !form?.monto || !form?.fecha)
       return setMsg({ tipo:'warn', texto:'Unidad, fecha y monto son obligatorios' })
     const monto = Math.round(parseFloat(form.monto) * 100) / 100
@@ -132,6 +133,7 @@ export default function Cobranzas() {
   }
 
   async function eliminarCobranza(cob) {
+    if (!puede('cobrar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite registrar o modificar cobranzas.' })
     if (!confirm('¿Eliminar este pago?')) return
     // Movimientos de cta cte ligados a esta cobranza (referencian el id en 'notas')
     const { data: movs } = await supabase.from('con_movimientos_unidad')
@@ -177,6 +179,7 @@ export default function Cobranzas() {
   }
 
   async function aplicarMora() {
+    if (!puede('cobrar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite registrar o modificar cobranzas.' })
     if (previewMora.length === 0) return
     if (!confirm(`¿Aplicar interés por mora a ${previewMora.length} unidad/es?`)) return
     setAplicandoMora(true)
@@ -218,6 +221,7 @@ export default function Cobranzas() {
   }
 
   async function cerrarPeriodo() {
+    if (!puede('cobrar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite registrar o modificar cobranzas.' })
     if (!expSel || !confirm(`¿Cerrar ${periodoLabel(expSel.periodo)}? Se trasladarán los saldos pendientes al período siguiente.`)) return
     await supabase.from('con_expensas').update({ estado: 'cerrada' }).eq('id', expSel.id)
     const siguiente = expensas.find(e => e.periodo > expSel.periodo)
@@ -365,7 +369,7 @@ export default function Cobranzas() {
                 <Input label="Observaciones" value={form.observaciones} onChange={v=>setForm(x=>({...x,observaciones:v}))} />
               </div>
               <div style={{ display:'flex', gap:8 }}>
-                <Btn small color={VD} onClick={registrarPago}>💾 Guardar pago</Btn>
+                <Btn small color={VD} onClick={registrarPago} disabled={!puede('cobrar')}>💾 Guardar pago</Btn>
                 <BtnSec small onClick={() => setForm(null)}>Cancelar</BtnSec>
               </div>
             </Card>
