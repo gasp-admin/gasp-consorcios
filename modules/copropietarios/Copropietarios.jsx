@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Copropietarios() {
-  const { session, consorcioActivo, copropietarios, setCopropietarios, unidades, expensas } = useApp()
+  const { session, consorcioActivo, copropietarios, setCopropietarios, unidades, expensas, puede } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
@@ -44,6 +44,7 @@ export default function Copropietarios() {
     if (false) (cps)
   }
   async function guardar() {
+    if (!puede('editar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite editar datos.' })
     if (!form.apellido_nombre) return setMsg({ tipo:'warn', texto:'Nombre obligatorio' })
     const id = form.id || nextId(lista, 'CP')
     const { error } = await supabase.from('con_copropietarios').upsert(
@@ -52,6 +53,7 @@ export default function Copropietarios() {
     setForm(null); setMsg({ tipo:'ok', texto:'✓ Guardado' }); cargar()
   }
   async function eliminar(id) {
+    if (!puede('editar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite editar datos.' })
     if (!confirm('¿Eliminar copropietario?')) return
     await supabase.from('con_copropietarios').delete().eq('id', id); cargar()
   }
