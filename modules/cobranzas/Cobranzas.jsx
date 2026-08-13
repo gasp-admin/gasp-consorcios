@@ -56,6 +56,10 @@ export default function Cobranzas() {
 
   async function registrarPago() {
     if (!puede('cobrar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite registrar o modificar cobranzas.' })
+    // Una liquidación CERRADA es inmutable: el pago se registra (cobranza + cta cte) pero NO se
+    // toca su detalle. El saldo del período siguiente se calcula desde las cobranzas reales
+    // (cobranzasPorUF), así que la deuda se arrastra igual sin modificar la liquidación cerrada.
+    const expCerrada = expSel?.estado === 'cerrada' || expSel?.estado === 'liquidada'
     if (!form?.unidad_id || !form?.monto || !form?.fecha)
       return setMsg({ tipo:'warn', texto:'Unidad, fecha y monto son obligatorios' })
     const monto = Math.round(parseFloat(form.monto) * 100) / 100
@@ -79,7 +83,7 @@ export default function Cobranzas() {
     const det = detalles.find(d => d.unidad_id === form.unidad_id)
     const im2 = parseFloat(consorcio?.interes_mora_2) || 0
     let recargoAplicado = 0
-    if (det) {
+    if (det && !expCerrada) {
       const salAnt   = parseFloat(det.saldo_anterior) || 0
       const montoExp = parseFloat(det.monto) || 0
       const moraPrev = parseFloat(det.interes_mora) || 0
