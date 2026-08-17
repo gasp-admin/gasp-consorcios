@@ -34,6 +34,7 @@ export const NAV_ITEMS = [
   { id: 'control_liquidaciones',    label: 'Control liquidaciones',   icon: '✅', sec: 'Expensas' },
   { id: 'cobranzas',                label: 'Cobranzas',               icon: '💳', sec: 'Cobranzas' },
   { id: 'cobranzas_auto',           label: 'Cobranzas automáticas',   icon: '🏦', sec: 'Cobranzas' },
+  { id: 'conciliar_pagos',          label: 'Importar pagos banco',    icon: '🏦', sec: 'Cobranzas', perm: 'cobrar' },
   { id: 'generar_debito',           label: 'Generar débito',          icon: '📤', sec: 'Cobranzas' },
   { id: 'anular_cobranza',          label: 'Anular cobranzas',        icon: '↩️', sec: 'Cobranzas' },
   { id: 'mora_diferencial',         label: 'Interés por mora',        icon: '⚖️', sec: 'Cobranzas' },
