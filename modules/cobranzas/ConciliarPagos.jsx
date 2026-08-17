@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
-import { AZ, GR, BG, VD } from '../../lib/config'
+import { SUPA_URL, AZ, GR, BG, VD } from '../../lib/config'
 
 // ─────────────────────────────────────────────────────────────────────────
 // Perfiles de columnas por banco. Cada banco informa distinto; todos se
@@ -93,6 +93,10 @@ export default function ConciliarPagos() {
   const [cargando, setCargando] = useState(false)
   const [importando, setImportando] = useState(false)
   const [msg, setMsg]           = useState(null)
+  const [loteId, setLoteId]     = useState(null)
+  const [lineasLote, setLineasLote] = useState([])
+  const [ufMap, setUfMap]       = useState({})
+  const [conciliando, setConciliando] = useState(false)
 
   const puedeCobrar = puede ? puede('cobrar') : true
 
@@ -180,12 +184,45 @@ export default function ConciliarPagos() {
       const { error: eLin } = await supabase.from('con_cobranza_lote_linea').insert(filas)
       if (eLin) throw eLin
 
-      setMsg({ t:'ok', m:`✓ Importadas ${lineas.length} líneas al lote. Próximo paso: conciliar (imputar a cada UF).` })
-      setLineas([]); setArchivo(null); setBanco('')
+      setMsg({ t:'ok', m:`✓ Importadas ${lineas.length} líneas. Ahora conciliá para proponer la UF de cada pago.` })
+      setLineas([]); setArchivo(null)
+      setLoteId(lote.id)
+      await cargarUFs()
+      await cargarLineasLote(lote.id)
     } catch (err) {
       setMsg({ t:'e', m:'No se pudo importar: ' + err.message })
     }
     setImportando(false)
+  }
+
+  async function cargarUFs() {
+    const { data } = await supabase.from('con_unidades')
+      .select('id, nro_uf_pdf, numero, con_copropietarios(apellido_nombre)')
+      .eq('consorcio_id', consorcioActivo.id)
+    const m = {}
+    for (const u of (data || [])) m[u.id] = { nro: u.nro_uf_pdf, dpto: u.numero, ape: u.con_copropietarios?.apellido_nombre || '' }
+    setUfMap(m)
+  }
+  async function cargarLineasLote(id) {
+    const { data } = await supabase.from('con_cobranza_lote_linea').select('*').eq('lote_id', id).order('fecha_pago')
+    setLineasLote(data || [])
+  }
+  async function conciliar() {
+    if (!loteId) return
+    setConciliando(true); setMsg(null)
+    try {
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const r = await fetch(`${SUPA_URL}/functions/v1/conciliar-cobranzas`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}` },
+        body: JSON.stringify({ lote_id: loteId }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.ok) { setMsg({ t:'e', m:'Error al conciliar: ' + (d.error || '') }); setConciliando(false); return }
+      setMsg({ t:'ok', m:`Conciliado: ${d.procesadas} sugeridas${d.por_ia?` (${d.por_ia} por IA)`:''}, ${d.sin_match||0} sin coincidencia.` })
+      await cargarLineasLote(loteId)
+    } catch (e) { setMsg({ t:'e', m:'Error: ' + e.message }) }
+    setConciliando(false)
   }
 
   const totImp = lineas.reduce((a, l) => a + l.importe, 0)
@@ -260,6 +297,44 @@ export default function ConciliarPagos() {
             <span style={{ fontSize:12, color:GR, marginLeft:12 }}>Esto solo guarda las líneas; la imputación a cada UF viene en el siguiente paso.</span>
           </div>
         </>
+      )}
+
+      {loteId && lineasLote.length > 0 && (
+        <div style={{ marginTop: 22 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:10 }}>
+            <h3 style={{ margin:0, color:AZ, fontSize:16 }}>Lote importado — {lineasLote.length} pagos</h3>
+            <button onClick={conciliar} disabled={conciliando}
+              style={{ padding:'9px 20px', background:AZ, color:'#fff', border:'none', borderRadius:8, fontSize:13, fontWeight:700, cursor: conciliando?'default':'pointer', opacity: conciliando?0.7:1 }}>
+              {conciliando ? 'Conciliando…' : '🔎 Conciliar (proponer UF)'}
+            </button>
+          </div>
+          <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:8, maxHeight:460, overflowY:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead style={{ position:'sticky', top:0, background:BG }}>
+                <tr><th style={th}>Fecha</th><th style={th}>Importe</th><th style={th}>Ordenante</th><th style={th}>→ UF sugerida</th><th style={th}>Confianza</th><th style={th}>Motivo</th></tr>
+              </thead>
+              <tbody>
+                {lineasLote.map((l) => {
+                  const uf = l.unidad_id ? ufMap[l.unidad_id] : null
+                  const cColor = l.confianza_matching==='alta' ? '#15803d' : l.confianza_matching==='media' ? '#c07d10' : l.confianza_matching==='baja' ? '#6b7280' : '#dc2626'
+                  return (
+                    <tr key={l.id}>
+                      <td style={{ ...td, whiteSpace:'nowrap' }}>{l.fecha_pago}</td>
+                      <td style={{ ...td, textAlign:'right', fontWeight:600, whiteSpace:'nowrap' }}>${Number(l.importe).toLocaleString('es-AR',{minimumFractionDigits:2})}</td>
+                      <td style={td}>{l.nombre_pagador || '—'}{l.cuit_pagador ? <span style={{ color:GR, fontSize:11 }}> · {l.cuit_pagador}</span> : ''}</td>
+                      <td style={td}>{uf ? `UF ${uf.nro} — ${uf.ape}` : <span style={{ color:'#dc2626' }}>sin imputar</span>}</td>
+                      <td style={{ ...td, color:cColor, fontWeight:600 }}>{l.confianza_matching || (l.estado==='sin_match' ? 'sin match' : '—')}</td>
+                      <td style={{ ...td, fontSize:11, color:GR }}>{l.motivo_pendiente}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ fontSize:12, color:GR, marginTop:10 }}>
+            Modo sugerencia: todavía <strong>no se imputó nada</strong>. Revisá las propuestas; la confirmación (crear el recibo en cada UF y aprender la regla) viene en el próximo paso.
+          </p>
+        </div>
       )}
     </div>
   )
