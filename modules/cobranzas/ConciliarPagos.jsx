@@ -167,15 +167,18 @@ export default function ConciliarPagos() {
     try {
       const uid = session.user.id
       const totalImporte = lineas.reduce((a, l) => a + l.importe, 0)
+      const loteId = 'LOTE-' + consorcioActivo.id + '-' + Date.now()
       const { data: lote, error: eLote } = await supabase.from('con_cobranza_lote').insert({
+        id: loteId,
         admin_id: uid, consorcio_id: consorcioActivo.id, sistema: banco,
-        archivo_nombre: archivo?.name || null, fecha_archivo: new Date().toISOString().slice(0, 10),
+        archivo_nombre: archivo?.name || 'planilla', fecha_archivo: new Date().toISOString().slice(0, 10),
         estado: 'importado', total_registros: lineas.length,
         registros_pendientes: lineas.length, total_importe: totalImporte, importe_pendiente: totalImporte,
       }).select('id').single()
       if (eLote) throw eLote
 
-      const filas = lineas.map((l) => ({
+      const filas = lineas.map((l, i) => ({
+        id: loteId + '-L' + String(i + 1).padStart(3, '0'),
         admin_id: uid, lote_id: lote.id, consorcio_id: consorcioActivo.id,
         fecha_pago: l.fecha, importe: l.importe,
         concepto_original: l.concepto, cuit_pagador: l.cuit, nombre_pagador: l.nombre,
