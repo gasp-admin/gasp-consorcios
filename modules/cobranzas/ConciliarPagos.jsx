@@ -199,11 +199,13 @@ export default function ConciliarPagos() {
   }
 
   async function cargarUFs() {
-    const { data } = await supabase.from('con_unidades')
-      .select('id, nro_uf_pdf, numero, con_copropietarios(apellido_nombre)')
-      .eq('consorcio_id', consorcioActivo.id)
+    const [{ data: uni }, { data: props }] = await Promise.all([
+      supabase.from('con_unidades').select('id, nro_uf_pdf, numero, propietario_id').eq('consorcio_id', consorcioActivo.id),
+      supabase.from('con_copropietarios').select('id, apellido_nombre').eq('consorcio_id', consorcioActivo.id),
+    ])
+    const pm = {}; for (const p of (props || [])) pm[p.id] = p.apellido_nombre
     const m = {}
-    for (const u of (data || [])) m[u.id] = { nro: u.nro_uf_pdf, dpto: u.numero, ape: u.con_copropietarios?.apellido_nombre || '' }
+    for (const u of (uni || [])) m[u.id] = { nro: u.nro_uf_pdf, dpto: u.numero, ape: pm[u.propietario_id] || '' }
     setUfMap(m)
   }
   async function cargarLineasLote(id) {
@@ -214,6 +216,9 @@ export default function ConciliarPagos() {
     if (!loteId) return
     setConciliando(true); setMsg(null)
     try {
+      // Reintentar: volver a 'pendiente' las líneas aún no confirmadas
+      await supabase.from('con_cobranza_lote_linea').update({ estado: 'pendiente' })
+        .eq('lote_id', loteId).neq('estado', 'confirmada')
       const { data: { session: sess } } = await supabase.auth.getSession()
       const r = await fetch(`${SUPA_URL}/functions/v1/conciliar-cobranzas`, {
         method: 'POST',
