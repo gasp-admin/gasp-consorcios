@@ -199,13 +199,21 @@ export default function ConciliarPagos() {
   }
 
   async function cargarUFs() {
-    const [{ data: uni }, { data: props }] = await Promise.all([
+    const [{ data: uni }, { data: props }, { data: expR }] = await Promise.all([
       supabase.from('con_unidades').select('id, nro_uf_pdf, numero, propietario_id').eq('consorcio_id', consorcioActivo.id),
       supabase.from('con_copropietarios').select('id, apellido_nombre').eq('consorcio_id', consorcioActivo.id),
+      supabase.from('con_expensas').select('id').eq('consorcio_id', consorcioActivo.id).order('periodo', { ascending: false }).limit(1),
     ])
     const pm = {}; for (const p of (props || [])) pm[p.id] = p.apellido_nombre
+    const tp = {}
+    const expId = expR?.[0]?.id
+    if (expId) {
+      const { data: dets } = await supabase.from('con_expensas_detalle')
+        .select('unidad_id, saldo_anterior, monto, interes_mora, pagos_periodo').eq('expensa_id', expId)
+      for (const d of (dets || [])) tp[d.unidad_id] = Math.round(((+d.saldo_anterior||0)+(+d.monto||0)+(+d.interes_mora||0)-(+d.pagos_periodo||0))*100)/100
+    }
     const m = {}
-    for (const u of (uni || [])) m[u.id] = { nro: u.nro_uf_pdf, dpto: u.numero, ape: pm[u.propietario_id] || '' }
+    for (const u of (uni || [])) m[u.id] = { nro: u.nro_uf_pdf, dpto: u.numero, ape: pm[u.propietario_id] || '', pagar: tp[u.id] ?? null }
     setUfMap(m)
   }
   async function cargarLineasLote(id) {
@@ -319,19 +327,23 @@ export default function ConciliarPagos() {
           <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:8, maxHeight:460, overflowY:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead style={{ position:'sticky', top:0, background:BG }}>
-                <tr><th style={th}>Fecha</th><th style={th}>Importe</th><th style={th}>Ordenante</th><th style={th}>→ UF sugerida</th><th style={th}>Confianza</th><th style={th}>Motivo</th></tr>
+                <tr><th style={th}>Fecha</th><th style={th}>Importe</th><th style={th}>Ordenante</th><th style={th}>→ UF sugerida</th><th style={th}>A pagar</th><th style={th}>Confianza</th><th style={th}>Motivo</th></tr>
               </thead>
               <tbody>
                 {lineasLote.map((l) => {
                   const uf = l.unidad_id ? ufMap[l.unidad_id] : null
+                  const ign = l.estado === 'ignorada'
                   const cColor = l.confianza_matching==='alta' ? '#15803d' : l.confianza_matching==='media' ? '#c07d10' : l.confianza_matching==='baja' ? '#6b7280' : '#dc2626'
+                  const pagar = uf && uf.pagar != null ? uf.pagar : null
+                  const coincide = pagar != null && Math.abs(pagar - Number(l.importe)) < 1
                   return (
-                    <tr key={l.id}>
+                    <tr key={l.id} style={ign ? { opacity:0.55 } : {}}>
                       <td style={{ ...td, whiteSpace:'nowrap' }}>{l.fecha_pago}</td>
                       <td style={{ ...td, textAlign:'right', fontWeight:600, whiteSpace:'nowrap' }}>${Number(l.importe).toLocaleString('es-AR',{minimumFractionDigits:2})}</td>
                       <td style={td}>{l.nombre_pagador || '—'}{l.cuit_pagador ? <span style={{ color:GR, fontSize:11 }}> · {l.cuit_pagador}</span> : ''}</td>
-                      <td style={td}>{uf ? `UF ${uf.nro} — ${uf.ape}` : <span style={{ color:'#dc2626' }}>sin imputar</span>}</td>
-                      <td style={{ ...td, color:cColor, fontWeight:600 }}>{l.confianza_matching || (l.estado==='sin_match' ? 'sin match' : '—')}</td>
+                      <td style={td}>{ign ? <span style={{ color:GR }}>— ignorado —</span> : uf ? `UF ${uf.nro} — ${uf.ape}` : <span style={{ color:'#dc2626' }}>sin imputar</span>}</td>
+                      <td style={{ ...td, textAlign:'right', whiteSpace:'nowrap', fontSize:11, color: pagar==null ? GR : coincide ? '#15803d' : '#c07d10', fontWeight: coincide ? 700 : 400 }}>{pagar != null ? '$'+pagar.toLocaleString('es-AR',{minimumFractionDigits:2}) : '—'}</td>
+                      <td style={{ ...td, color:cColor, fontWeight:600 }}>{ign ? '—' : (l.confianza_matching || (l.estado==='sin_match' ? 'sin match' : '—'))}</td>
                       <td style={{ ...td, fontSize:11, color:GR }}>{l.motivo_pendiente}</td>
                     </tr>
                   )
