@@ -7,6 +7,7 @@ import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
+import InterfastPanel from './InterfastPanel'
 
 export default function CobranzasAutomaticas() {
   const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo } = useApp()
@@ -855,6 +856,7 @@ export default function CobranzasAutomaticas() {
         {[
           { id:'importar', l:'📥 Importar archivo' },
           { id:'api',      l:'🔌 API SIRO Roela' },
+          { id:'interfast',l:'🏦 Interfast (Macro)' },
           { id:'config',   l:'⚙️ Configuración' },
           { id:'historial',l:'📋 Historial' },
         ].map(t => (
@@ -868,6 +870,9 @@ export default function CobranzasAutomaticas() {
       </div>
 
       <Msg data={msg} />
+
+      {/* ── TAB: INTERFAST (MACRO) ── */}
+      {tab === 'interfast' && <InterfastPanel />}
 
       {/* ── TAB: IMPORTAR ARCHIVO ── */}
       {tab === 'importar' && (
