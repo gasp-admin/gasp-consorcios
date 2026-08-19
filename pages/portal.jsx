@@ -332,6 +332,40 @@ export default function Portal() {
   const cbu    = cuentaBanco?.cbu   || consorcio?.cbu   || null
   const alias  = cuentaBanco?.alias || consorcio?.alias_cbu || '—'
   const banco  = cuentaBanco?.banco || consorcio?.banco  || '—'
+  const bloqueComoPagar = (interfast?.cvu || cbu) ? (
+    <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px',
+      marginBottom:14, border:'1.5px solid #dbeafe', boxShadow:'0 2px 8px #0001' }}>
+      <div style={{ fontWeight:700, fontSize:14, color:AZ, marginBottom:12 }}>💳 Cómo pagar</div>
+      {interfast?.cvu ? (
+        <div>
+          <div style={{ fontWeight:700, fontSize:13, color:'#166534', marginBottom:10 }}>🏦 Pago electrónico (Interfast)</div>
+          <a href={`https://interfast.com.ar/pagar/${interfast.cpe}`} target="_blank" rel="noreferrer"
+            style={{ display:'block', padding:'12px', background:'#16a34a', color:'#fff', textAlign:'center',
+              borderRadius:10, fontWeight:700, fontSize:15, textDecoration:'none', marginBottom:12 }}>
+            💳 Pagar online con tarjeta
+          </a>
+          <div style={{ fontSize:12.5, color:'#374151', lineHeight:1.9 }}>
+            <div style={{ color:GR, marginBottom:4 }}>O transferí desde tu billetera / homebanking a:</div>
+            <div><span style={{ color:GR }}>CVU:</span> <strong style={{ fontFamily:'monospace' }}>{interfast.cvu}</strong></div>
+            {interfast.alias && <div><span style={{ color:GR }}>Alias:</span> <strong>{interfast.alias}</strong></div>}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div style={{ fontSize:13, color:'#374151', lineHeight:2 }}>
+            <div><span style={{ color:GR }}>Titular:</span> <strong>{consorcio?.nombre}</strong></div>
+            <div><span style={{ color:GR }}>CBU:</span> <strong style={{ fontFamily:'monospace' }}>{cbu}</strong></div>
+            <div><span style={{ color:GR }}>Alias:</span> <strong>{alias}</strong></div>
+            <div><span style={{ color:GR }}>Banco:</span> {banco}</div>
+          </div>
+          <div style={{ marginTop:10, padding:'8px 12px', background:'#eff6ff',
+            borderRadius:8, fontSize:11, color:'#1e40af' }}>
+            ℹ️ Incluí el importe exacto con centavos al transferir.
+          </div>
+        </div>
+      )}
+    </div>
+  ) : null
 
   // ── Drive ──────────────────────────────────────────────────────────────────
   const driveFolderUrl = consorcio?.drive_folder_url || null
@@ -536,24 +570,7 @@ export default function Portal() {
             )}
           </div>
 
-          {cbu && (
-            <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px',
-              marginBottom:14, border:`1.5px solid #dbeafe`, boxShadow:'0 2px 8px #0001' }}>
-              <div style={{ fontWeight:700, fontSize:14, color:AZ, marginBottom:12 }}>💳 Cómo pagar</div>
-              <div style={{ fontSize:13, color:'#374151', lineHeight:2 }}>
-                <div><span style={{ color:GR }}>Titular:</span> <strong>{consorcio?.nombre}</strong></div>
-                <div><span style={{ color:GR }}>CBU:</span>{' '}
-                  <strong style={{ fontFamily:'monospace' }}>{cbu}</strong>
-                </div>
-                <div><span style={{ color:GR }}>Alias:</span> <strong>{alias}</strong></div>
-                <div><span style={{ color:GR }}>Banco:</span> {banco}</div>
-              </div>
-              <div style={{ marginTop:10, padding:'8px 12px', background:'#eff6ff',
-                borderRadius:8, fontSize:11, color:'#1e40af' }}>
-                ℹ️ Incluya el importe exacto con centavos al transferir.
-              </div>
-            </div>
-          )}
+          {bloqueComoPagar}
 
           <button onClick={abrirPDFCompleto} disabled={generandoPDF || loadingGastos}
             style={{ width:'100%', padding:'13px', background:'#374151', color:'#fff',
@@ -779,24 +796,7 @@ export default function Portal() {
               </div>
             )}
 
-            {cbu && (
-              <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px',
-                marginTop:14, border:`1.5px solid #dbeafe`, boxShadow:'0 2px 8px #0001' }}>
-                <div style={{ fontWeight:700, fontSize:14, color:AZ, marginBottom:12 }}>💳 Cómo pagar</div>
-                <div style={{ fontSize:13, color:'#374151', lineHeight:2 }}>
-                  <div><span style={{ color:GR }}>Titular:</span> <strong>{consorcio?.nombre}</strong></div>
-                  <div><span style={{ color:GR }}>CBU:</span>{' '}
-                    <strong style={{ fontFamily:'monospace' }}>{cbu}</strong>
-                  </div>
-                  <div><span style={{ color:GR }}>Alias:</span> <strong>{alias}</strong></div>
-                  <div><span style={{ color:GR }}>Banco:</span> {banco}</div>
-                </div>
-                <div style={{ marginTop:10, padding:'8px 12px', background:'#eff6ff',
-                  borderRadius:8, fontSize:11, color:'#1e40af' }}>
-                  ℹ️ Incluya el importe exacto con centavos al transferir.
-                </div>
-              </div>
-            )}
+            {bloqueComoPagar}
           </div>
         )}
 
@@ -962,40 +962,6 @@ export default function Portal() {
         {/* TAB: PAGOS */}
         {tab === 'pagos' && (
           <div id="pagos">
-            {(interfast?.cvu || cbu) && (
-              <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px',
-                marginBottom:14, boxShadow:'0 2px 12px #0001' }}>
-                <div style={{ fontWeight:700, fontSize:15, marginBottom:14, color:'#111' }}>💳 Cómo pagar</div>
-                {interfast?.cvu && (
-                  <div style={{ border:'1.5px solid #dcfce7', background:'#f0fdf4', borderRadius:12, padding:'14px 16px', marginBottom:14 }}>
-                    <div style={{ fontWeight:700, fontSize:13, color:'#166534', marginBottom:10 }}>🏦 Pago electrónico (Interfast)</div>
-                    <a href={`https://interfast.com.ar/pagar/${interfast.cpe}`} target="_blank" rel="noreferrer"
-                      style={{ display:'block', padding:'12px', background:'#16a34a', color:'#fff',
-                        textAlign:'center', borderRadius:10, fontWeight:700, fontSize:15, textDecoration:'none', marginBottom:12 }}>
-                      💳 Pagar online con tarjeta
-                    </a>
-                    <div style={{ fontSize:12.5, color:'#374151', lineHeight:1.9 }}>
-                      <div style={{ color:GR, marginBottom:4 }}>O transferí desde tu billetera / homebanking a:</div>
-                      <div><span style={{ color:GR }}>CVU:</span> <strong style={{ fontFamily:'monospace' }}>{interfast.cvu}</strong></div>
-                      {interfast.alias && <div><span style={{ color:GR }}>Alias:</span> <strong>{interfast.alias}</strong></div>}
-                    </div>
-                  </div>
-                )}
-                {cbu && (
-                  <div style={{ fontSize:13, color:'#374151', lineHeight:2 }}>
-                    <div style={{ fontWeight:600, color:AZ, marginBottom:6 }}>Transferencia a la cuenta del consorcio</div>
-                    <div><span style={{ color:GR }}>Titular:</span> <strong>{consorcio?.nombre}</strong></div>
-                    <div><span style={{ color:GR }}>CBU:</span> <strong style={{ fontFamily:'monospace' }}>{cbu}</strong></div>
-                    <div><span style={{ color:GR }}>Alias:</span> <strong>{alias}</strong></div>
-                    <div><span style={{ color:GR }}>Banco:</span> {banco}</div>
-                    <div style={{ marginTop:10, padding:'8px 12px', background:'#eff6ff',
-                      borderRadius:8, fontSize:11, color:'#1e40af' }}>
-                      ℹ️ Incluí el importe exacto con centavos al transferir.
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
             {cobranzas.length === 0 ? (
               <div style={{ background:'#fff', borderRadius:14, padding:32,
                 textAlign:'center', color:GR }}>
