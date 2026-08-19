@@ -42,7 +42,7 @@ export default async function handler(req, res) {
     if (accion === 'init') {
       const [
         { data: cp }, { data: con }, { data: adm },
-        { data: cuentas }, { data: dets }, { data: cobs }, { data: ifuf },
+        { data: cuentas }, { data: dets }, { data: cobs }, { data: ifuf }, { data: cfgcob },
       ] = await Promise.all([
         db.from('con_copropietarios').select('*').eq('id', uf.propietario_id).single(),
         db.from('con_consorcios').select('*').eq('id', uf.consorcio_id).single(),
@@ -57,8 +57,9 @@ export default async function handler(req, res) {
           con_expensas:expensa_id (periodo)
         `).eq('unidad_id', uf.id).in('estado', ['vigente', 'acreditado', 'cobrado']).order('fecha', { ascending: false }).limit(30),
         db.from('con_interfast_uf').select('cpe, cvu, alias').eq('unidad_id', uf.id).maybeSingle(),
+        db.from('con_config_cobranza').select('interfast_activo').eq('consorcio_id', uf.consorcio_id).maybeSingle(),
       ])
-      return res.status(200).json({ uf, cp, con, adm, cuentas, dets, cobs, interfast: ifuf })
+      return res.status(200).json({ uf, cp, con, adm, cuentas, dets, cobs, interfast: (cfgcob?.interfast_activo ? ifuf : null) })
     }
 
     // ── cta: cuenta corriente (llama a la EF desde el servidor) ──
