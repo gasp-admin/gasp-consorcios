@@ -727,6 +727,7 @@ export default function Portal() {
         {/* TAB: CUENTA CORRIENTE */}
         {tab === 'cuenta' && (
           <div id="cuenta-corriente">
+            {bloqueComoPagar}
             {detOrdenados.length === 0 ? (
               <div style={{ background:'#fff', borderRadius:14, padding:32,
                 textAlign:'center', color:GR }}>Sin movimientos registrados</div>
@@ -795,8 +796,6 @@ export default function Portal() {
                 })}
               </div>
             )}
-
-            {bloqueComoPagar}
           </div>
         )}
 
