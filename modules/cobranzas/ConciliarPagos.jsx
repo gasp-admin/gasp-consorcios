@@ -97,6 +97,8 @@ export default function ConciliarPagos() {
   const [lineasLote, setLineasLote] = useState([])
   const [ufMap, setUfMap]       = useState({})
   const [conciliando, setConciliando] = useState(false)
+  const [sel, setSel] = useState(() => new Set())
+  const [confirmando, setConfirmando] = useState(false)
 
   const puedeCobrar = puede ? puede('cobrar') : true
 
@@ -241,6 +243,36 @@ export default function ConciliarPagos() {
     setConciliando(false)
   }
 
+  function toggleSel(id) {
+    setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+  async function cambiarUF(lineId, unidadId) {
+    await supabase.from('con_cobranza_lote_linea')
+      .update({ unidad_id: unidadId || null, estado: unidadId ? 'sugerida' : 'sin_match', confianza_matching: unidadId ? 'manual' : '', motivo_pendiente: unidadId ? 'Asignada a mano' : 'Sin imputar' })
+      .eq('id', lineId)
+    await cargarLineasLote(loteId)
+  }
+  async function confirmar(payload) {
+    setConfirmando(true); setMsg(null)
+    try {
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const r = await fetch(`${SUPA_URL}/functions/v1/confirmar-cobranza`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}` },
+        body: JSON.stringify({ lote_id: loteId, ...payload }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.ok) { setMsg({ t:'e', m:'Error al confirmar: ' + (d.error || '') }); setConfirmando(false); return }
+      setMsg({ t:'ok', m:`✓ ${d.confirmadas} cobranzas imputadas${d.aprendidas?` · ${d.aprendidas} reglas aprendidas (CUIT→UF)`:''}.` })
+      setSel(new Set())
+      await cargarLineasLote(loteId)
+    } catch (e) { setMsg({ t:'e', m:'Error: ' + e.message }) }
+    setConfirmando(false)
+  }
+  const ufOpciones = Object.entries(ufMap)
+    .map(([id, u]) => ({ id, nro: u.nro, label: `UF ${u.nro} — ${u.ape || 's/prop'}` }))
+    .sort((a, b) => ((parseInt(a.nro,10)||999) - (parseInt(b.nro,10)||999)))
+
   const totImp = lineas.reduce((a, l) => a + l.importe, 0)
   const conCuit = lineas.filter((l) => l.cuit).length
   const conNombre = lineas.filter((l) => l.nombre).length
@@ -318,33 +350,65 @@ export default function ConciliarPagos() {
       {loteId && lineasLote.length > 0 && (
         <div style={{ marginTop: 22 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:10 }}>
-            <h3 style={{ margin:0, color:AZ, fontSize:16 }}>Lote importado — {lineasLote.length} pagos</h3>
-            <button onClick={conciliar} disabled={conciliando}
-              style={{ padding:'9px 20px', background:AZ, color:'#fff', border:'none', borderRadius:8, fontSize:13, fontWeight:700, cursor: conciliando?'default':'pointer', opacity: conciliando?0.7:1 }}>
-              {conciliando ? 'Conciliando…' : '🔎 Conciliar (proponer UF)'}
-            </button>
+            <h3 style={{ margin:0, color:AZ, fontSize:16 }}>Lote \u2014 {lineasLote.length} pagos</h3>
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+              <button onClick={conciliar} disabled={conciliando || confirmando}
+                style={{ padding:'9px 16px', background:AZ, color:'#fff', border:'none', borderRadius:8, fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                {conciliando ? 'Conciliando\u2026' : '\ud83d\udd0e Conciliar'}
+              </button>
+              {lineasLote.some((l) => l.estado === 'sugerida') && (
+                <>
+                  <button onClick={() => confirmar({ modo:'alta' })} disabled={confirmando}
+                    style={{ padding:'9px 16px', background:VD, color:'#fff', border:'none', borderRadius:8, fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                    \u2713 Confirmar confianza alta
+                  </button>
+                  <button onClick={() => confirmar({ line_ids:[...sel] })} disabled={confirmando || !sel.size}
+                    style={{ padding:'9px 16px', background: sel.size ? '#1d4ed8' : '#cbd5e1', color:'#fff', border:'none', borderRadius:8, fontSize:13, fontWeight:700, cursor: sel.size ? 'pointer':'default' }}>
+                    Confirmar {sel.size} sel.
+                  </button>
+                </>
+              )}
+            </div>
           </div>
-          <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:8, maxHeight:460, overflowY:'auto' }}>
+          <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:8, maxHeight:520, overflowY:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
-              <thead style={{ position:'sticky', top:0, background:BG }}>
-                <tr><th style={th}>Fecha</th><th style={th}>Importe</th><th style={th}>Ordenante</th><th style={th}>→ UF sugerida</th><th style={th}>A pagar</th><th style={th}>Confianza</th><th style={th}>Motivo</th></tr>
+              <thead style={{ position:'sticky', top:0, background:BG, zIndex:1 }}>
+                <tr>
+                  <th style={{ ...th, width:26 }}></th>
+                  <th style={th}>Fecha</th><th style={th}>Importe</th><th style={th}>Ordenante</th>
+                  <th style={th}>UF imputada</th><th style={th}>A pagar</th><th style={th}>Confianza</th><th style={th}>Motivo</th>
+                </tr>
               </thead>
               <tbody>
                 {lineasLote.map((l) => {
                   const uf = l.unidad_id ? ufMap[l.unidad_id] : null
                   const ign = l.estado === 'ignorada'
-                  const cColor = l.confianza_matching==='alta' ? '#15803d' : l.confianza_matching==='media' ? '#c07d10' : l.confianza_matching==='baja' ? '#6b7280' : '#dc2626'
+                  const conf = l.estado === 'confirmada'
+                  const editable = !ign && !conf
+                  const cColor = l.confianza_matching==='alta' ? '#15803d' : l.confianza_matching==='media' ? '#c07d10' : l.confianza_matching==='manual' ? '#1d4ed8' : l.confianza_matching==='baja' ? '#6b7280' : '#dc2626'
                   const pagar = uf && uf.pagar != null ? uf.pagar : null
                   const coincide = pagar != null && Math.abs(pagar - Number(l.importe)) < 1
+                  const rowBg = conf ? '#f0fdf4' : ign ? '#f9fafb' : '#fff'
                   return (
-                    <tr key={l.id} style={ign ? { opacity:0.55 } : {}}>
+                    <tr key={l.id} style={{ background:rowBg, opacity: ign ? 0.6 : 1 }}>
+                      <td style={{ ...td, textAlign:'center' }}>
+                        {editable && l.unidad_id ? <input type="checkbox" checked={sel.has(l.id)} onChange={() => toggleSel(l.id)} /> : conf ? '\u2713' : ''}
+                      </td>
                       <td style={{ ...td, whiteSpace:'nowrap' }}>{l.fecha_pago}</td>
                       <td style={{ ...td, textAlign:'right', fontWeight:600, whiteSpace:'nowrap' }}>${Number(l.importe).toLocaleString('es-AR',{minimumFractionDigits:2})}</td>
-                      <td style={td}>{l.nombre_pagador || '—'}{l.cuit_pagador ? <span style={{ color:GR, fontSize:11 }}> · {l.cuit_pagador}</span> : ''}</td>
-                      <td style={td}>{ign ? <span style={{ color:GR }}>— ignorado —</span> : uf ? `UF ${uf.nro} — ${uf.ape}` : <span style={{ color:'#dc2626' }}>sin imputar</span>}</td>
-                      <td style={{ ...td, textAlign:'right', whiteSpace:'nowrap', fontSize:11, color: pagar==null ? GR : coincide ? '#15803d' : '#c07d10', fontWeight: coincide ? 700 : 400 }}>{pagar != null ? '$'+pagar.toLocaleString('es-AR',{minimumFractionDigits:2}) : '—'}</td>
-                      <td style={{ ...td, color:cColor, fontWeight:600 }}>{ign ? '—' : (l.confianza_matching || (l.estado==='sin_match' ? 'sin match' : '—'))}</td>
-                      <td style={{ ...td, fontSize:11, color:GR }}>{l.motivo_pendiente}</td>
+                      <td style={td}>{l.nombre_pagador || '\u2014'}{l.cuit_pagador ? <span style={{ color:GR, fontSize:11 }}> \u00b7 {l.cuit_pagador}</span> : ''}</td>
+                      <td style={td}>
+                        {ign ? <span style={{ color:GR }}>\u2014 ignorado \u2014</span>
+                          : conf ? <span style={{ color:'#15803d', fontWeight:600 }}>UF {uf?.nro} \u2014 {uf?.ape}</span>
+                          : <select value={l.unidad_id || ''} onChange={(e) => cambiarUF(l.id, e.target.value)}
+                              style={{ padding:'4px 6px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, maxWidth:220, background:'#fff' }}>
+                              <option value="">\u2014 sin imputar \u2014</option>
+                              {ufOpciones.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                            </select>}
+                      </td>
+                      <td style={{ ...td, textAlign:'right', whiteSpace:'nowrap', fontSize:11, color: pagar==null ? GR : coincide ? '#15803d' : '#c07d10', fontWeight: coincide ? 700 : 400 }}>{pagar != null ? '$'+pagar.toLocaleString('es-AR',{minimumFractionDigits:2}) : '\u2014'}</td>
+                      <td style={{ ...td, color:cColor, fontWeight:600, fontSize:12 }}>{conf ? 'confirmada' : ign ? '\u2014' : (l.confianza_matching || (l.estado==='sin_match' ? 'sin match' : '\u2014'))}</td>
+                      <td style={{ ...td, fontSize:11, color: (l.motivo_pendiente||'').includes('distinto') ? '#c2410c' : GR }}>{l.motivo_pendiente}</td>
                     </tr>
                   )
                 })}
@@ -352,7 +416,7 @@ export default function ConciliarPagos() {
             </table>
           </div>
           <p style={{ fontSize:12, color:GR, marginTop:10 }}>
-            Modo sugerencia: todavía <strong>no se imputó nada</strong>. Revisá las propuestas; la confirmación (crear el recibo en cada UF y aprender la regla) viene en el próximo paso.
+            Ajust\u00e1 la UF donde haga falta. <strong>Confirmar</strong> crea el recibo en cada UF, imputa a la expensa m\u00e1s reciente por el importe completo y aprende la regla por CUIT.
           </p>
         </div>
       )}
