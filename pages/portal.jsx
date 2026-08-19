@@ -126,6 +126,7 @@ export default function Portal() {
   const [cobranzas, setCobranzas]     = useState([])
   const [adminPerfil, setAdminPerfil] = useState(null)
   const [cuentaBanco, setCuentaBanco] = useState(null)
+  const [interfast, setInterfast]     = useState(null)
   const [tab, setTab]                 = useState('cuenta')
   const [periodoExpandido, setPeriodoExpandido] = useState(null)
   const [gastosPeriodo, setGastosPeriodo]       = useState([])
@@ -163,10 +164,11 @@ export default function Portal() {
       const resp = await fetch('/api/portal?accion=init&token=' + encodeURIComponent(tk))
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok || data.error || !data.uf) { setError('Link no válido o expirado.'); setLoading(false); return }
-      const { uf, cp, con, adm, cuentas, dets, cobs } = data
+      const { uf, cp, con, adm, cuentas, dets, cobs, interfast } = data
       setUnidad(uf)
       setCoprop(cp); setConsorcio(con); setAdminPerfil(adm)
       setCuentaBanco(cuentas?.[0] || null)
+      setInterfast(interfast || null)
       setDetalles((dets||[]).filter(d =>
         (parseFloat(d.monto)||0) > 0 || (parseFloat(d.saldo_anterior)||0) > 0
       ))
@@ -549,6 +551,27 @@ export default function Portal() {
               <div style={{ marginTop:10, padding:'8px 12px', background:'#eff6ff',
                 borderRadius:8, fontSize:11, color:'#1e40af' }}>
                 ℹ️ Incluya el importe exacto con centavos al transferir.
+              </div>
+            </div>
+          )}
+
+          {interfast?.cvu && (
+            <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px',
+              marginBottom:14, border:'1.5px solid #dcfce7', boxShadow:'0 2px 8px #0001' }}>
+              <div style={{ fontWeight:700, fontSize:14, color:'#166534', marginBottom:12 }}>🏦 Pago electrónico (Interfast)</div>
+              <div style={{ fontSize:13, color:'#374151', lineHeight:2 }}>
+                <div><span style={{ color:GR }}>CVU:</span> <strong style={{ fontFamily:'monospace' }}>{interfast.cvu}</strong></div>
+                {interfast.alias && <div><span style={{ color:GR }}>Alias:</span> <strong>{interfast.alias}</strong></div>}
+                <div><span style={{ color:GR }}>Código de pago:</span> <strong style={{ fontFamily:'monospace' }}>{interfast.cpe}</strong></div>
+              </div>
+              <a href={`https://interfast.com.ar/pagar/${interfast.cpe}`} target="_blank" rel="noreferrer"
+                style={{ display:'block', marginTop:12, padding:'11px', background:'#16a34a', color:'#fff',
+                  textAlign:'center', borderRadius:10, fontWeight:700, fontSize:14, textDecoration:'none' }}>
+                💳 Pagar online
+              </a>
+              <div style={{ marginTop:10, padding:'8px 12px', background:'#f0fdf4',
+                borderRadius:8, fontSize:11, color:'#166534' }}>
+                ℹ️ Transferí a la CVU desde tu billetera/homebanking, o pagá online con tarjeta.
               </div>
             </div>
           )}
