@@ -81,9 +81,10 @@ export default function LiquidacionPeriodo() {
   async function cargarComprobantesImportables(eid) {
     setCargandoComps(true)
     try {
-      // 1. Obtener IDs ya importados como gastos en esta expensa
+      // 1. Obtener IDs de comprobantes ya importados como gastos en CUALQUIER expensa del consorcio
+      //    (no sólo la actual), para no ofrecer comprobantes ya liquidados en meses anteriores.
       const { data: gastosExist } = await supabase.from('con_gastos')
-        .select('comprobante_id').eq('expensa_id', eid).not('comprobante_id','is',null)
+        .select('comprobante_id').eq('consorcio_id', consorcioId).not('comprobante_id','is',null)
       const idsYaImportados = new Set((gastosExist||[]).map(g=>g.comprobante_id))
 
       // 2. Traer TODOS los comprobantes del consorcio (sin join para evitar problemas RLS)
@@ -161,6 +162,7 @@ export default function LiquidacionPeriodo() {
         comprobante_id: c.id,
         proveedor_id: c.proveedor_id || null,
         fecha: c.fecha || hoy,
+        comprobante: c.numero || null,
         concepto: c.concepto || `${c.tipo||''} ${c.numero||''}`.trim() || 'Sin concepto',
         categoria: CAT_MAP[prov?.rubro || c.proveedor_rubro] || 'varios',
         proveedor_nombre: prov?.razon_social || c.proveedor_nombre_resuelto || null,
