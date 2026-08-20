@@ -59,7 +59,18 @@ export default async function handler(req, res) {
         db.from('con_interfast_uf').select('cpe, cvu, alias').eq('unidad_id', uf.id).maybeSingle(),
         db.from('con_config_cobranza').select('interfast_activo').eq('consorcio_id', uf.consorcio_id).maybeSingle(),
       ])
-      return res.status(200).json({ uf, cp, con, adm, cuentas, dets, cobs, interfast: (cfgcob?.interfast_activo ? ifuf : null) })
+
+      // Corte nativo: no mostrar expensas anteriores a fecha_corte_nativo (coherente con get-cuenta-corriente).
+      // La historia queda congelada en el saldo de apertura; la cta cte arranca desde el corte.
+      let detsVisibles = dets || []
+      if (con?.fecha_corte_nativo) {
+        const corteYM = String(con.fecha_corte_nativo).slice(0, 7)
+        detsVisibles = detsVisibles.filter((d) => {
+          const per = d?.con_expensas?.periodo
+          return !per || per >= corteYM
+        })
+      }
+      return res.status(200).json({ uf, cp, con, adm, cuentas, dets: detsVisibles, cobs, interfast: (cfgcob?.interfast_activo ? ifuf : null) })
     }
 
     // ── cta: cuenta corriente (llama a la EF desde el servidor) ──
