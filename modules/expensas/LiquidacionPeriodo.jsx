@@ -723,10 +723,10 @@ export default function LiquidacionPeriodo() {
             const celdas = colsActivas.map(c =>
               `<td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${colsCod.includes(c.codigo)?fmtN(montoG):'—'}</td>`
             ).join('') + `<td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${fmtN(montoG)}</td>`
-            return `<tr style="border-bottom:1px solid #eee"><td style="padding:2px 5px;font-size:7pt">${(g.concepto||'').replace(/</g,'&lt;')}${g.proveedor_nombre?', '+g.proveedor_nombre.replace(/</g,'&lt;'):''}${g.comprobante?', '+g.comprobante:''}</td>${celdas}</tr>`
+            return `<tr style="border-bottom:1px solid #eee"><td style="padding:2px 5px;font-size:7pt">${(g.concepto||'').replace(/</g,'&lt;')}${g.proveedor_nombre?', '+g.proveedor_nombre.replace(/</g,'&lt;'):''}${g.comprobante?', '+g.comprobante:''}${g.fecha?' — '+String(g.fecha).slice(0,10).split('-').reverse().join('/'):''}</td>${celdas}</tr>`
           } else {
             return `<tr style="border-bottom:1px solid #eee">
-              <td style="padding:2px 6px;font-size:7.5pt">${(g.concepto||'').replace(/</g,'&lt;')}${g.proveedor_nombre?', '+g.proveedor_nombre.replace(/</g,'&lt;'):''}${g.comprobante?', '+g.comprobante:''}</td>
+              <td style="padding:2px 6px;font-size:7.5pt">${(g.concepto||'').replace(/</g,'&lt;')}${g.proveedor_nombre?', '+g.proveedor_nombre.replace(/</g,'&lt;'):''}${g.comprobante?', '+g.comprobante:''}${g.fecha?' — '+String(g.fecha).slice(0,10).split('-').reverse().join('/'):''}</td>
               <td style="text-align:right;padding:2px 6px;font-size:7.5pt;white-space:nowrap">${fmtN(montoG)}</td>
               <td style="text-align:right;padding:2px 6px;font-size:7.5pt;white-space:nowrap">${fmtN(montoG)}</td>
             </tr>`
