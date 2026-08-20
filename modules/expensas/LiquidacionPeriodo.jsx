@@ -537,11 +537,16 @@ export default function LiquidacionPeriodo() {
         saldo_arrastre = ajusteSaldoAnt + interes_mora
       }
 
-      // TOTAL a pagar = expensa + redondeo (centavos UF) + saldo anterior (con signo) + interés.
-      // En nativos deuda e interés se compensan (interés ya devengado); en históricos el interés es nuevo.
-      const monto_total = expensaBase + centavosUF + ajusteSaldoAnt + interes_mora
-      // 2do vencimiento: recargo solo sobre la expensa del período, saldo anterior e interés sin recargo
-      const monto_vto2 = Math.round((expensaBase + centavosUF) * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100 + ajusteSaldoAnt + interes_mora
+      // TOTAL a pagar: se fuerza a terminar en los centavos = número de UF (identifica el pago en
+      // el banco) sobre el TOTAL, no sobre la expensa. Así, aunque el saldo anterior arrastre sus
+      // propios centavos, el total SIEMPRE termina en ,0N (N = número de UF).
+      const baseTotal = expensaBase + ajusteSaldoAnt + interes_mora
+      const monto_total = Math.trunc(baseTotal + 1e-9) + centavosUF
+      // redondeo real aplicado: se registra en la cta cte y define la expensa del período CON centavos
+      const redondeoTotal = Math.round((monto_total - baseTotal) * 100) / 100
+      // 2do vencimiento: recargo sobre la expensa del período; también se ajusta a centavos de UF
+      const baseVto2 = Math.round(expensaBase * (1 + (config.pct_mora_vto2 || 0) / 100) * 100) / 100 + ajusteSaldoAnt + interes_mora
+      const monto_vto2 = Math.trunc(baseVto2 + 1e-9) + centavosUF
 
       // Calcular aporte desagregado por columna (para la planilla PDF)
       // Misma lógica de fallback que expensaBase
@@ -571,7 +576,7 @@ export default function LiquidacionPeriodo() {
         coef, pct: pct.toFixed(4),
         expensa_base: expensaBase,
         aporte_por_columna,   // desglose por columna para el PDF
-        redondeo: centavosUF,
+        redondeo: redondeoTotal,
         monto: monto_total,
         monto_vto2,
         vto1, vto2,
