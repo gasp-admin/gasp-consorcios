@@ -251,8 +251,15 @@ export default function Cobranzas() {
 
   const MEDIOS = ['transferencia','efectivo','debito','cheque','otro']
   const totalCobrado   = cobranzas.reduce((a, c) => a + parseFloat(c.monto||0), 0)
-  const totalPendiente = detalles.filter(d => d.estado !== 'pagada').reduce((a, d) => {
-    const s = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0) - (parseFloat(d.pagos_periodo)||0)
+  // Pagado por unidad: se toma de las cobranzas reales (con_cobranzas) y no de pagos_periodo,
+  // porque en expensas cerradas pagos_periodo no se actualiza (el pago va a la cta cte).
+  const pagadoUF = (uid) => {
+    const pc = cobranzas.filter(c => c.unidad_id === uid).reduce((a, c) => a + (parseFloat(c.monto)||0), 0)
+    return pc
+  }
+  const totalPendiente = detalles.reduce((a, d) => {
+    const pagado = pagadoUF(d.unidad_id) || (parseFloat(d.pagos_periodo)||0)
+    const s = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0) - pagado
     return a + Math.max(0, s)
   }, 0)
   const totalMora = detalles.reduce((a, d) => a + (parseFloat(d.interes_mora)||0), 0)
@@ -398,17 +405,19 @@ export default function Cobranzas() {
                     {detalles.map(d => {
                       const u    = unidades.find(x=>x.id===d.unidad_id)
                       const cp   = u ? copropietarios.find(c=>c.id===u.propietario_id) : null
-                      const pagado  = parseFloat(d.pagos_periodo) || 0
+                      const pagado  = pagadoUF(d.unidad_id) || (parseFloat(d.pagos_periodo) || 0)
                       const salAnt  = parseFloat(d.saldo_anterior) || 0
                       const monto   = parseFloat(d.monto) || 0
                       const mora    = parseFloat(d.interes_mora) || 0
                       const saldo   = Math.max(0, salAnt + monto + mora - pagado)
+                      // Estado real derivado del saldo (pagos_periodo no se actualiza en expensas cerradas)
+                      const estadoReal = saldo <= 0.005 ? 'pagada' : (pagado > 0 ? 'parcial' : 'pendiente')
                       // Importe a pagar con el 2º vencimiento: recargo DIRECTO (interes_mora_2 %)
                       // sobre la expensa del período (no sobre la deuda ni el interés), sin prorratear por días.
                       const im2     = parseFloat(consorcio?.interes_mora_2) || 0
                       const recargo2 = saldo > 0 ? Math.round(monto * im2 / 100 * 100) / 100 : 0
                       const saldo2  = saldo > 0 ? Math.round((saldo + recargo2) * 100) / 100 : 0
-                      const ec = d.estado==='pagada'
+                      const ec = estadoReal==='pagada'
                         ? {c:VD,bg:'#dcfce7'}
                         : saldo>0 ? {c:RJ,bg:'#fee2e2'} : {c:AM,bg:'#fef9c3'}
                       return (
@@ -421,9 +430,9 @@ export default function Cobranzas() {
                           <td style={{ padding:'8px 10px', color:VD, fontWeight:600 }}>{pagado>0?fmt(pagado):'—'}</td>
                           <td style={{ padding:'8px 10px', fontWeight:700, color:saldo>0?RJ:VD }}>{fmt(saldo)}</td>
                           <td style={{ padding:'8px 10px', fontWeight:600, color:saldo2>0?AM:GR }} title={recargo2>0?`Recargo ${im2}%: ${fmt(recargo2)}`:''}>{saldo2>0?fmt(saldo2):'—'}</td>
-                          <td style={{ padding:'8px 10px' }}><Badge text={d.estado} color={ec.c} bg={ec.bg} /></td>
+                          <td style={{ padding:'8px 10px' }}><Badge text={estadoReal} color={ec.c} bg={ec.bg} /></td>
                           <td style={{ padding:'8px 10px' }}>
-                            {d.estado !== 'pagada' && (
+                            {estadoReal !== 'pagada' && (
                               <Btn small color={VD} onClick={() => setForm({
                                 fecha: new Date().toISOString().split('T')[0],
                                 medio_pago: 'transferencia',
@@ -431,7 +440,7 @@ export default function Cobranzas() {
                                 monto: saldo
                               })}>💳 Cobrar</Btn>
                             )}
-                            {d.estado === 'pagada' && <Badge text="✓ Cobrado" color={VD} bg='#dcfce7' />}
+                            {estadoReal === 'pagada' && <Badge text="✓ Cobrado" color={VD} bg='#dcfce7' />}
                             {u?.portal_token && (
                               <Btn small title="Enviar link portal por WhatsApp" onClick={() => {
                                 const url = 'https://consorcios.administracionpinamar.com/portal?token=' + u?.portal_token
