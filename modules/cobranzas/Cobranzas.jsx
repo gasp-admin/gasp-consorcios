@@ -32,16 +32,20 @@ export default function Cobranzas() {
       supabase.from('con_consorcios').select('*').eq('id', consorcioId).single()
     ])
     const exps = expRes.data || []
-    setExpensas(exps)
+    const corteN = conRes.data?.fecha_corte_nativo
+    // Corte nativo: las expensas anteriores al corte son historia congelada (se ven en la cta cte),
+    // no se gestionan como cobranza acá. Sólo se muestran períodos >= corte.
+    const expsVis = corteN ? exps.filter(e => (e.periodo||'') >= String(corteN).slice(0,7)) : exps
+    setExpensas(expsVis)
     setConsorcio(conRes.data || null)
-    if (exps.length > 0) {
+    if (expsVis.length > 0) {
       // Prioridad: 1) expensa abierta con detalles, 2) cerrada más reciente con detalles, 3) cualquier abierta, 4) la primera
-      // Buscar la expensa más relevante para mostrar
-      // Preferir cerrada con datos sobre abierta sin datos
-      const abConDatos = exps.find(e => e.estado === 'abierta' && e.tipo !== 'migracion' && parseFloat(e.total_expensa) > 0)
-      const cerradaReciente = exps.find(e => e.estado === 'cerrada')
-      const abSinDatos = exps.find(e => e.estado === 'abierta' && e.tipo !== 'migracion')
-      seleccionarExpensa(abConDatos || cerradaReciente || abSinDatos || exps[0])
+      const abConDatos = expsVis.find(e => e.estado === 'abierta' && e.tipo !== 'migracion' && parseFloat(e.total_expensa) > 0)
+      const cerradaReciente = expsVis.find(e => e.estado === 'cerrada')
+      const abSinDatos = expsVis.find(e => e.estado === 'abierta' && e.tipo !== 'migracion')
+      seleccionarExpensa(abConDatos || cerradaReciente || abSinDatos || expsVis[0])
+    } else {
+      setExpSel(null); setDetalles([]); setCobranzas([])
     }
   }
 
@@ -313,7 +317,11 @@ export default function Cobranzas() {
           )
         })}
         {expensas.length === 0 && (
-          <div style={{ color:GR, fontSize:13 }}>No hay períodos de expensas. Ir a Expensas para crear uno.</div>
+          <div style={{ color:GR, fontSize:13 }}>
+            {consorcio?.fecha_corte_nativo
+              ? `Consorcio nativo desde ${String(consorcio.fecha_corte_nativo).slice(0,7).split('-').reverse().join('/')}. Los saldos de apertura se ven en la cuenta corriente. Liquidá el período en Expensas para gestionar cobranzas.`
+              : 'No hay períodos de expensas. Ir a Expensas para crear uno.'}
+          </div>
         )}
       </div>
 
