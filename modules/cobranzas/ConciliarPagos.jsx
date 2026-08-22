@@ -201,15 +201,25 @@ export default function ConciliarPagos() {
   }
 
   async function cargarUFs() {
-    const [{ data: uni }, { data: props }, { data: expR }] = await Promise.all([
+    const [{ data: uni }, { data: props }, { data: expR }, { data: consR }] = await Promise.all([
       supabase.from('con_unidades').select('id, nro_uf_pdf, numero, propietario_id').eq('consorcio_id', consorcioActivo.id),
       supabase.from('con_copropietarios').select('id, apellido_nombre').eq('consorcio_id', consorcioActivo.id),
-      supabase.from('con_expensas').select('id').eq('consorcio_id', consorcioActivo.id).order('periodo', { ascending: false }).limit(1),
+      supabase.from('con_expensas').select('id, periodo').eq('consorcio_id', consorcioActivo.id).order('periodo', { ascending: false }).limit(1),
+      supabase.from('con_consorcios').select('fecha_corte_nativo').eq('id', consorcioActivo.id).maybeSingle(),
     ])
     const pm = {}; for (const p of (props || [])) pm[p.id] = p.apellido_nombre
     const tp = {}
     const expId = expR?.[0]?.id
-    if (expId) {
+    const ultPeriodo = expR?.[0]?.periodo
+    const corte = consR?.fecha_corte_nativo || null
+    // Si la última expensa es ANTERIOR al corte nativo, su detalle es historia (puede estar corrupto
+    // en consorcios migrados): el total a pagar se toma de la apertura del corte (= cta cte).
+    const usarAperturas = !!corte && !!ultPeriodo && ultPeriodo < String(corte).slice(0, 7)
+    if (usarAperturas) {
+      const { data: aperts } = await supabase.from('con_movimientos_unidad')
+        .select('unidad_id, tipo, monto').eq('consorcio_id', consorcioActivo.id).like('id', 'MOV-APERT-%')
+      for (const a of (aperts || [])) tp[a.unidad_id] = a.tipo === 'credito' ? -(+a.monto||0) : (+a.monto||0)
+    } else if (expId) {
       const { data: dets } = await supabase.from('con_expensas_detalle')
         .select('unidad_id, saldo_anterior, monto, interes_mora, pagos_periodo').eq('expensa_id', expId)
       for (const d of (dets || [])) tp[d.unidad_id] = Math.round(((+d.saldo_anterior||0)+(+d.monto||0)+(+d.interes_mora||0)-(+d.pagos_periodo||0))*100)/100
