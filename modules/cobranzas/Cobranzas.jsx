@@ -286,6 +286,12 @@ export default function Cobranzas() {
   }
   const totalPendiente = detalles.reduce((a, d) => a + calcUF(d).saldo, 0)
   const totalMora = detalles.reduce((a, d) => a + (parseFloat(d.interes_mora)||0), 0)
+  // Ordenar por número de UF (la carga por created_at puede venir desordenada en consorcios migrados).
+  const numUF = (uid) => {
+    const u = unidades.find(x => x.id === uid)
+    return parseInt(u?.nro_uf_pdf ?? u?.numero, 10) || 0
+  }
+  const detallesOrdenados = [...detalles].sort((a, b) => numUF(a.unidad_id) - numUF(b.unidad_id))
 
   return (
     <div>
@@ -381,7 +387,7 @@ export default function Cobranzas() {
                   <select value={form.unidad_id||''} onChange={e => setForm(x=>({...x,unidad_id:e.target.value}))}
                     style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, background:'#fff' }}>
                     <option value=''>— Seleccionar UF —</option>
-                    {detalles.map(d => {
+                    {detallesOrdenados.map(d => {
                       const u  = unidades.find(x=>x.id===d.unidad_id)
                       const cp = u ? copropietarios.find(c=>c.id===u.propietario_id) : null
                       const saldo = Math.round(Math.max(0,
@@ -425,7 +431,7 @@ export default function Cobranzas() {
                     </tr>
                   </thead>
                   <tbody>
-                    {detalles.map(d => {
+                    {detallesOrdenados.map(d => {
                       const u    = unidades.find(x=>x.id===d.unidad_id)
                       const cp   = u ? copropietarios.find(c=>c.id===u.propietario_id) : null
                       const { salAnt, monto, mora, pagado, saldo } = calcUF(d)
