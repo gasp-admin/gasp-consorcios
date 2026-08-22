@@ -205,7 +205,7 @@ export default function ConciliarPagos() {
       supabase.from('con_unidades').select('id, nro_uf_pdf, numero, propietario_id').eq('consorcio_id', consorcioActivo.id),
       supabase.from('con_copropietarios').select('id, apellido_nombre').eq('consorcio_id', consorcioActivo.id),
       supabase.from('con_expensas').select('id, periodo').eq('consorcio_id', consorcioActivo.id).order('periodo', { ascending: false }).limit(1),
-      supabase.from('con_consorcios').select('fecha_corte_nativo').eq('id', consorcioActivo.id).maybeSingle(),
+      supabase.from('con_consorcios').select('fecha_corte_nativo, interes_mora_2').eq('id', consorcioActivo.id).maybeSingle(),
     ])
     const pm = {}; for (const p of (props || [])) pm[p.id] = p.apellido_nombre
     const tp = {}
@@ -224,8 +224,14 @@ export default function ConciliarPagos() {
         .select('unidad_id, saldo_anterior, monto, interes_mora, pagos_periodo').eq('expensa_id', expId)
       for (const d of (dets || [])) tp[d.unidad_id] = Math.round(((+d.saldo_anterior||0)+(+d.monto||0)+(+d.interes_mora||0)-(+d.pagos_periodo||0))*100)/100
     }
+    const im2 = parseFloat(consR?.interes_mora_2) || 0
     const m = {}
-    for (const u of (uni || [])) m[u.id] = { nro: u.nro_uf_pdf, dpto: u.numero, ape: pm[u.propietario_id] || '', pagar: tp[u.id] ?? null }
+    for (const u of (uni || [])) {
+      const p1 = tp[u.id] ?? null
+      // 2do venc = 1er venc + recargo (interes_mora_2 %). Solo sobre saldos deudores (>0).
+      const p2 = (p1 != null && p1 > 0) ? Math.round(p1 * (1 + im2/100) * 100) / 100 : p1
+      m[u.id] = { nro: u.nro_uf_pdf, dpto: u.numero, ape: pm[u.propietario_id] || '', pagar: p1, pagar2: p2 }
+    }
     setUfMap(m)
   }
   async function cargarLineasLote(id) {
@@ -386,7 +392,7 @@ export default function ConciliarPagos() {
                 <tr>
                   <th style={{ ...th, width:26 }}></th>
                   <th style={th}>Fecha</th><th style={th}>Importe</th><th style={th}>Ordenante</th>
-                  <th style={th}>UF imputada</th><th style={th}>A pagar</th><th style={th}>Confianza</th><th style={th}>Motivo</th>
+                  <th style={th}>UF imputada</th><th style={th}>1er venc</th><th style={th}>2º venc</th><th style={th}>Confianza</th><th style={th}>Motivo</th>
                 </tr>
               </thead>
               <tbody>
@@ -397,7 +403,9 @@ export default function ConciliarPagos() {
                   const editable = !ign && !conf
                   const cColor = l.confianza_matching==='alta' ? '#15803d' : l.confianza_matching==='media' ? '#c07d10' : l.confianza_matching==='manual' ? '#1d4ed8' : l.confianza_matching==='baja' ? '#6b7280' : '#dc2626'
                   const pagar = uf && uf.pagar != null ? uf.pagar : null
+                  const pagar2 = uf && uf.pagar2 != null ? uf.pagar2 : null
                   const coincide = pagar != null && Math.abs(pagar - Number(l.importe)) < 1
+                  const coincide2 = pagar2 != null && Math.abs(pagar2 - Number(l.importe)) < 1
                   const rowBg = conf ? '#f0fdf4' : ign ? '#f9fafb' : '#fff'
                   return (
                     <tr key={l.id} style={{ background:rowBg, opacity: ign ? 0.6 : 1 }}>
@@ -417,6 +425,7 @@ export default function ConciliarPagos() {
                             </select>}
                       </td>
                       <td style={{ ...td, textAlign:'right', whiteSpace:'nowrap', fontSize:11, color: pagar==null ? GR : coincide ? '#15803d' : '#c07d10', fontWeight: coincide ? 700 : 400 }}>{pagar != null ? '$'+pagar.toLocaleString('es-AR',{minimumFractionDigits:2}) : '\u2014'}</td>
+                      <td style={{ ...td, textAlign:'right', whiteSpace:'nowrap', fontSize:11, color: pagar2==null ? GR : coincide2 ? '#15803d' : '#c07d10', fontWeight: coincide2 ? 700 : 400 }}>{pagar2 != null ? '$'+pagar2.toLocaleString('es-AR',{minimumFractionDigits:2}) : '\u2014'}</td>
                       <td style={{ ...td, color:cColor, fontWeight:600, fontSize:12 }}>{conf ? 'confirmada' : ign ? '\u2014' : (l.confianza_matching || (l.estado==='sin_match' ? 'sin match' : '\u2014'))}</td>
                       <td style={{ ...td, fontSize:11, color: (l.motivo_pendiente||'').includes('distinto') ? '#c2410c' : GR }}>{l.motivo_pendiente}</td>
                     </tr>
