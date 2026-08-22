@@ -81,23 +81,29 @@ export default function Cobranzas() {
     const det = detalles.find(d => d.unidad_id === form.unidad_id)
     const im2 = parseFloat(consorcio?.interes_mora_2) || 0
     let recargoAplicado = 0
-    if (det && !expCerrada) {
-      const salAnt   = parseFloat(det.saldo_anterior) || 0
-      const montoExp = parseFloat(det.monto) || 0
-      const moraPrev = parseFloat(det.interes_mora) || 0
-      const pagosPrev= parseFloat(det.pagos_periodo) || 0
-      const deuda1   = Math.round((salAnt + montoExp + moraPrev - pagosPrev) * 100) / 100  // pendiente al 1º venc
-      const recargo2 = Math.round(montoExp * im2 / 100 * 100) / 100                         // recargo sobre la expensa
+    if (det) {
+      // Saldo pendiente al 1º venc según el modelo vigente (calcUF respeta el corte nativo).
+      const info     = calcUF(det)
+      const deuda1   = info.saldo                                          // pendiente antes de este pago
+      const recargo2 = Math.round(info.monto * im2 / 100 * 100) / 100      // recargo sobre la expensa (o total_uf en pre-corte)
       if (monto > deuda1 + 0.005 && recargo2 > 0) {
         recargoAplicado = Math.min(recargo2, Math.round((monto - deuda1) * 100) / 100)
       }
-      const nuevoPago  = Math.round((pagosPrev + monto) * 100) / 100
-      const nuevaMora  = Math.round((moraPrev + recargoAplicado) * 100) / 100
-      const deudaTotal = Math.round((salAnt + montoExp + nuevaMora) * 100) / 100
-      const estado = nuevoPago >= deudaTotal - 0.005 ? 'pagada' : 'parcial'
-      await supabase.from('con_expensas_detalle')
-        .update({ pagos_periodo: nuevoPago, interes_mora: nuevaMora, estado, fecha_pago: estado==='pagada' ? form.fecha : null })
-        .eq('id', det.id)
+      // El detalle (pagos_periodo/estado) se actualiza sólo cuando NO está congelado
+      // (expensa abierta y no pre-corte). En nativo/cerrada el saldo se deriva de la cta cte.
+      if (!expCerrada && !esMesPreCorte) {
+        const salAnt   = parseFloat(det.saldo_anterior) || 0
+        const montoExp = parseFloat(det.monto) || 0
+        const moraPrev = parseFloat(det.interes_mora) || 0
+        const pagosPrev= parseFloat(det.pagos_periodo) || 0
+        const nuevoPago  = Math.round((pagosPrev + monto) * 100) / 100
+        const nuevaMora  = Math.round((moraPrev + recargoAplicado) * 100) / 100
+        const deudaTotal = Math.round((salAnt + montoExp + nuevaMora) * 100) / 100
+        const estado = nuevoPago >= deudaTotal - 0.005 ? 'pagada' : 'parcial'
+        await supabase.from('con_expensas_detalle')
+          .update({ pagos_periodo: nuevoPago, interes_mora: nuevaMora, estado, fecha_pago: estado==='pagada' ? form.fecha : null })
+          .eq('id', det.id)
+      }
     }
 
     // Movimiento de crédito (pago) → alimenta la cta cte. estado 'vigente' (CHECK de la tabla).
