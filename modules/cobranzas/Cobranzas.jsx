@@ -16,6 +16,7 @@ export default function Cobranzas() {
   const [expSel, setExpSel]             = useState(null)
   const [detalles, setDetalles]         = useState([])
   const [cobranzas, setCobranzas]       = useState([])
+  const [aperturas, setAperturas]       = useState([])
   const [consorcio, setConsorcio]       = useState(null)
   const [form, setForm]                 = useState(null)
   const [tabMora, setTabMora]           = useState(false)
@@ -45,11 +46,15 @@ export default function Cobranzas() {
 
   async function seleccionarExpensa(exp) {
     setExpSel(exp); setPreviewMora([]); setTabMora(false)
-    const [d, c] = await Promise.all([
+    const [d, c, ap] = await Promise.all([
       supabase.from('con_expensas_detalle').select('*').eq('expensa_id', exp.id).order('created_at'),
-      supabase.from('con_cobranzas').select('*').eq('expensa_id', exp.id).order('fecha', { ascending: false })
+      supabase.from('con_cobranzas').select('*').eq('expensa_id', exp.id).order('fecha', { ascending: false }),
+      // Aperturas del corte nativo (fuente de verdad del saldo, = cta cte). El detalle histórico
+      // puede estar corrupto en consorcios migrados; las aperturas no.
+      supabase.from('con_movimientos_unidad').select('unidad_id, tipo, monto')
+        .eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%')
     ])
-    setDetalles(d.data || []); setCobranzas(c.data || [])
+    setDetalles(d.data || []); setCobranzas(c.data || []); setAperturas(ap.data || [])
   }
 
   async function registrarPago() {
@@ -264,9 +269,15 @@ export default function Cobranzas() {
     const monto = parseFloat(d.monto) || 0
     const mora  = parseFloat(d.interes_mora) || 0
     if (esMesPreCorte) {
+      // Saldo base = la APERTURA del corte (= cta cte). El detalle histórico puede estar corrupto
+      // en consorcios migrados, así que no se usa d.monto. Restan sólo pagos posteriores al corte.
+      const ap = aperturas.find(a => a.unidad_id === d.unidad_id)
+      const montoBase = ap
+        ? (ap.tipo === 'credito' ? -(parseFloat(ap.monto)||0) : (parseFloat(ap.monto)||0))
+        : monto
       const pagado = cobranzas.filter(c => c.unidad_id === d.unidad_id && String(c.fecha||'') >= corteNativo)
         .reduce((a, c) => a + (parseFloat(c.monto)||0), 0)
-      return { salAnt: 0, monto, mora, pagado, saldo: Math.max(0, Math.round((monto - pagado)*100)/100) }
+      return { salAnt: 0, monto: montoBase, mora, pagado, saldo: Math.max(0, Math.round((montoBase - pagado)*100)/100) }
     }
     const salAnt = parseFloat(d.saldo_anterior) || 0
     const pagado = cobranzas.filter(c => c.unidad_id === d.unidad_id).reduce((a, c) => a + (parseFloat(c.monto)||0), 0)
