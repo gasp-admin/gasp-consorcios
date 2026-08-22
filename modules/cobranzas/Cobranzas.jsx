@@ -32,20 +32,14 @@ export default function Cobranzas() {
       supabase.from('con_consorcios').select('*').eq('id', consorcioId).single()
     ])
     const exps = expRes.data || []
-    const corteN = conRes.data?.fecha_corte_nativo
-    // Corte nativo: las expensas anteriores al corte son historia congelada (se ven en la cta cte),
-    // no se gestionan como cobranza acá. Sólo se muestran períodos >= corte.
-    const expsVis = corteN ? exps.filter(e => (e.periodo||'') >= String(corteN).slice(0,7)) : exps
-    setExpensas(expsVis)
+    setExpensas(exps)
     setConsorcio(conRes.data || null)
-    if (expsVis.length > 0) {
+    if (exps.length > 0) {
       // Prioridad: 1) expensa abierta con detalles, 2) cerrada más reciente con detalles, 3) cualquier abierta, 4) la primera
-      const abConDatos = expsVis.find(e => e.estado === 'abierta' && e.tipo !== 'migracion' && parseFloat(e.total_expensa) > 0)
-      const cerradaReciente = expsVis.find(e => e.estado === 'cerrada')
-      const abSinDatos = expsVis.find(e => e.estado === 'abierta' && e.tipo !== 'migracion')
-      seleccionarExpensa(abConDatos || cerradaReciente || abSinDatos || expsVis[0])
-    } else {
-      setExpSel(null); setDetalles([]); setCobranzas([])
+      const abConDatos = exps.find(e => e.estado === 'abierta' && e.tipo !== 'migracion' && parseFloat(e.total_expensa) > 0)
+      const cerradaReciente = exps.find(e => e.estado === 'cerrada')
+      const abSinDatos = exps.find(e => e.estado === 'abierta' && e.tipo !== 'migracion')
+      seleccionarExpensa(abConDatos || cerradaReciente || abSinDatos || exps[0])
     }
   }
 
@@ -255,17 +249,25 @@ export default function Cobranzas() {
 
   const MEDIOS = ['transferencia','efectivo','debito','cheque','otro']
   const totalCobrado   = cobranzas.reduce((a, c) => a + parseFloat(c.monto||0), 0)
-  // Pagado por unidad: se toma de las cobranzas reales (con_cobranzas) y no de pagos_periodo,
-  // porque en expensas cerradas pagos_periodo no se actualiza (el pago va a la cta cte).
-  const pagadoUF = (uid) => {
-    const pc = cobranzas.filter(c => c.unidad_id === uid).reduce((a, c) => a + (parseFloat(c.monto)||0), 0)
-    return pc
+  const corteNativo = consorcio?.fecha_corte_nativo || null
+  // ¿La expensa mostrada es un mes ANTERIOR al corte nativo? En ese caso su detalle.monto ya es
+  // el saldo NETO al cierre (= apertura = cta cte): NO se suma saldo_anterior (evita doble conteo)
+  // y sólo se restan los pagos POSTERIORES al corte. Así los montos coinciden con la cuenta corriente.
+  const esMesPreCorte = !!corteNativo && (expSel?.periodo || '') < String(corteNativo).slice(0,7)
+  const calcUF = (d) => {
+    const monto = parseFloat(d.monto) || 0
+    const mora  = parseFloat(d.interes_mora) || 0
+    if (esMesPreCorte) {
+      const pagado = cobranzas.filter(c => c.unidad_id === d.unidad_id && String(c.fecha||'') >= corteNativo)
+        .reduce((a, c) => a + (parseFloat(c.monto)||0), 0)
+      return { salAnt: 0, monto, mora, pagado, saldo: Math.max(0, Math.round((monto - pagado)*100)/100) }
+    }
+    const salAnt = parseFloat(d.saldo_anterior) || 0
+    const pagado = cobranzas.filter(c => c.unidad_id === d.unidad_id).reduce((a, c) => a + (parseFloat(c.monto)||0), 0)
+                   || (parseFloat(d.pagos_periodo) || 0)
+    return { salAnt, monto, mora, pagado, saldo: Math.max(0, Math.round((salAnt + monto + mora - pagado)*100)/100) }
   }
-  const totalPendiente = detalles.reduce((a, d) => {
-    const pagado = pagadoUF(d.unidad_id) || (parseFloat(d.pagos_periodo)||0)
-    const s = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0) + (parseFloat(d.interes_mora)||0) - pagado
-    return a + Math.max(0, s)
-  }, 0)
+  const totalPendiente = detalles.reduce((a, d) => a + calcUF(d).saldo, 0)
   const totalMora = detalles.reduce((a, d) => a + (parseFloat(d.interes_mora)||0), 0)
 
   return (
@@ -317,11 +319,7 @@ export default function Cobranzas() {
           )
         })}
         {expensas.length === 0 && (
-          <div style={{ color:GR, fontSize:13 }}>
-            {consorcio?.fecha_corte_nativo
-              ? `Consorcio nativo desde ${String(consorcio.fecha_corte_nativo).slice(0,7).split('-').reverse().join('/')}. Los saldos de apertura se ven en la cuenta corriente. Liquidá el período en Expensas para gestionar cobranzas.`
-              : 'No hay períodos de expensas. Ir a Expensas para crear uno.'}
-          </div>
+          <div style={{ color:GR, fontSize:13 }}>No hay períodos de expensas. Ir a Expensas para crear uno.</div>
         )}
       </div>
 
@@ -413,12 +411,7 @@ export default function Cobranzas() {
                     {detalles.map(d => {
                       const u    = unidades.find(x=>x.id===d.unidad_id)
                       const cp   = u ? copropietarios.find(c=>c.id===u.propietario_id) : null
-                      const pagado  = pagadoUF(d.unidad_id) || (parseFloat(d.pagos_periodo) || 0)
-                      const salAnt  = parseFloat(d.saldo_anterior) || 0
-                      const monto   = parseFloat(d.monto) || 0
-                      const mora    = parseFloat(d.interes_mora) || 0
-                      const saldo   = Math.max(0, salAnt + monto + mora - pagado)
-                      // Estado real derivado del saldo (pagos_periodo no se actualiza en expensas cerradas)
+                      const { salAnt, monto, mora, pagado, saldo } = calcUF(d)
                       const estadoReal = saldo <= 0.005 ? 'pagada' : (pagado > 0 ? 'parcial' : 'pendiente')
                       // Importe a pagar con el 2º vencimiento: recargo DIRECTO (interes_mora_2 %)
                       // sobre la expensa del período (no sobre la deuda ni el interés), sin prorratear por días.
