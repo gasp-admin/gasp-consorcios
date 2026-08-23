@@ -405,9 +405,9 @@ export default function LiquidacionPeriodo() {
         for (const a of (aperts || [])) {
           const saldoAp = a.tipo === 'credito' ? -(parseFloat(a.monto) || 0) : (parseFloat(a.monto) || 0)
           const pagosUF = pagoUF[a.unidad_id] || 0
-          // saldo anterior = apertura; pagos post-corte; interés = recargos 2º venc (MOV-RECV2)
-          // legítimos del período. Una UF que pagó de más (antes del vto) queda con saldo a favor.
-          saldosAnt[a.unidad_id] = { saldo: saldoAp, pagos: pagosUF, interes: recUF[a.unidad_id] || 0, nativo: true }
+          // saldo anterior = apertura; pagos post-corte; interes = recargos 2º venc legítimos (MOV-RECV2).
+          // El prorrateo (rama corteMes) resta pagos, conserva saldo a favor y calcula mora sobre la deuda.
+          saldosAnt[a.unidad_id] = { saldo: saldoAp, pagos: pagosUF, interes: recUF[a.unidad_id] || 0, corteMes: true }
           totalCobradoAnt += pagosUF
         }
       } else if (!esAnteriorNativo && (lufAnt||[]).length > 0) {
@@ -544,7 +544,16 @@ export default function LiquidacionPeriodo() {
       const tasaMora = parseFloat(consorcioActivo?.interes_mora || 0) / 100
 
       let deuda, ajusteSaldoAnt, interes_mora, saldo_arrastre
-      if (antUF.nativo) {
+      if (antUF.corteMes) {
+        // Primer mes nativo (consorcio migrado): deuda = apertura − pagos post-corte (CON signo:
+        // conserva saldo a favor). El interés = recargos 2º venc legítimos (MOV-RECV2, ya devengados)
+        // MÁS el interés de mora del período sobre la deuda que quede pendiente (> 0).
+        deuda = Math.round((saldo_anterior - pagos_anterior) * 100) / 100
+        const moraDeuda = deuda > 0 ? Math.round(deuda * tasaMora * 100) / 100 : 0
+        interes_mora = Math.round(((antUF.interes || 0) + moraDeuda) * 100) / 100
+        ajusteSaldoAnt = deuda
+        saldo_arrastre = deuda + interes_mora
+      } else if (antUF.nativo) {
         // Modelo Administración Global (período anterior nativo):
         //   deuda = saldo anterior − pagos (CON signo; si pagó el interés en 2º vto queda negativa).
         //   interés = el del mes anterior (ya devengado); deuda e interés se compensan en el total.
@@ -1195,10 +1204,15 @@ export default function LiquidacionPeriodo() {
           const pagoU2 = {}, recU2 = {}
           for (const p of (pagosPost2 || [])) pagoU2[p.unidad_id] = (pagoU2[p.unidad_id] || 0) + (parseFloat(p.monto) || 0)
           for (const rc of (recPost2 || [])) recU2[rc.unidad_id] = (recU2[rc.unidad_id] || 0) + (parseFloat(rc.monto) || 0)
+          const tasaMora2 = parseFloat(consorcioActivo?.interes_mora || 0) / 100
           for (const a of (aperts2 || [])) {
             const saldoAp = a.tipo === 'credito' ? -(parseFloat(a.monto) || 0) : (parseFloat(a.monto) || 0)
-            const neto = Math.round((saldoAp + (recU2[a.unidad_id] || 0) - (pagoU2[a.unidad_id] || 0)) * 100) / 100
-            if (neto !== 0) saldosAnt[a.unidad_id] = neto
+            // deuda = apertura + recargos legítimos − pagos post-corte (con signo, conserva a favor)
+            const deudaN = Math.round((saldoAp + (recU2[a.unidad_id] || 0) - (pagoU2[a.unidad_id] || 0)) * 100) / 100
+            // arrastre = deuda + mora del período sobre la deuda pendiente
+            const moraN = deudaN > 0 ? Math.round(deudaN * tasaMora2 * 100) / 100 : 0
+            const arrastre = Math.round((deudaN + moraN) * 100) / 100
+            if (arrastre !== 0) saldosAnt[a.unidad_id] = arrastre
           }
         } else if ((lufAnt2||[]).length > 0) {
           // Período anterior histórico: saldo al cierre = total_uf (conserva saldo a favor negativo)
