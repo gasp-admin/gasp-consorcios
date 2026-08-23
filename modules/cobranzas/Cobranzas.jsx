@@ -91,7 +91,11 @@ export default function Cobranzas() {
       const info     = calcUF(det)
       const deuda1   = info.saldo                                          // pendiente antes de este pago
       const recargo2 = Math.round(info.monto * im2 / 100 * 100) / 100      // recargo sobre la expensa (o total_uf en pre-corte)
-      if (monto > deuda1 + 0.005 && recargo2 > 0) {
+      // El recargo del 2º venc SOLO aplica si el pago se hizo DESPUÉS del 1er vencimiento. Si pagó
+      // en término (aunque pague de más), el excedente es saldo a favor, NO un recargo.
+      const vto1 = expSel?.fecha_vencimiento
+      const pagoVencido = !!vto1 && String(form.fecha) > String(vto1)
+      if (pagoVencido && monto > deuda1 + 0.005 && recargo2 > 0) {
         recargoAplicado = Math.min(recargo2, Math.round((monto - deuda1) * 100) / 100)
       }
       // El detalle (pagos_periodo/estado) se actualiza sólo cuando NO está congelado
