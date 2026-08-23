@@ -405,6 +405,8 @@ export default function LiquidacionPeriodo() {
         for (const a of (aperts || [])) {
           const saldoAp = a.tipo === 'credito' ? -(parseFloat(a.monto) || 0) : (parseFloat(a.monto) || 0)
           const pagosUF = pagoUF[a.unidad_id] || 0
+          // saldo anterior = apertura; pagos post-corte; interés = recargos 2º venc (MOV-RECV2)
+          // legítimos del período. Una UF que pagó de más (antes del vto) queda con saldo a favor.
           saldosAnt[a.unidad_id] = { saldo: saldoAp, pagos: pagosUF, interes: recUF[a.unidad_id] || 0, nativo: true }
           totalCobradoAnt += pagosUF
         }
