@@ -350,7 +350,7 @@ export default function LiquidacionPeriodo() {
     // Cargar saldos anteriores de la última expensa cerrada
     let saldosAnt = {}
     const { data: expAnterior } = await supabase.from('con_expensas')
-      .select('id, saldo_caja_final, total_cobrado, fuente').eq('consorcio_id', consorcioId)
+      .select('id, saldo_caja_final, total_cobrado, fuente, periodo').eq('consorcio_id', consorcioId)
       .neq('id', expSel?.id || '').eq('estado','cerrada')
       .order('periodo', { ascending: false }).limit(1)
 
@@ -387,7 +387,28 @@ export default function LiquidacionPeriodo() {
       // espejo residual de un import previo (total_uf sin netear los pagos) que arrastraría el monto
       // completo como deuda. Solo se prioriza con_liquidacion_uf para períodos históricos importados.
       const esAnteriorNativo = (expAnterior[0].fuente === 'gasp')
-      if (!esAnteriorNativo && (lufAnt||[]).length > 0) {
+      // Consorcio MIGRADO a nativo cuyo período anterior es PRE-corte: el total_uf del luf es la
+      // apertura y NO refleja los pagos/recargos post-corte (que están en la cta cte). El saldo real
+      // al inicio del período nativo = apertura (MOV-APERT) − pagos post-corte + recargos post-corte.
+      // Se usa el modelo nativo (resta pagos) con interés = recargos post-corte (MOV-RECV2).
+      const corteNat = consorcioActivo?.fecha_corte_nativo || null
+      const expAntPreCorte = !!corteNat && (expAnterior[0].periodo || '') < String(corteNat).slice(0, 7)
+      if (expAntPreCorte) {
+        const [{ data: aperts }, { data: pagosPost }, { data: recPost }] = await Promise.all([
+          supabase.from('con_movimientos_unidad').select('unidad_id, tipo, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%'),
+          supabase.from('con_cobranzas').select('unidad_id, monto').eq('consorcio_id', consorcioId).gte('fecha', corteNat),
+          supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat),
+        ])
+        const pagoUF = {}, recUF = {}
+        for (const p of (pagosPost || [])) pagoUF[p.unidad_id] = (pagoUF[p.unidad_id] || 0) + (parseFloat(p.monto) || 0)
+        for (const rc of (recPost || [])) recUF[rc.unidad_id] = (recUF[rc.unidad_id] || 0) + (parseFloat(rc.monto) || 0)
+        for (const a of (aperts || [])) {
+          const saldoAp = a.tipo === 'credito' ? -(parseFloat(a.monto) || 0) : (parseFloat(a.monto) || 0)
+          const pagosUF = pagoUF[a.unidad_id] || 0
+          saldosAnt[a.unidad_id] = { saldo: saldoAp, pagos: pagosUF, interes: recUF[a.unidad_id] || 0, nativo: true }
+          totalCobradoAnt += pagosUF
+        }
+      } else if (!esAnteriorNativo && (lufAnt||[]).length > 0) {
         // Período anterior histórico (importado): el saldo al cierre es total_uf (conserva saldo a favor)
         for (const l of lufAnt) {
           const pagosUF = cobranzasPorUF[l.unidad_id] || (parseFloat(l.pagos)||0)
@@ -1140,7 +1161,7 @@ export default function LiquidacionPeriodo() {
 
       // 3. Buscar saldos anteriores de cada UF (de períodos previos)
       const { data: expAnterior } = await supabase.from('con_expensas')
-        .select('id').eq('consorcio_id', consorcioId)
+        .select('id, periodo').eq('consorcio_id', consorcioId)
         .neq('id', expSel.id).eq('estado','cerrada')
         .order('periodo', { ascending: false }).limit(1)
 
@@ -1159,7 +1180,25 @@ export default function LiquidacionPeriodo() {
         for (const co of (cobranzasAnt2||[])) {
           cobPorUF2[co.unidad_id] = (cobPorUF2[co.unidad_id]||0) + (parseFloat(co.monto)||0)
         }
-        if ((lufAnt2||[]).length > 0) {
+        // Consorcio migrado con período anterior PRE-corte: saldo neto = apertura − pagos + recargos
+        // post-corte (cta cte). El total_uf del luf es sólo la apertura (no netea los pagos).
+        const corteNat2 = consorcioActivo?.fecha_corte_nativo || null
+        const expAntPreCorte2 = !!corteNat2 && (expAnterior[0].periodo || '') < String(corteNat2).slice(0, 7)
+        if (expAntPreCorte2) {
+          const [{ data: aperts2 }, { data: pagosPost2 }, { data: recPost2 }] = await Promise.all([
+            supabase.from('con_movimientos_unidad').select('unidad_id, tipo, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%'),
+            supabase.from('con_cobranzas').select('unidad_id, monto').eq('consorcio_id', consorcioId).gte('fecha', corteNat2),
+            supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat2),
+          ])
+          const pagoU2 = {}, recU2 = {}
+          for (const p of (pagosPost2 || [])) pagoU2[p.unidad_id] = (pagoU2[p.unidad_id] || 0) + (parseFloat(p.monto) || 0)
+          for (const rc of (recPost2 || [])) recU2[rc.unidad_id] = (recU2[rc.unidad_id] || 0) + (parseFloat(rc.monto) || 0)
+          for (const a of (aperts2 || [])) {
+            const saldoAp = a.tipo === 'credito' ? -(parseFloat(a.monto) || 0) : (parseFloat(a.monto) || 0)
+            const neto = Math.round((saldoAp + (recU2[a.unidad_id] || 0) - (pagoU2[a.unidad_id] || 0)) * 100) / 100
+            if (neto !== 0) saldosAnt[a.unidad_id] = neto
+          }
+        } else if ((lufAnt2||[]).length > 0) {
           // Período anterior histórico: saldo al cierre = total_uf (conserva saldo a favor negativo)
           for (const l of lufAnt2) {
             const saldo = parseFloat(l.total_uf) || 0
