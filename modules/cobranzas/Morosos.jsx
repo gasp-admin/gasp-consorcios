@@ -22,27 +22,66 @@ export default function Morosos() {
 
   async function cargar() {
     setLoading(true)
-    const { data } = await supabase.from('con_expensas_detalle')
-      .select('*, con_expensas!inner(periodo,fecha_vencimiento)')
-      .eq('admin_id', uid).eq('consorcio_id', consorcioId)
-      .in('estado', ['pendiente','morosa']).order('created_at', { ascending:false })
-    setMorosos(data||[]); setLoading(false)
+    const corte = consorcioActivo?.fecha_corte_nativo || null
+    // Último período cerrado (para etiqueta de período y expensa_id de intimaciones/convenios).
+    const { data: exps } = await supabase.from('con_expensas')
+      .select('id, periodo, fecha_vencimiento').eq('consorcio_id', consorcioId).eq('estado', 'cerrada')
+      .order('periodo', { ascending: false }).limit(1)
+    const ult = exps?.[0] || null
+
+    // Saldo FINAL por UF = saldo de la cuenta corriente (lo mismo que ve el usuario en la cta cte).
+    const saldoUF = {}
+    if (corte) {
+      // Nativo / migrado: cta cte = aperturas (MOV-APERT) + movimientos POSTERIORES al corte.
+      const { data: movs } = await supabase.from('con_movimientos_unidad')
+        .select('unidad_id, tipo, monto, categoria, id, fecha')
+        .eq('consorcio_id', consorcioId).eq('estado', 'vigente')
+      for (const m of (movs || [])) {
+        const esApert = String(m.id || '').startsWith('MOV-APERT-')
+        if (!esApert && String(m.fecha || '') < corte) continue   // ignorar historia pre-corte
+        const val = m.tipo === 'debito' ? Number(m.monto || 0) : -Number(m.monto || 0)
+        if (!saldoUF[m.unidad_id]) saldoUF[m.unidad_id] = { deuda: 0, interes: 0 }
+        saldoUF[m.unidad_id].deuda += val
+        if (m.categoria === 'interes_mora' && m.tipo === 'debito') saldoUF[m.unidad_id].interes += Number(m.monto || 0)
+      }
+    } else if (ult) {
+      // Histórico: moroso = deuda VENCIDA NETA de ajustes (columna DEUDA + RED./AJUSTES del prorrateo).
+      // Los ajustes negativos (condonaciones, planes) cancelan la deuda: p.ej. una UF con deuda pero
+      // ajuste que la anula NO es morosa. Coincide con "UNIDADES CON DEUDA" del PDF.
+      const { data: lufs } = await supabase.from('con_liquidacion_uf')
+        .select('unidad_id, deuda, interes, ajustes').eq('expensa_id', ult.id)
+      for (const l of (lufs || [])) {
+        const deudaNeta = Number(l.deuda || 0) + Number(l.ajustes || 0)
+        saldoUF[l.unidad_id] = { deuda: deudaNeta, interes: Number(l.interes || 0) }
+      }
+    }
+
+    // Solo UF con saldo DEUDOR (> 0), ordenadas por número de UF.
+    const numUF = (id) => { const u = unidades.find(x => x.id === id); return parseInt(u?.nro_uf_pdf ?? u?.numero, 10) || 999 }
+    const lista = Object.entries(saldoUF)
+      .map(([unidad_id, s]) => ({
+        unidad_id, deuda: Math.round(s.deuda * 100) / 100, interes: Math.round(s.interes * 100) / 100,
+        periodo: ult?.periodo || null, fecha_vencimiento: ult?.fecha_vencimiento || null, expensa_id: ult?.id || null,
+      }))
+      .filter(x => x.deuda > 1)
+      .sort((a, b) => numUF(a.unidad_id) - numUF(b.unidad_id))
+    setMorosos(lista); setLoading(false)
   }
   async function enviarWA(det) {
     const u=unidades.find(x=>x.id===det.unidad_id)
     const cp=u?copropietarios.find(c=>c.id===u.propietario_id):null
     if (!cp?.telefono) return alert('El copropietario no tiene teléfono registrado')
-    const msg=encodeURIComponent(`Estimado/a ${cp.apellido_nombre}, le informamos que tiene pendiente el pago de expensas del período ${periodoLabel(det.con_expensas?.periodo)} por ${fmt(det.monto)}. Por favor regularice su situación. Gracias.`)
+    const msg=encodeURIComponent(`Estimado/a ${cp.apellido_nombre}, le informamos que registra un saldo deudor de expensas por ${fmt(det.deuda)}${det.periodo?` al período ${periodoLabel(det.periodo)}`:''}. Por favor regularice su situación. Gracias.`)
     window.open(`https://wa.me/549${(()=>{let n=(cp.telefono||'').replace(/\D/g,'');if(n.startsWith('549'))return n;if(n.startsWith('54'))return '9'+n.slice(2);if(n.startsWith('0'))n=n.slice(1);return n})()}?text=${msg}`,'_blank')
   }
 
   function generarIntimacion(det) {
     const u=unidades.find(x=>x.id===det.unidad_id)
     const cp=u?copropietarios.find(c=>c.id===u.propietario_id):null
-    const periodo=periodoLabel(det.con_expensas?.periodo)
-    const vto=det.con_expensas?.fecha_vencimiento?new Date(det.con_expensas.fecha_vencimiento+'T00:00:00').toLocaleDateString('es-AR'):'-'
+    const periodo=det.periodo?periodoLabel(det.periodo):'-'
+    const vto=det.fecha_vencimiento?new Date(det.fecha_vencimiento+'T00:00:00').toLocaleDateString('es-AR'):'-'
     const hoy=new Date().toLocaleDateString('es-AR')
-    const deuda=Number(det.monto||0)+Number(det.interes_mora||0)+Number(det.saldo_anterior||0)
+    const deuda=Number(det.deuda||0)
     const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
       body{font-family:Arial,sans-serif;max-width:760px;margin:0 auto;padding:40px;font-size:12pt;line-height:1.7}
       h1{font-size:15pt;text-align:center;text-transform:uppercase;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:24px}
@@ -56,7 +95,7 @@ export default function Morosos() {
     </style></head><body>
       <div class="encabezado">
         <div><strong>Administración de Consorcios Pinamar</strong><br/>Lenguado 1313, Local 3 — Pinamar, Buenos Aires<br/>Tel: 02267 444034</div>
-        <div style="text-align:right">Pinamar, ${hoy}<br/><strong>Ref.:</strong> ${u?.numero||det.unidad_id} — ${periodoLabel(det.con_expensas?.periodo)}</div>
+        <div style="text-align:right">Pinamar, ${hoy}<br/><strong>Ref.:</strong> ${u?.numero||det.unidad_id} — ${periodo}</div>
       </div>
       <h1>⚠ Intimación de Pago de Expensas</h1>
       <div class="datos">
@@ -100,9 +139,9 @@ export default function Morosos() {
     // Registrar en movimientos_unidad
     for (let i=1;i<=cuotas;i++) {
       await supabase.from('con_movimientos_unidad').insert([{
-        id:`CONV-${det.id}-${i}-${Date.now()}`,
+        id:`CONV-${det.unidad_id}-${i}-${Date.now()}`,
         admin_id:uid, consorcio_id:consorcioId,
-        unidad_id:det.unidad_id, expensa_id:det.expensa_id,
+        unidad_id:det.unidad_id, expensa_id:det.expensa_id||null,
         tipo:'convenio_cuota', concepto:`Convenio de pago — Cuota ${i}/${cuotas}`,
         monto:montoCuota, es_debito:true,
         es_convenio_pago:true, cuotas_total:cuotas, cuota_numero:i, monto_cuota:montoCuota,
@@ -115,21 +154,21 @@ export default function Morosos() {
   }
 
   useEffect(()=>{ if (consorcioId) cargar() },[consorcioId])
-  const totalDeuda=morosos.reduce((a,d)=>a+Number(d.monto||0),0)
+  const totalDeuda=morosos.reduce((a,d)=>a+Number(d.deuda||0),0)
 
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
         <div>
           <div style={{ fontWeight:700, fontSize:15, color:RJ }}>⚠ Morosos</div>
-          <div style={{ fontSize:12, color:GR }}>{morosos.length} cuotas pendientes · Total: {fmt(totalDeuda)}</div>
+          <div style={{ fontSize:12, color:GR }}>{morosos.length} unidad(es) con saldo deudor · Total: {fmt(totalDeuda)}</div>
         </div>
         <Btn color={RJ} onClick={async()=>{
           for (const d of morosos) {
             const u=unidades.find(x=>x.id===d.unidad_id)
             const cp=u?copropietarios.find(c=>c.id===u.propietario_id):null
             if (cp?.telefono) {
-              const msg=encodeURIComponent(`Estimado/a ${cp.apellido_nombre}, tiene expensas pendientes por ${fmt(d.monto)} del período ${periodoLabel(d.con_expensas?.periodo)}. Por favor regularice.`)
+              const msg=encodeURIComponent(`Estimado/a ${cp.apellido_nombre}, registra un saldo deudor de expensas por ${fmt(d.deuda)}${d.periodo?` al período ${periodoLabel(d.periodo)}`:''}. Por favor regularice.`)
               window.open(`https://wa.me/549${(()=>{let n=(cp.telefono||'').replace(/\D/g,'');if(n.startsWith('549'))return n;if(n.startsWith('54'))return '9'+n.slice(2);if(n.startsWith('0'))n=n.slice(1);return n})()}?text=${msg}`,'_blank')
               await new Promise(r=>setTimeout(r,500))
             }
@@ -177,7 +216,7 @@ export default function Morosos() {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead>
               <tr style={{ background:'#fef2f2' }}>
-                {['UF','Copropietario','Período','Deuda','Mora','Estado','Acciones'].map((h,i)=>(
+                {['UF','Copropietario','Últ. período','Saldo deudor','Mora incl.','Acciones'].map((h,i)=>(
                   <th key={i} style={{ padding:'8px 12px', textAlign:'left', fontSize:11, fontWeight:'bold', color:RJ, textTransform:'uppercase', borderBottom:'1px solid #fecaca' }}>{h}</th>
                 ))}
               </tr>
@@ -187,25 +226,24 @@ export default function Morosos() {
                 const u=unidades.find(x=>x.id===d.unidad_id)
                 const cp=u?copropietarios.find(c=>c.id===u.propietario_id):null
                 return (
-                  <tr key={d.id} style={{ borderBottom:'1px solid #fef2f2' }}>
+                  <tr key={d.unidad_id} style={{ borderBottom:'1px solid #fef2f2' }}>
                     <td style={{ padding:'10px 12px', fontWeight:700, color:AZ }}>{u?.numero||'—'}</td>
                     <td style={{ padding:'10px 12px' }}>{cp?.apellido_nombre||'—'}</td>
-                    <td style={{ padding:'10px 12px' }}>{periodoLabel(d.con_expensas?.periodo)}</td>
-                    <td style={{ padding:'10px 12px', fontWeight:700, color:RJ }}>{fmt(d.monto)}</td>
-                    <td style={{ padding:'10px 12px', color:Number(d.interes_mora)>0?RJ:GR }}>{Number(d.interes_mora)>0?fmt(d.interes_mora):'—'}</td>
-                    <td style={{ padding:'10px 12px' }}><Badge text={d.estado} color={d.estado==='morosa'?RJ:AM} /></td>
+                    <td style={{ padding:'10px 12px' }}>{d.periodo?periodoLabel(d.periodo):'—'}</td>
+                    <td style={{ padding:'10px 12px', fontWeight:700, color:RJ }}>{fmt(d.deuda)}</td>
+                    <td style={{ padding:'10px 12px', color:Number(d.interes)>0?RJ:GR }}>{Number(d.interes)>0?fmt(d.interes):'—'}</td>
                     <td style={{ padding:'10px 12px' }}>
                       <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
                         {cp?.telefono && <Btn small color='#25d366' onClick={()=>enviarWA(d)}>📱</Btn>}
                         {cp?.email && <Btn small color={AZ} onClick={()=>window.open(`mailto:${cp.email}`)}>✉</Btn>}
                         <Btn small color={RJ} title="Generar intimación formal" onClick={()=>generarIntimacion(d)}>📄 Intimación</Btn>
-                        <Btn small color={AM} title="Convenio de pago en cuotas" onClick={()=>setConvenioForm({det:d,cuotas:'',monto_total:Number(d.monto||0)+Number(d.interes_mora||0)+Number(d.saldo_anterior||0),detalle:''})}>📋 Convenio</Btn>
+                        <Btn small color={AM} title="Convenio de pago en cuotas" onClick={()=>setConvenioForm({det:d,cuotas:'',monto_total:Number(d.deuda||0),detalle:''})}>📋 Convenio</Btn>
                       </div>
                     </td>
                   </tr>
                 )
               })}
-              {morosos.length===0 && <tr><td colSpan={7} style={{ padding:32, textAlign:'center', color:VD, fontWeight:600 }}>✅ No hay morosos registrados</td></tr>}
+              {morosos.length===0 && <tr><td colSpan={6} style={{ padding:32, textAlign:'center', color:VD, fontWeight:600 }}>✅ No hay morosos según las cuentas corrientes</td></tr>}
             </tbody>
           </table>
         </div>
