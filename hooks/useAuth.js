@@ -1,7 +1,7 @@
 // hooks/useAuth.js — Hook de autenticación para GASP Consorcios.
 // session, login(), logout() — antes en App(), ahora independiente.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { SUPERADMIN } from '../lib/config'
 
@@ -15,6 +15,10 @@ export function useAuth() {
   const [pass, setPass]                 = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError]     = useState('')
+  // Ultimo user.id procesado. Sirve para IGNORAR los eventos de onAuthStateChange que NO cambian de
+  // usuario (TOKEN_REFRESHED / re-foco de la pestana), que si no re-disparan recargas y el
+  // LoadingScreen, desmontando la vista en curso y perdiendo el formulario que se estaba cargando.
+  const lastUserIdRef = useRef(undefined)
 
   async function resolverAdminId(s) {
     if (!s?.user?.id) { setAdminId(null); setRol(null); return }
@@ -32,11 +36,17 @@ export function useAuth() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       const s = data?.session || null
+      lastUserIdRef.current = s?.user?.id || null
       setSession(s)
       if (s) { setEsSuperAdmin(s.user?.email === SUPERADMIN); resolverAdminId(s) }
       else setAdminId(null)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      const newId = s?.user?.id || null
+      // Mismo usuario (refresh de token / re-foco de pestana): NO re-procesar. Evita la recarga de
+      // consorcios + LoadingScreen que desmonta la vista y borra el formulario en curso.
+      if (lastUserIdRef.current === newId) return
+      lastUserIdRef.current = newId
       setSession(s)
       setEsSuperAdmin(s?.user?.email === SUPERADMIN)
       resolverAdminId(s)
@@ -54,6 +64,7 @@ export function useAuth() {
       return false
     }
     const { data } = await supabase.auth.getSession()
+    lastUserIdRef.current = data?.session?.user?.id || null
     setSession(data?.session || null)
     await resolverAdminId(data?.session)
     setLoginLoading(false)
@@ -62,6 +73,7 @@ export function useAuth() {
 
   async function logout() {
     await supabase.auth.signOut()
+    lastUserIdRef.current = null
     setSession(null)
     setAdminId(null)
     setRol(null)
