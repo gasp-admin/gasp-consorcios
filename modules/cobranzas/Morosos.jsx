@@ -133,25 +133,29 @@ export default function Morosos() {
       }
     } else if (ult) {
       const { data: lufs } = await supabase.from('con_liquidacion_uf')
-        .select('unidad_id, deuda, interes, ajustes').eq('expensa_id', ult.id)
+        .select('unidad_id, deuda, interes, ajustes, total_uf').eq('expensa_id', ult.id)
       for (const l of (lufs || [])) {
-        const neta = Number(l.deuda || 0) + Number(l.ajustes || 0)
-        saldoUF[l.unidad_id] = { deuda: neta + Number(l.interes || 0), interes: Number(l.interes || 0) }
+        saldoUF[l.unidad_id] = {
+          deuda: Number(l.total_uf || 0),                            // saldo final EXACTO (= cta cte / PDF) → reclamo
+          vencida: Number(l.deuda || 0) + Number(l.ajustes || 0),    // capital vencido neto → criterio de mora
+          interes: Number(l.interes || 0),
+        }
       }
     }
 
     const numUF = (id) => { const u = unidades.find(x => x.id === id); return parseInt(u?.nro_uf_pdf ?? u?.numero, 10) || 999 }
     const lista = Object.entries(saldoUF)
       .map(([unidad_id, s]) => {
-        const deuda = Math.round(s.deuda * 100) / 100
+        const deuda = Math.round(s.deuda * 100) / 100                              // saldo total exacto (reclamo)
+        const vencida = Math.round((s.vencida != null ? s.vencida : s.deuda) * 100) / 100  // capital vencido (criterio)
         const exp = expUF[unidad_id] || 0
         const meses = exp > 0 ? Math.max(1, Math.round(deuda / exp)) : 1
         return {
-          unidad_id, deuda, interes: Math.round(s.interes * 100) / 100, meses,
+          unidad_id, deuda, vencida, interes: Math.round(s.interes * 100) / 100, meses,
           periodo: ult?.periodo || null, expensa_id: ult?.id || null,
         }
       })
-      .filter(x => x.deuda > 1)
+      .filter(x => x.vencida > 1)
       .sort((a, b) => numUF(a.unidad_id) - numUF(b.unidad_id))
     setMorosos(lista); setSel(new Set()); setLoading(false)
   }
