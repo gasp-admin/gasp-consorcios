@@ -18,7 +18,7 @@ export default function CoeficientesColumnas() {
   const { session, consorcioActivo, unidades, puede } = useApp()
   const uid = session?.user?.id
   const consorcioId = consorcioActivo?.id
-  const puedeEditar = puede ? puede('consorcios') : true
+  const puedeEditar = true  // acceso ya filtrado por el menú (perm 'configurar') + RLS
 
   const [tab, setTab] = useState('columnas') // 'columnas' | 'coeficientes'
   const [columnas, setColumnas] = useState([])
