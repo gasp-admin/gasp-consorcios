@@ -141,6 +141,25 @@ export default function Sueldos() {
     }))
   }
 
+  // Sube el documento (recibo de sueldo / formulario ARCA) a la carpeta de Drive del consorcio.
+  async function subirDocumentoDrive(base64, filename, mime, tipoDoc) {
+    try {
+      const entidad_tipo = tipoDoc === 'recibo_sueldo' ? 'recibo_sueldo' : 'formulario_arca'
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const resp = await fetch(`${SUPA_URL}/functions/v1/subir-archivo-drive`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sess?.access_token}`,
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+        },
+        body: JSON.stringify({ base64, filename, mime, consorcio_id: consorcioId, entidad_tipo, entidad_id: null }),
+      })
+      const r = await resp.json()
+      if (!r.ok) console.warn('Drive:', r.error)
+    } catch (e) { console.warn('Drive:', e.message) }
+  }
+
   // ── Lectura IA de recibo PDF (via Edge Function — evita CORS) ───────────
   async function leerReciboConIA(file, tipoDoc = 'recibo_sueldo') {
     if (!file) return
@@ -176,6 +195,9 @@ export default function Sueldos() {
       }
 
       const parsed = result.datos || {}
+
+      // Archivar el documento en la carpeta de Drive del consorcio (no bloquea la lectura si falla)
+      subirDocumentoDrive(b64, file.name, file.type, tipoDoc)
 
       // Si leyó FATERYH → completar campo fateryh directamente
       if (tipoDoc === 'fateryh') {
