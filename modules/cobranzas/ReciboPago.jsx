@@ -7,6 +7,7 @@ import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
+import { LOGO_ADM_B64 } from '../../lib/logo'
 
 export default function ReciboPago() {
   const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo } = useApp()
@@ -68,9 +69,12 @@ export default function ReciboPago() {
 <div class="recibo">
   <div class="header">
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
-      <div>
-        <h1>RECIBO DE PAGO DE EXPENSAS</h1>
-        <p>Ley Provincial 14.701 — Provincia de Buenos Aires</p>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="background:#fff;border-radius:6px;padding:5px;display:flex;align-items:center"><img src="${LOGO_ADM_B64}" alt="Logo" style="width:46px;height:auto;object-fit:contain"/></div>
+        <div>
+          <h1>RECIBO DE PAGO DE EXPENSAS</h1>
+          <p>Ley Provincial 14.701 — Provincia de Buenos Aires</p>
+        </div>
       </div>
       <div class="nro">
         <span>N° ${nroRecibo}</span>
