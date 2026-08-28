@@ -175,24 +175,15 @@ export default function CoeficientesColumnas() {
               Cargá o corregí de una sola vez el coeficiente de todas las UF. Podés copiar los valores de otra columna ya cargada.
             </p>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, color: '#5b6b7a', marginBottom: 4 }}>Coeficiente a cargar</label>
-                <Sel value={campoSel} onChange={e => setCampoSel(e.target.value)}>
-                  {CAMPOS_COEF.map(c => <option key={c.campo} value={c.campo}>{c.label}</option>)}
-                </Sel>
+              <div style={{ minWidth: 220 }}>
+                <Sel label="Coeficiente a cargar" value={campoSel} onChange={setCampoSel}
+                  opts={CAMPOS_COEF.map(c => ({ v: c.campo, l: c.label }))} />
               </div>
-              {puedeEditar && (
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#5b6b7a', marginBottom: 4 }}>Copiar valores de…</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <Sel value={copiarDe} onChange={e => setCopiarDe(e.target.value)}>
-                      <option value="">(elegir columna)</option>
-                      {CAMPOS_COEF.filter(c => c.campo !== campoSel).map(c => <option key={c.campo} value={c.campo}>{c.label}</option>)}
-                    </Sel>
-                    <BtnSec onClick={aplicarCopia} disabled={!copiarDe}>Copiar</BtnSec>
-                  </div>
-                </div>
-              )}
+              <div style={{ minWidth: 220 }}>
+                <Sel label="Copiar valores de…" value={copiarDe} onChange={setCopiarDe}
+                  opts={[{ v: '', l: '(elegir columna)' }, ...CAMPOS_COEF.filter(c => c.campo !== campoSel).map(c => ({ v: c.campo, l: c.label }))]} />
+              </div>
+              <BtnSec onClick={aplicarCopia} disabled={!copiarDe}>Copiar</BtnSec>
             </div>
 
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
