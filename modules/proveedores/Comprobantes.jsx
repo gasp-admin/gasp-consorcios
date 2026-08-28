@@ -17,6 +17,7 @@ export default function Comprobantes() {
   const uid = session?.user?.id
 
   const [comprobantes, setComprobantes] = useState([])
+  const [docsDrive, setDocsDrive] = useState({})
   const [form, setForm]   = useState(null)
   const [formPago, setFormPago] = useState(null) // pago rápido inline
   const [filtro, setFiltro] = useState('')
@@ -32,6 +33,34 @@ export default function Comprobantes() {
   const hoy = new Date().toISOString().split('T')[0]
 
   // ── Extraer datos de factura PDF con IA ───────────────────────────────────
+  // Sube el archivo del comprobante a la carpeta de Drive del consorcio (no bloquea el alta si falla).
+  async function subirComprobanteDrive(file, compId) {
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader()
+        r.onload = () => res(r.result.split(',')[1])
+        r.onerror = () => rej(new Error('Error leyendo archivo'))
+        r.readAsDataURL(file)
+      })
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const resp = await fetch(`${SUPA_URL}/functions/v1/subir-archivo-drive`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sess?.access_token}`,
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+        },
+        body: JSON.stringify({
+          base64, filename: file.name, mime: file.type,
+          consorcio_id: consorcioId, entidad_tipo: 'comprobante', entidad_id: compId,
+        }),
+      })
+      const r = await resp.json()
+      if (r.ok) setMsg({ tipo: 'ok', texto: '✓ Comprobante registrado y archivado en Drive' })
+      else console.warn('Drive:', r.error)
+    } catch (e) { console.warn('Drive:', e.message) }
+  }
+
   async function extraerFacturaConIA(file) {
     if (!file) return
     setArchivoFactura(file)
@@ -102,6 +131,12 @@ export default function Comprobantes() {
     if (filtro) q.eq('proveedor_id', filtro)
     const { data } = await q
     setComprobantes(data || [])
+    // Documentos archivados en Drive (para el enlace por comprobante)
+    const { data: docs } = await supabase.from('con_documentos_drive')
+      .select('entidad_id, drive_file_url').eq('consorcio_id', consorcioId).eq('entidad_tipo', 'comprobante')
+    const map = {}
+    for (const d of (docs || [])) if (d.entidad_id) map[d.entidad_id] = d.drive_file_url
+    setDocsDrive(map)
   }
 
   async function guardar() {
@@ -132,8 +167,9 @@ export default function Comprobantes() {
       else { setMsg({ tipo:'ok', texto:'✓ Comprobante actualizado' }); setForm(null); cargar() }
     } else {
       // Alta nueva
+      const compId = `COMP-${Date.now()}`
       const { error } = await supabase.from('con_comprobantes_proveedor').insert([{
-        id: `COMP-${Date.now()}`,
+        id: compId,
         admin_id: uid,
         consorcio_id: consorcioId,
         proveedor_id: form.proveedor_id,
@@ -154,8 +190,8 @@ export default function Comprobantes() {
       if (error) setMsg({ tipo:'error', texto: error.message })
       else {
         setMsg({ tipo:'ok', texto:'✓ Comprobante registrado' })
+        if (archivoFactura) subirComprobanteDrive(archivoFactura, compId)
         setForm(null)
-        // Si el usuario quiere pagar en el momento, no hace nada más
         cargar()
       }
     }
@@ -550,6 +586,11 @@ export default function Comprobantes() {
                         {c.estado !== 'anulado' && (
                           <Btn small title="Editar" onClick={()=>{ setForm({...c}); setFormPago(null) }}
                             style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
+                        )}
+                        {/* Ver en Drive */}
+                        {docsDrive[c.id] && (
+                          <Btn small title="Ver comprobante en Drive" onClick={()=>window.open(docsDrive[c.id],'_blank')}
+                            style={{ background:'#e8f0fe', color:'#1a73e8' }}>📎</Btn>
                         )}
                         {/* Anular */}
                         {c.estado !== 'anulado' && c.estado !== 'pagado' && (
