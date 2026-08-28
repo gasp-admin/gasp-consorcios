@@ -60,6 +60,7 @@ export const NAV_ITEMS = [
   { id: 'agenda_venc',              label: 'Agenda vencimientos',     icon: '📅', sec: 'Comunicaciones' },
   { id: 'plan_cuentas',             label: 'Plan de cuentas',         icon: '📑', sec: 'Configuración', perm: 'configurar' },
   { id: 'grupos_liquidacion',       label: 'Grupos de liquidación',   icon: '🗂️', sec: 'Configuración', perm: 'configurar' },
+  { id: 'columnas_coef',            label: 'Columnas y coeficientes', icon: '📐', sec: 'Configuración', perm: 'configurar' },
   { id: 'importar',                 label: 'Importar datos',          icon: '📥', sec: 'Configuración', perm: 'configurar' },
   { id: 'importar_pdf',             label: 'Migrar desde PDF (IA)',    icon: '🤖', sec: 'Configuración', perm: 'configurar' },
   { id: 'equipo',                   label: 'Equipo',                  icon: '👥', sec: 'Configuración', perm: 'configurar' },
