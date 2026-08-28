@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase'
 import { AZ, VD, RJ, AM, GR } from '../../lib/config'
 import { fmt } from '../../lib/formatters'
 import { Btn, BtnSec, Card } from '../../components/ui'
+import { LOGO_ADM_B64 } from '../../lib/logo'
 
 const AVISOS = {
   1: { label: '1º Aviso (informativo)', titulo: 'Aviso de Deuda de Expensas — Primer Aviso' },
@@ -43,7 +44,10 @@ function docIntimacion(tipo, datos) {
   return `
     <div class="hoja">
       <div class="encabezado">
-        <div><strong>Administración de Consorcios Pinamar</strong><br/>Lenguado 1313, Local 3 — Pinamar, Buenos Aires<br/>Tel: 02267 444034</div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <img src="${LOGO_ADM_B64}" alt="Administración de Consorcios Pinamar" style="width:58px;height:auto;object-fit:contain"/>
+          <div><strong>Administración de Consorcios Pinamar</strong><br/>Lenguado 1313, Local 3 — Pinamar, Buenos Aires<br/>Tel: 02267 444034</div>
+        </div>
         <div style="text-align:right">Pinamar, ${hoy}<br/><strong>Ref.:</strong> UF ${datos.unidad} — ${datos.consorcio}</div>
       </div>
       <h1${esFinal ? ' class="final"' : ''}>${esFinal ? '⚠ ' : ''}${AVISOS[tipo].titulo}</h1>
