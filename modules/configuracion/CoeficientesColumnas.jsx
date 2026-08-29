@@ -50,7 +50,7 @@ export default function CoeficientesColumnas() {
     try {
       const res = await Promise.all(columnas.map(c =>
         supabase.from('con_columnas_liquidacion')
-          .update({ nombre: c.nombre, orden: Number(c.orden) || 0, activo: !!c.activo })
+          .update({ nombre: c.nombre, orden: Number(c.orden) || 0, activo: !!c.activo, tipo: c.tipo || 'prorrateo' })
           .eq('id', c.id)))
       const err = res.find(r => r.error)
       if (err) throw err.error
@@ -133,6 +133,7 @@ export default function CoeficientesColumnas() {
               <thead><tr>
                 <th style={{ ...th, width: 60 }}>Usar</th>
                 <th style={th}>Nombre de la columna</th>
+                <th style={{ ...th, width: 150 }}>Tipo</th>
                 <th style={th}>Coeficiente que usa</th>
                 <th style={{ ...th, width: 80 }}>Orden</th>
               </tr></thead>
@@ -148,7 +149,11 @@ export default function CoeficientesColumnas() {
                         onChange={e => setCol(c.id, 'nombre', e.target.value)}
                         style={{ width: '95%', padding: '6px 8px', border: '1px solid #cdd7df', borderRadius: 6, fontSize: 14 }} />
                     </td>
-                    <td style={{ ...td, color: '#5b6b7a' }}>{labelCampo(c.campo_coef)}</td>
+                    <td style={td}>
+                      <Sel value={c.tipo || 'prorrateo'} onChange={v => setCol(c.id, 'tipo', v)}
+                        opts={[{ v: 'prorrateo', l: 'Prorrateo' }, { v: 'monto_fijo', l: 'Monto fijo' }]} />
+                    </td>
+                    <td style={{ ...td, color: '#5b6b7a' }}>{c.tipo === 'monto_fijo' ? '— (directo a la UF)' : labelCampo(c.campo_coef)}</td>
                     <td style={td}>
                       <input type="number" value={c.orden ?? ''} disabled={!puedeEditar}
                         onChange={e => setCol(c.id, 'orden', e.target.value)}
@@ -156,7 +161,7 @@ export default function CoeficientesColumnas() {
                     </td>
                   </tr>
                 ))}
-                {columnas.length === 0 && <tr><td colSpan={4} style={{ ...td, color: '#5b6b7a' }}>Este consorcio no tiene columnas configuradas.</td></tr>}
+                {columnas.length === 0 && <tr><td colSpan={5} style={{ ...td, color: '#5b6b7a' }}>Este consorcio no tiene columnas configuradas.</td></tr>}
               </tbody>
             </table>
             {puedeEditar && columnas.length > 0 && (
