@@ -60,6 +60,32 @@ export default function LiquidacionPeriodo() {
     })
   }, [consorcioId])
 
+  // ── Columnas monto_fijo (gastos particulares) ───────────────────────────────
+  // Una columna monto_fijo NO se prorratea: cada gasto con unidad_id va 100% a esa UF.
+  // El gasto llega a la columna por su categoría (mapeada vía grupo, D1=C).
+  const columnasMF = columnasLiq.filter(c => c.activo && c.tipo === 'monto_fijo')
+  // Categorías que caen (vía grupo) en alguna columna monto_fijo activa
+  const categoriasMF = (() => {
+    const codigosMF = new Set(columnasMF.map(c => c.codigo))
+    const set = new Set()
+    gruposLiq.forEach(gr => {
+      if ((gr.columnas_coef || []).some(cc => codigosMF.has(cc))) {
+        (gr.categorias || []).forEach(cat => set.add(cat))
+      }
+    })
+    return set
+  })()
+  const esCategoriaMF = (cat) => categoriasMF.has(cat)
+  const hayColumnaMF = columnasMF.length > 0
+  // Categoría a asignar a un gasto marcado como "particular" (primera categoría del
+  // grupo que mapea a la primera columna monto_fijo activa del consorcio).
+  const categoriaParticularPorDefecto = (() => {
+    if (columnasMF.length === 0) return null
+    const cod = columnasMF[0].codigo
+    const grp = gruposLiq.find(gr => (gr.columnas_coef || []).includes(cod))
+    return grp?.categorias?.[0] || null
+  })()
+
   // ── Cargar datos ───────────────────────────────────────────────────────────
   // Recarga la lista de expensas (períodos) del consorcio activo en el contexto.
   // La llaman nuevaExpensa, confirmarYCerrar y las acciones de reapertura/borrado.
@@ -90,7 +116,7 @@ export default function LiquidacionPeriodo() {
       // 2. Traer TODOS los comprobantes del consorcio (sin join para evitar problemas RLS)
       const { data: comps, error } = await supabase
         .from('con_comprobantes_proveedor')
-        .select('id, proveedor_id, tipo, numero, concepto, monto_total, saldo_pendiente, estado, fecha, fecha_vencimiento, notas')
+        .select('id, proveedor_id, tipo, numero, concepto, monto_total, saldo_pendiente, estado, fecha, fecha_vencimiento, notas, unidad_id')
         .eq('consorcio_id', consorcioId)
         .neq('estado', 'anulado')
         .order('fecha', { ascending:false })
@@ -134,6 +160,13 @@ export default function LiquidacionPeriodo() {
     const seleccionados = compImportables.filter(c => compSeleccionados[c.id])
     if (seleccionados.length === 0) return setMsg({ tipo:'warn', texto:'Seleccioná al menos un comprobante para importar' })
 
+    // D1=C: un comprobante marcado como particular (unidad_id) requiere una columna
+    // monto_fijo activa a la cual mapear su categoría. Si no existe, no se puede imputar.
+    const particularesSinCol = seleccionados.filter(c => c.unidad_id) 
+    if (particularesSinCol.length > 0 && !categoriaParticularPorDefecto) {
+      return setMsg({ tipo:'error', texto:'Hay comprobantes marcados como gasto particular pero el consorcio no tiene una columna de "Monto fijo" configurada. Configurala en Columnas y coeficientes antes de importar.' })
+    }
+
     // Mapa rubro → categoría del plan de cuentas de GASP
     const CAT_MAP = {
       'limpieza': 'gastos_comunes', 'electricidad': 'electricidad',
@@ -154,6 +187,7 @@ export default function LiquidacionPeriodo() {
 
     const inserts = seleccionados.map(c => {
       const prov = provMap[c.proveedor_id]
+      const esParticular = !!c.unidad_id
       return {
         id: `GAS-IMP-${c.id}`,
         admin_id: session.user.id,
@@ -164,7 +198,12 @@ export default function LiquidacionPeriodo() {
         fecha: c.fecha || hoy,
         comprobante: c.numero || null,
         concepto: c.concepto || `${c.tipo||''} ${c.numero||''}`.trim() || 'Sin concepto',
-        categoria: CAT_MAP[prov?.rubro || c.proveedor_rubro] || 'varios',
+        // Gasto particular: categoría de la columna monto_fijo + UF destino (100% a esa UF).
+        // Gasto común: categoría derivada del rubro del proveedor.
+        categoria: esParticular
+          ? categoriaParticularPorDefecto
+          : (CAT_MAP[prov?.rubro || c.proveedor_rubro] || 'varios'),
+        unidad_id: esParticular ? c.unidad_id : null,
         proveedor_nombre: prov?.razon_social || c.proveedor_nombre_resuelto || null,
         monto: parseFloat(c.monto_total) || 0,
       }
@@ -241,6 +280,12 @@ export default function LiquidacionPeriodo() {
     if (!formGasto?.concepto?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el concepto' })
     if (!formGasto?.monto || parseFloat(formGasto.monto) <= 0) return setMsg({ tipo:'warn', texto:'Ingresá el monto' })
 
+    // D5: un gasto en categoría de columna monto_fijo (particular) exige UF destino.
+    const catEsMF = esCategoriaMF(formGasto.categoria)
+    if (catEsMF && !formGasto.unidad_id) {
+      return setMsg({ tipo:'warn', texto:'Es un gasto particular: seleccioná la UF a la que se le carga.' })
+    }
+
     const payload = {
       admin_id: session.user.id,
       consorcio_id: consorcioId,
@@ -248,6 +293,7 @@ export default function LiquidacionPeriodo() {
       fecha: formGasto.fecha || hoy,
       concepto: formGasto.concepto.trim(),
       categoria: formGasto.categoria || 'varios',
+      unidad_id: catEsMF ? (formGasto.unidad_id || null) : null,  // UF solo si es gasto particular
       proveedor_nombre: formGasto.proveedor_nombre || null,
       monto: parseFloat(formGasto.monto),
     }
@@ -286,8 +332,13 @@ export default function LiquidacionPeriodo() {
 
     const gruposOrdenados = [...gruposLiq].sort((a,b) => a.numero - b.numero)
 
+    // Tipo de cada columna (prorrateo | monto_fijo)
+    const tipoPorCod = {}
+    colsActivas.forEach(col => { tipoPorCod[col.codigo] = col.tipo || 'prorrateo' })
+
     // Calcular total de gastos por columna según grupos de liquidación
     const totalesPorCol = {}
+    const porUfPorCol = {}   // solo columnas monto_fijo: { codigo: { unidad_id: monto } }
     colsActivas.forEach(col => { totalesPorCol[col.codigo] = 0 })
 
     gastos.forEach(g => {
@@ -302,17 +353,25 @@ export default function LiquidacionPeriodo() {
       // que AMBAS columnas lo incluyen para el prorrateo por su coeficiente.
       // No se divide el monto; cada columna lo prorratea independientemente.
       colsCodigos.forEach(cc => {
-        if (totalesPorCol[cc] !== undefined) totalesPorCol[cc] += monto
+        if (totalesPorCol[cc] === undefined) return
+        totalesPorCol[cc] += monto
+        // Columna monto_fijo: acumular el gasto por UF destino (no se prorratea).
+        if (tipoPorCod[cc] === 'monto_fijo' && g.unidad_id) {
+          porUfPorCol[cc] = porUfPorCol[cc] || {}
+          porUfPorCol[cc][g.unidad_id] = (porUfPorCol[cc][g.unidad_id] || 0) + monto
+        }
       })
     })
 
-    // Construir estado: { [codigo]: { monto: number, usar_total: true } }
+    // Construir estado: { [codigo]: { monto, tipo, por_uf, usar_total } }
     const nuevoEstado = {}
     colsActivas.forEach(col => {
       nuevoEstado[col.codigo] = {
         nombre: col.nombre,
         campo_coef: col.campo_coef || 'porcentaje_fiscal',
+        tipo: col.tipo || 'prorrateo',
         monto: Math.round(totalesPorCol[col.codigo] || 0),
+        por_uf: porUfPorCol[col.codigo] || {},   // desglose por UF (solo monto_fijo)
         usar_total: true,   // si true: usa el total calculado; si false: editable manualmente
       }
     })
@@ -328,6 +387,16 @@ export default function LiquidacionPeriodo() {
 
     const colsActivas = columnasLiq.filter(c => c.activo)
     const tieneMultiCol = colsActivas.length > 1
+
+    // D5: bloquear si hay gastos en columna monto_fijo (particulares) sin UF destino.
+    // No se inventa destino ni se prorratea: se avisa para que se corrija.
+    const gastosMFSinUF = gastos.filter(g => esCategoriaMF(g.categoria) && !g.unidad_id)
+    if (gastosMFSinUF.length > 0) {
+      const lista = gastosMFSinUF
+        .map(g => `«${g.concepto || 'sin concepto'}» ($${(parseFloat(g.monto) || 0).toLocaleString('es-AR')})`)
+        .join(', ')
+      return setMsg({ tipo:'error', texto:`Hay ${gastosMFSinUF.length} gasto(s) particular(es) sin UF asignada: ${lista}. Asigná la UF destino (editá el gasto) antes de calcular la distribución.` })
+    }
 
     // Determinar el total a cobrar
     // — Multicol: suma de los importes de todas las columnas (cada una editable)
@@ -514,6 +583,11 @@ export default function LiquidacionPeriodo() {
         // Para cada columna: intentar usar su campo_coef propio;
         // si ese campo es 0 en TODAS las UFs (no configurado), hacer fallback a porcentaje_fiscal
         Object.entries(importesPorColumna).forEach(([codigo, col]) => {
+          // Columna monto_fijo: el gasto particular va 100% a la UF destino (no se prorratea).
+          if (col.tipo === 'monto_fijo') {
+            expensaBase += Math.round(col.por_uf?.[u.id] || 0)
+            return
+          }
           const montoCol = parseFloat(col.monto) || 0
           if (montoCol === 0) return  // columna sin importe → no aporta
           const campoCf = col.campo_coef || 'porcentaje_fiscal'
@@ -587,6 +661,11 @@ export default function LiquidacionPeriodo() {
       const aporte_por_columna = {}
       if (tieneMultiCol && Object.keys(importesPorColumna).length > 0) {
         Object.entries(importesPorColumna).forEach(([codigo, col]) => {
+          // Columna monto_fijo: el aporte de la UF es el gasto particular directo (o 0).
+          if (col.tipo === 'monto_fijo') {
+            aporte_por_columna[codigo] = Math.round(col.por_uf?.[u.id] || 0)
+            return
+          }
           const montoCol = parseFloat(col.monto) || 0
           const campoCf = col.campo_coef || 'porcentaje_fiscal'
           const coefTotalCol = unidades.reduce((a, uu) => a + (parseFloat(uu[campoCf])||0), 0)
@@ -1639,6 +1718,24 @@ export default function LiquidacionPeriodo() {
                       borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
                 </div>
               </div>
+              {esCategoriaMF(formGasto.categoria) && (
+                <div style={{ background:'#faf5ff', border:'1px solid #e9d5ff', borderRadius:7, padding:'10px 12px', marginBottom:12 }}>
+                  <div style={{ fontSize:12, color:'#7c3aed', fontWeight:600, marginBottom:4 }}>Gasto particular — UF destino *</div>
+                  <select value={formGasto.unidad_id||''}
+                    onChange={e=>setFormGasto(f=>({...f,unidad_id:e.target.value}))}
+                    style={{ width:'100%', padding:'7px 10px', border:'1px solid #d8b4fe', borderRadius:7, fontSize:13, background:'#fff' }}>
+                    <option value="">— Seleccioná la UF —</option>
+                    {[...unidades].sort((a,b)=>{
+                      const na = parseInt(String(a.nro_uf_pdf ?? a.numero ?? '').replace(/\D/g,''))||0
+                      const nb = parseInt(String(b.nro_uf_pdf ?? b.numero ?? '').replace(/\D/g,''))||0
+                      return na - nb
+                    }).map(u=>(
+                      <option key={u.id} value={u.id}>{(u.nro_uf_pdf||u.numero_interno||u.numero||u.id)}{u.numero?` — ${u.numero}`:''}</option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize:10, color:'#9333ea', marginTop:4 }}>Se carga 100% a la UF elegida (no se prorratea).</div>
+                </div>
+              )}
               <div style={{ display:'flex', gap:8 }}>
                 <Btn onClick={guardarGasto}>✓ Guardar</Btn>
                 <BtnSec onClick={()=>{setFormGasto(null);setMsg(null)}}>Cancelar</BtnSec>
@@ -1794,6 +1891,21 @@ export default function LiquidacionPeriodo() {
                               return acc
                             }, 0)
                           })()
+                          const esMF = (col.tipo || estado.tipo) === 'monto_fijo'
+                          if (esMF) {
+                            // Columna monto_fijo: el importe = suma de gastos particulares (no editable,
+                            // no se prorratea). Se asigna 100% a la UF destino de cada gasto.
+                            const nUf = Object.keys(estado.por_uf || {}).length
+                            return (
+                              <tr key={col.codigo} style={{ borderBottom:'1px solid #e5e7eb', background:'#faf5ff' }}>
+                                <td style={{ padding:'8px 10px', fontWeight:700, color:'#7c3aed' }}>{col.nombre}</td>
+                                <td style={{ padding:'8px 10px', fontSize:11, color:'#7c3aed', fontWeight:600 }}>Monto fijo · por UF</td>
+                                <td style={{ padding:'8px 10px', textAlign:'right', color:GR }}>{fmt(Math.round(estado.monto||0))}</td>
+                                <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:700, color:'#7c3aed' }}>{fmt(Math.round(estado.monto||0))}</td>
+                                <td style={{ padding:'8px 10px', textAlign:'center', fontSize:11, color:GR }}>{nUf} UF</td>
+                              </tr>
+                            )
+                          }
                           return (
                             <tr key={col.codigo} style={{ borderBottom:'1px solid #e5e7eb' }}>
                               <td style={{ padding:'8px 10px', fontWeight:700, color:AZ }}>{col.nombre}</td>
