@@ -30,7 +30,16 @@ export default function Comprobantes() {
   const [tabComp, setTabComp]         = useState('proveedores')
   const [gastosSueldos, setGastosSueldos] = useState([])
   const [cargandoSueldos, setCargandoSueldos] = useState(false)
+  const [hayColMF, setHayColMF] = useState(false)  // consorcio tiene columna monto_fijo activa
   const hoy = new Date().toISOString().split('T')[0]
+
+  // ¿El consorcio activo tiene alguna columna monto_fijo activa? (habilita "gasto particular")
+  useEffect(() => {
+    if (!consorcioId) { setHayColMF(false); return }
+    supabase.from('con_columnas_liquidacion')
+      .select('id').eq('consorcio_id', consorcioId).eq('activo', true).eq('tipo', 'monto_fijo').limit(1)
+      .then(({ data }) => setHayColMF((data || []).length > 0))
+  }, [consorcioId])
 
   // ── Extraer datos de factura PDF con IA ───────────────────────────────────
   // Sube el archivo del comprobante a la carpeta de Drive del consorcio (no bloquea el alta si falla).
@@ -144,8 +153,10 @@ export default function Comprobantes() {
     if (!form?.concepto?.trim()) return setMsg({ tipo:'warn', texto:'Ingresá el concepto' })
     if (!form?.monto_total || parseFloat(form.monto_total) <= 0) return setMsg({ tipo:'warn', texto:'Ingresá el monto' })
     if (!form?.fecha) return setMsg({ tipo:'warn', texto:'Ingresá la fecha' })
+    if (form?.es_particular && !form?.unidad_id) return setMsg({ tipo:'warn', texto:'Seleccioná la UF del gasto particular' })
     setGuardando(true)
     const total = parseFloat(form.monto_total)
+    const unidadDestino = form.es_particular ? (form.unidad_id || null) : null
     const esEdicion = !!form.id
     if (esEdicion) {
       // Edición: actualizar campos editables (no el saldo ni estado si ya tiene pagos)
@@ -161,6 +172,7 @@ export default function Comprobantes() {
         iva: parseFloat(form.iva||0),
         otros_impuestos: parseFloat(form.otros_impuestos||0),
         monto_total: total,
+        unidad_id: unidadDestino,
         notas: form.notas || null,
       }).eq('id', form.id)
       if (error) setMsg({ tipo:'error', texto: error.message })
@@ -185,6 +197,7 @@ export default function Comprobantes() {
         monto_total: total,
         saldo_pendiente: total,
         estado: 'pendiente',
+        unidad_id: unidadDestino,
         notas: form.notas || null,
       }])
       if (error) setMsg({ tipo:'error', texto: error.message })
@@ -491,6 +504,7 @@ export default function Comprobantes() {
           form={form} setForm={setForm}
           guardar={guardar} guardando={guardando}
           proveedores={proveedores} expensas={expensas}
+          unidades={unidades} hayColMF={hayColMF}
           extraerFacturaConIA={extraerFacturaConIA}
           extrayendoIA={extrayendoIA} archivoFactura={archivoFactura}
         />
@@ -618,7 +632,9 @@ export default function Comprobantes() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function FormComp({ form, setForm, guardar, guardando, proveedores, expensas,
+  unidades = [], hayColMF = false,
   extraerFacturaConIA, extrayendoIA, archivoFactura }) {
+  const esPart = form.es_particular ?? !!form.unidad_id
   const TIPOS = [
     {v:'factura',l:'Factura'},{v:'remito',l:'Remito'},{v:'ticket',l:'Ticket'},
     {v:'nota_debito',l:'Nota de débito'},{v:'nota_credito',l:'Nota de crédito'}
@@ -748,6 +764,33 @@ function FormComp({ form, setForm, guardar, guardando, proveedores, expensas,
             style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
         </div>
       </div>
+      {hayColMF && (
+        <div style={{ background:'#faf5ff', border:'1px solid #e9d5ff', borderRadius:8, padding:'10px 14px', marginBottom:14 }}>
+          <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:13, color:'#7c3aed', fontWeight:600 }}>
+            <input type="checkbox" checked={esPart}
+              onChange={e=>setForm(f=>({...f, es_particular:e.target.checked, unidad_id: e.target.checked ? f.unidad_id : null }))} />
+            Es un gasto particular de una UF
+          </label>
+          {esPart && (
+            <div style={{ marginTop:10 }}>
+              <div style={{ fontSize:12, color:'#7c3aed', marginBottom:4, fontWeight:500 }}>UF destino *</div>
+              <select value={form.unidad_id||''} onChange={e=>setForm(f=>({...f, unidad_id:e.target.value}))}
+                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d8b4fe', borderRadius:7, fontSize:13, background:'#fff', boxSizing:'border-box' }}>
+                <option value="">— Seleccioná la UF —</option>
+                {[...unidades].sort((a,b)=>{
+                  const na = parseInt(String(a.nro_uf_pdf ?? a.numero ?? '').replace(/\D/g,''))||0
+                  const nb = parseInt(String(b.nro_uf_pdf ?? b.numero ?? '').replace(/\D/g,''))||0
+                  return na - nb
+                }).map(u=>(
+                  <option key={u.id} value={u.id}>{(u.nro_uf_pdf||u.numero_interno||u.numero||u.id)}{u.numero?` — ${u.numero}`:''}</option>
+                ))}
+              </select>
+              <div style={{ fontSize:10, color:'#9333ea', marginTop:4 }}>Al liquidar, este gasto se carga 100% a la UF elegida (no se prorratea).</div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ display:'flex', gap:8 }}>
         <Btn onClick={guardar} disabled={guardando}>{guardando?'⏳':form.id?'💾 Actualizar':'✓ Guardar'}</Btn>
         <BtnSec onClick={()=>{setForm(null);setMsg(null)}}>Cancelar</BtnSec>
