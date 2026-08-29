@@ -78,6 +78,8 @@ export default function CoeficientesColumnas() {
   // Detecta si el consorcio trabaja en base 100 (porcentaje) o base 1 (fracción)
   const formatoBase = totalCoef > 5 ? 100 : 1
   const sumaOk = Math.abs(totalCoef - formatoBase) < (formatoBase === 100 ? 0.05 : 0.0005)
+  const colDelCampo = useMemo(() => columnas.find(c => c.campo_coef === campoSel), [columnas, campoSel])
+  const esMontoFijo = colDelCampo?.tipo === 'monto_fijo'
 
   function aplicarCopia() {
     if (!copiarDe) return
@@ -191,37 +193,45 @@ export default function CoeficientesColumnas() {
               <BtnSec onClick={aplicarCopia} disabled={!copiarDe}>Copiar</BtnSec>
             </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr>
-                <th style={th}>UF</th>
-                <th style={th}>Unidad</th>
-                <th style={{ ...th, textAlign: 'right' }}>Coeficiente</th>
-              </tr></thead>
-              <tbody>
-                {ufs.map(u => (
-                  <tr key={u.id}>
-                    <td style={td}>{u.nro_uf_pdf || u.numero}</td>
-                    <td style={{ ...td, color: '#5b6b7a' }}>{u.numero}</td>
-                    <td style={{ ...td, textAlign: 'right' }}>
-                      <input type="number" step="any" value={valores[u.id] ?? ''} disabled={!puedeEditar}
-                        onChange={e => setVal(u.id, e.target.value)} style={inpNum} />
+            {esMontoFijo ? (
+              <Msg tipo="warn">
+                La columna <strong>{colDelCampo?.nombre}</strong> es de tipo <strong>Monto fijo</strong>: el gasto se asigna completo a una UF al cargar el comprobante (no se prorratea). Acá no hay coeficientes para cargar.
+              </Msg>
+            ) : (
+              <>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead><tr>
+                    <th style={th}>UF</th>
+                    <th style={th}>Unidad</th>
+                    <th style={{ ...th, textAlign: 'right' }}>Coeficiente</th>
+                  </tr></thead>
+                  <tbody>
+                    {ufs.map(u => (
+                      <tr key={u.id}>
+                        <td style={td}>{u.nro_uf_pdf || u.numero}</td>
+                        <td style={{ ...td, color: '#5b6b7a' }}>{u.numero}</td>
+                        <td style={{ ...td, textAlign: 'right' }}>
+                          <input type="number" step="any" value={valores[u.id] ?? ''} disabled={!puedeEditar}
+                            onChange={e => setVal(u.id, e.target.value)} style={inpNum} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr>
+                    <td style={{ ...td, fontWeight: 700 }} colSpan={2}>Total</td>
+                    <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: sumaOk ? '#13876b' : '#c0392b' }}>
+                      {totalCoef.toFixed(4)} {sumaOk ? '✓' : `(esperado ${formatoBase})`}
                     </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot><tr>
-                <td style={{ ...td, fontWeight: 700 }} colSpan={2}>Total</td>
-                <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: sumaOk ? '#13876b' : '#c0392b' }}>
-                  {totalCoef.toFixed(4)} {sumaOk ? '✓' : `(esperado ${formatoBase})`}
-                </td>
-              </tr></tfoot>
-            </table>
+                  </tr></tfoot>
+                </table>
 
-            {puedeEditar && ufs.length > 0 && (
-              <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center' }}>
-                <Btn onClick={guardarCoeficientes} disabled={guardando}>{guardando ? 'Guardando…' : `Guardar coeficientes (${ufs.length} UF)`}</Btn>
-                {!sumaOk && <span style={{ fontSize: 13, color: '#c0392b' }}>La suma no da {formatoBase}. Podés guardar igual, pero revisá los valores.</span>}
-              </div>
+                {puedeEditar && ufs.length > 0 && (
+                  <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <Btn onClick={guardarCoeficientes} disabled={guardando}>{guardando ? 'Guardando…' : `Guardar coeficientes (${ufs.length} UF)`}</Btn>
+                    {!sumaOk && <span style={{ fontSize: 13, color: '#c0392b' }}>La suma no da {formatoBase}. Podés guardar igual, pero revisá los valores.</span>}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </Card>
