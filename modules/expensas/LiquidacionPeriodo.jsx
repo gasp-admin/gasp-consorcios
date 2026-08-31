@@ -949,6 +949,9 @@ export default function LiquidacionPeriodo() {
 
     // ── Deuda por UF ─────────────────────────────────────────────────────────
     const deudaUFs = distribucion.filter(d=>d.deuda>0)
+    // Total del pie de la tabla de deudores: suma SOLO las UF listadas (deuda>0).
+    // NO usar totDeuda (que suma TODAS las UF, incluidos los saldos a favor negativos) → subvaluaba el total.
+    const totDeudaMorosos = deudaUFs.reduce((a,d)=>a+(d.deuda||0),0)
     const deudaHTML = deudaUFs.length > 0
       ? deudaUFs.map(d=>`<tr style="border-bottom:1px solid #fecaca"><td style="padding:3px 8px;text-align:center">${d.numero_uf}</td><td style="padding:3px 8px">${String(d.numero||'').replace(/</g,'&lt;')}</td><td style="padding:3px 8px">${String(d.propietario||'').replace(/</g,'&lt;')}</td><td style="text-align:right;padding:3px 8px;font-weight:700">${fmtN(d.deuda)}</td><td style="text-align:right;padding:3px 8px;font-weight:700">${fmtN(d.deuda)}</td></tr>`).join('')
       : '<tr><td colspan="5" style="text-align:center;padding:6px;color:#6b7280">Sin unidades con deuda</td></tr>'
@@ -1128,8 +1131,8 @@ export default function LiquidacionPeriodo() {
     <tbody>${deudaHTML}</tbody>
     <tfoot><tr style="background:#1A3FA0;color:#fff;font-weight:700">
       <td colspan="3" style="padding:3px 7px;text-align:right">TOTAL</td>
-      <td style="text-align:right;padding:3px 7px;white-space:nowrap">${fmtN(totDeuda)}</td>
-      <td style="text-align:right;padding:3px 7px;white-space:nowrap">${fmtN(totDeuda)}</td>
+      <td style="text-align:right;padding:3px 7px;white-space:nowrap">${fmtN(totDeudaMorosos)}</td>
+      <td style="text-align:right;padding:3px 7px;white-space:nowrap">${fmtN(totDeudaMorosos)}</td>
     </tr></tfoot>
   </table>
   <div class="footer">
