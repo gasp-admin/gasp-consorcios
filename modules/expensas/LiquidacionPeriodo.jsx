@@ -238,6 +238,12 @@ export default function LiquidacionPeriodo() {
 
   async function nuevaExpensa() {
     if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
+    // Consorcios históricos: las liquidaciones se cargan por Importar PDF/Excel (id HIST), NO por "Nuevo período".
+    // Crear acá una expensa nativa (id EXP-<con>-<timestamp>) deja una cáscara vacía que luego colisiona con la
+    // importación por el unique(consorcio_id, periodo) y la deja a medias (luf sin header). Ver §19 anomalía CON153.
+    if (consorcioActivo?.modelo_cc === 'historico') {
+      return setMsg({ tipo:'warn', texto:'Este consorcio está en modo histórico: cargá la liquidación desde Importar PDF/Excel, no desde “Nuevo período”.' })
+    }
     // Calcular próximo período
     const hoyDate = new Date()
     const mes     = String(hoyDate.getMonth() + 1).padStart(2,'0')
@@ -1540,9 +1546,13 @@ export default function LiquidacionPeriodo() {
               </div>
             )}
 
-            <Btn onClick={nuevaExpensa} disabled={procesando}>
-              {procesando ? '⏳' : '+ Crear nuevo período'}
-            </Btn>
+            {consorcioActivo?.modelo_cc === 'historico' ? (
+              <Msg data={{ tipo:'info', texto:'Consorcio en modo histórico: las liquidaciones se cargan desde Importar PDF/Excel, no desde aquí.' }} />
+            ) : (
+              <Btn onClick={nuevaExpensa} disabled={procesando}>
+                {procesando ? '⏳' : '+ Crear nuevo período'}
+              </Btn>
+            )}
           </Card>
         </div>
       )}
