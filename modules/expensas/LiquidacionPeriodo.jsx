@@ -116,7 +116,7 @@ export default function LiquidacionPeriodo() {
       // 2. Traer TODOS los comprobantes del consorcio (sin join para evitar problemas RLS)
       const { data: comps, error } = await supabase
         .from('con_comprobantes_proveedor')
-        .select('id, proveedor_id, tipo, numero, concepto, monto_total, saldo_pendiente, estado, fecha, fecha_vencimiento, notas, unidad_id')
+        .select('id, proveedor_id, tipo, numero, concepto, monto_total, saldo_pendiente, estado, fecha, fecha_vencimiento, notas, unidad_id, categoria')
         .eq('consorcio_id', consorcioId)
         .neq('estado', 'anulado')
         .order('fecha', { ascending:false })
@@ -202,7 +202,7 @@ export default function LiquidacionPeriodo() {
         // Gasto común: categoría derivada del rubro del proveedor.
         categoria: esParticular
           ? categoriaParticularPorDefecto
-          : (CAT_MAP[prov?.rubro || c.proveedor_rubro] || 'varios'),
+          : (c.categoria || CAT_MAP[prov?.rubro || c.proveedor_rubro] || 'varios'),
         unidad_id: esParticular ? c.unidad_id : null,
         proveedor_nombre: prov?.razon_social || c.proveedor_nombre_resuelto || null,
         monto: parseFloat(c.monto_total) || 0,
