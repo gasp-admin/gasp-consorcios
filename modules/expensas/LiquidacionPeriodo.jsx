@@ -472,7 +472,7 @@ export default function LiquidacionPeriodo() {
         const [{ data: aperts }, { data: pagosPost }, { data: recPost }] = await Promise.all([
           supabase.from('con_movimientos_unidad').select('unidad_id, tipo, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%'),
           supabase.from('con_cobranzas').select('unidad_id, monto').eq('consorcio_id', consorcioId).gte('fecha', corteNat),
-          supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat),
+          supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat).neq('estado', 'anulado'),
         ])
         const pagoUF = {}, recUF = {}
         for (const p of (pagosPost || [])) pagoUF[p.unidad_id] = (pagoUF[p.unidad_id] || 0) + (parseFloat(p.monto) || 0)
@@ -1284,7 +1284,7 @@ export default function LiquidacionPeriodo() {
           const [{ data: aperts2 }, { data: pagosPost2 }, { data: recPost2 }] = await Promise.all([
             supabase.from('con_movimientos_unidad').select('unidad_id, tipo, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%'),
             supabase.from('con_cobranzas').select('unidad_id, monto').eq('consorcio_id', consorcioId).gte('fecha', corteNat2),
-            supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat2),
+            supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat2).neq('estado', 'anulado'),
           ])
           const pagoU2 = {}, recU2 = {}
           for (const p of (pagosPost2 || [])) pagoU2[p.unidad_id] = (pagoU2[p.unidad_id] || 0) + (parseFloat(p.monto) || 0)
