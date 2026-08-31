@@ -40,6 +40,7 @@ export const NAV_ITEMS = [
   { id: 'mora_diferencial',         label: 'Interés por mora',        icon: '⚖️', sec: 'Cobranzas' },
   { id: 'morosos',                  label: 'Morosos',                 icon: '⚠️', sec: 'Cobranzas' },
   { id: 'recibos',                  label: 'Recibos de pago',         icon: '🧾', sec: 'Cobranzas' },
+  { id: 'interfast',                label: 'Interfast (Macro)',       icon: '🏦', sec: 'Cobranzas', perm: 'cobrar' },
   { id: 'proveedores',              label: 'Proveedores',             icon: '🔧', sec: 'Proveedores' },
   { id: 'comprobantes',             label: 'Comprobantes',            icon: '🧾', sec: 'Proveedores' },
   { id: 'pagos_prov',               label: 'Pagos',                   icon: '💸', sec: 'Proveedores' },
