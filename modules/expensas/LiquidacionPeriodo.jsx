@@ -116,7 +116,7 @@ export default function LiquidacionPeriodo() {
       // 2. Traer TODOS los comprobantes del consorcio (sin join para evitar problemas RLS)
       const { data: comps, error } = await supabase
         .from('con_comprobantes_proveedor')
-        .select('id, proveedor_id, tipo, numero, concepto, monto_total, saldo_pendiente, estado, fecha, fecha_vencimiento, notas, unidad_id')
+        .select('id, proveedor_id, tipo, numero, concepto, monto_total, saldo_pendiente, estado, fecha, fecha_vencimiento, notas, unidad_id, categoria')
         .eq('consorcio_id', consorcioId)
         .neq('estado', 'anulado')
         .order('fecha', { ascending:false })
@@ -202,7 +202,7 @@ export default function LiquidacionPeriodo() {
         // Gasto común: categoría derivada del rubro del proveedor.
         categoria: esParticular
           ? categoriaParticularPorDefecto
-          : (CAT_MAP[prov?.rubro || c.proveedor_rubro] || 'varios'),
+          : (c.categoria || CAT_MAP[prov?.rubro || c.proveedor_rubro] || 'varios'),
         unidad_id: esParticular ? c.unidad_id : null,
         proveedor_nombre: prov?.razon_social || c.proveedor_nombre_resuelto || null,
         monto: parseFloat(c.monto_total) || 0,
@@ -469,18 +469,23 @@ export default function LiquidacionPeriodo() {
       const corteNat = consorcioActivo?.fecha_corte_nativo || null
       const expAntPreCorte = !!corteNat && (expAnterior[0].periodo || '') < String(corteNat).slice(0, 7)
       if (expAntPreCorte) {
-        const [{ data: aperts }, { data: pagosPost }, { data: recPost }] = await Promise.all([
+        const [{ data: aperts }, { data: pagosPost }, { data: recPost }, { data: ncPost }] = await Promise.all([
           supabase.from('con_movimientos_unidad').select('unidad_id, tipo, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%'),
           supabase.from('con_cobranzas').select('unidad_id, monto').eq('consorcio_id', consorcioId).gte('fecha', corteNat),
-          supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat),
+          supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat).neq('estado', 'anulado'),
+          // Créditos de ajuste post-corte (NC, cancelación de intereses, pagos no registrados):
+          // vigentes, tipo crédito, que NO son apertura ni pago (MOV-COB / con_cobranzas). La cta cte
+          // los netea; sin esto la liquidación los ignora y sobre-factura la UF. Se acreditan como "pagos".
+          supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).eq('tipo', 'credito').gte('fecha', corteNat).neq('estado', 'anulado').not('id', 'like', 'MOV-APERT-%').not('id', 'like', 'MOV-COB-%'),
         ])
         const pagoUF = {}, recUF = {}
         for (const p of (pagosPost || [])) pagoUF[p.unidad_id] = (pagoUF[p.unidad_id] || 0) + (parseFloat(p.monto) || 0)
+        for (const nc of (ncPost || [])) pagoUF[nc.unidad_id] = (pagoUF[nc.unidad_id] || 0) + (parseFloat(nc.monto) || 0)
         for (const rc of (recPost || [])) recUF[rc.unidad_id] = (recUF[rc.unidad_id] || 0) + (parseFloat(rc.monto) || 0)
         for (const a of (aperts || [])) {
           const saldoAp = a.tipo === 'credito' ? -(parseFloat(a.monto) || 0) : (parseFloat(a.monto) || 0)
           const pagosUF = pagoUF[a.unidad_id] || 0
-          // saldo anterior = apertura; pagos post-corte; interes = recargos 2º venc legítimos (MOV-RECV2).
+          // saldo anterior = apertura; pagos post-corte (incluye NC/ajustes); interes = MOV-RECV2 vigentes.
           // El prorrateo (rama corteMes) resta pagos, conserva saldo a favor y calcula mora sobre la deuda.
           saldosAnt[a.unidad_id] = { saldo: saldoAp, pagos: pagosUF, interes: recUF[a.unidad_id] || 0, corteMes: true }
           totalCobradoAnt += pagosUF
@@ -944,6 +949,9 @@ export default function LiquidacionPeriodo() {
 
     // ── Deuda por UF ─────────────────────────────────────────────────────────
     const deudaUFs = distribucion.filter(d=>d.deuda>0)
+    // Total del pie de la tabla de deudores: suma SOLO las UF listadas (deuda>0).
+    // NO usar totDeuda (que suma TODAS las UF, incluidos los saldos a favor negativos) → subvaluaba el total.
+    const totDeudaMorosos = deudaUFs.reduce((a,d)=>a+(d.deuda||0),0)
     const deudaHTML = deudaUFs.length > 0
       ? deudaUFs.map(d=>`<tr style="border-bottom:1px solid #fecaca"><td style="padding:3px 8px;text-align:center">${d.numero_uf}</td><td style="padding:3px 8px">${String(d.numero||'').replace(/</g,'&lt;')}</td><td style="padding:3px 8px">${String(d.propietario||'').replace(/</g,'&lt;')}</td><td style="text-align:right;padding:3px 8px;font-weight:700">${fmtN(d.deuda)}</td><td style="text-align:right;padding:3px 8px;font-weight:700">${fmtN(d.deuda)}</td></tr>`).join('')
       : '<tr><td colspan="5" style="text-align:center;padding:6px;color:#6b7280">Sin unidades con deuda</td></tr>'
@@ -1123,8 +1131,8 @@ export default function LiquidacionPeriodo() {
     <tbody>${deudaHTML}</tbody>
     <tfoot><tr style="background:#1A3FA0;color:#fff;font-weight:700">
       <td colspan="3" style="padding:3px 7px;text-align:right">TOTAL</td>
-      <td style="text-align:right;padding:3px 7px;white-space:nowrap">${fmtN(totDeuda)}</td>
-      <td style="text-align:right;padding:3px 7px;white-space:nowrap">${fmtN(totDeuda)}</td>
+      <td style="text-align:right;padding:3px 7px;white-space:nowrap">${fmtN(totDeudaMorosos)}</td>
+      <td style="text-align:right;padding:3px 7px;white-space:nowrap">${fmtN(totDeudaMorosos)}</td>
     </tr></tfoot>
   </table>
   <div class="footer">
@@ -1281,13 +1289,17 @@ export default function LiquidacionPeriodo() {
         const corteNat2 = consorcioActivo?.fecha_corte_nativo || null
         const expAntPreCorte2 = !!corteNat2 && (expAnterior[0].periodo || '') < String(corteNat2).slice(0, 7)
         if (expAntPreCorte2) {
-          const [{ data: aperts2 }, { data: pagosPost2 }, { data: recPost2 }] = await Promise.all([
+          const [{ data: aperts2 }, { data: pagosPost2 }, { data: recPost2 }, { data: ncPost2 }] = await Promise.all([
             supabase.from('con_movimientos_unidad').select('unidad_id, tipo, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%'),
             supabase.from('con_cobranzas').select('unidad_id, monto').eq('consorcio_id', consorcioId).gte('fecha', corteNat2),
-            supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat2),
+            supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat2).neq('estado', 'anulado'),
+            // Créditos de ajuste post-corte (NC, cancelación intereses, pagos no registrados): vigentes,
+            // crédito, no apertura ni pago. La cta cte los netea; se acreditan como pago (reducen el arrastre).
+            supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).eq('tipo', 'credito').gte('fecha', corteNat2).neq('estado', 'anulado').not('id', 'like', 'MOV-APERT-%').not('id', 'like', 'MOV-COB-%'),
           ])
           const pagoU2 = {}, recU2 = {}
           for (const p of (pagosPost2 || [])) pagoU2[p.unidad_id] = (pagoU2[p.unidad_id] || 0) + (parseFloat(p.monto) || 0)
+          for (const nc of (ncPost2 || [])) pagoU2[nc.unidad_id] = (pagoU2[nc.unidad_id] || 0) + (parseFloat(nc.monto) || 0)
           for (const rc of (recPost2 || [])) recU2[rc.unidad_id] = (recU2[rc.unidad_id] || 0) + (parseFloat(rc.monto) || 0)
           const tasaMora2 = parseFloat(consorcioActivo?.interes_mora || 0) / 100
           for (const a of (aperts2 || [])) {
