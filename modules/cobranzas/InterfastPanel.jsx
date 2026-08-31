@@ -21,8 +21,9 @@ export default function InterfastPanel() {
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState(null)
   const [preview, setPreview] = useState(null)
+  const [pubs, setPubs] = useState([])
 
-  useEffect(() => { if (consorcioId) { cargarCfg(); cargarUfs() } }, [consorcioId])
+  useEffect(() => { if (consorcioId) { cargarCfg(); cargarUfs(); cargarPubs() } }, [consorcioId])
 
   async function cargarCfg() {
     const { data } = await supabase.from('con_config_cobranza').select('*').eq('consorcio_id', consorcioId).maybeSingle()
@@ -31,6 +32,10 @@ export default function InterfastPanel() {
   async function cargarUfs() {
     const { data } = await supabase.from('con_interfast_uf').select('*').eq('consorcio_id', consorcioId).order('codigo_cliente')
     setUfs(data || [])
+  }
+  async function cargarPubs() {
+    const { data } = await supabase.from('con_interfast_publicacion').select('*').eq('consorcio_id', consorcioId).order('created_at', { ascending: false })
+    setPubs(data || [])
   }
   function set(k, v) { setCfg(c => ({ ...c, [k]: v })) }
 
@@ -57,7 +62,7 @@ export default function InterfastPanel() {
     const d = await invoke('publicar-deuda-interfast', { expensa_id: expSel, dry_run: dry }, dry ? 'pub-dry' : 'pub')
     if (!d) return
     if (dry) { setPreview(d); setMsg({ t: 'ok', x: `Vista previa: ${d.total_registros} UF · 1er vto ${fmtN(d.total_1er_vto)} · 2do ${fmtN(d.total_2do_vto)}` }) }
-    else setMsg({ t: d.ok ? 'ok' : 'e', x: d.ok ? `✓ Publicado. Nº ${d.respuesta?.PublicacionId ?? ''} — ${d.total_registros} UF` : (d.respuesta?.Mensaje || d.mensaje || 'Error al publicar') })
+    else { setMsg({ t: d.ok ? 'ok' : 'e', x: d.ok ? `✓ Publicado. Nº ${d.respuesta?.PublicacionId ?? ''} — ${d.total_registros} UF` : (d.respuesta?.Mensaje || d.mensaje || 'Error al publicar') }); if (d.ok) cargarPubs() }
   }
   async function cvu() {
     const d = await invoke('interfast-medios-pago', { accion: 'cvu_crear', consorcio_id: consorcioId }, 'cvu')
@@ -125,6 +130,40 @@ export default function InterfastPanel() {
             </table>
           </div>
         )}
+      </div>
+
+      {/* Publicaciones a Interfast */}
+      <div style={box}>
+        <div style={h}>🧾 Publicaciones a Interfast</div>
+        {pubs.length > 0 ? (
+          <div style={{ maxHeight: 260, overflow: 'auto', border: '1px solid #eee', borderRadius: 8 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead><tr style={{ background: '#f8fafc' }}>
+                <th style={{ padding: 6, textAlign: 'left' }}>Período</th>
+                <th style={{ padding: 6, textAlign: 'left' }}>IdDeuda</th>
+                <th style={{ padding: 6, textAlign: 'right' }}>1er vto</th>
+                <th style={{ padding: 6, textAlign: 'right' }}>2do vto</th>
+                <th style={{ padding: 6, textAlign: 'center' }}>UF</th>
+                <th style={{ padding: 6, textAlign: 'center' }}>Estado</th>
+                <th style={{ padding: 6, textAlign: 'left' }}>Fecha</th>
+              </tr></thead>
+              <tbody>{pubs.map(p => {
+                const ok = p.respuesta?.Exito === true || String(p.respuesta?.Exito) === 'true'
+                return (
+                  <tr key={p.id} style={{ borderTop: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: 6 }}>{p.periodo}</td>
+                    <td style={{ padding: 6, fontFamily: 'monospace' }}>{p.id_deuda ?? '—'}</td>
+                    <td style={{ padding: 6, textAlign: 'right' }}>{fmtN(p.total_1er_vto)}</td>
+                    <td style={{ padding: 6, textAlign: 'right' }}>{fmtN(p.total_2do_vto)}</td>
+                    <td style={{ padding: 6, textAlign: 'center' }}>{p.registros}</td>
+                    <td style={{ padding: 6, textAlign: 'center', color: ok ? '#166534' : '#991b1b', fontWeight: 600 }}>{ok ? '✅ OK' : '❌'}</td>
+                    <td style={{ padding: 6 }}>{String(p.created_at || '').slice(0, 16).replace('T', ' ')}</td>
+                  </tr>
+                )
+              })}</tbody>
+            </table>
+          </div>
+        ) : <div style={{ fontSize: 12, color: GR }}>Sin publicaciones registradas todavía.</div>}
       </div>
 
       {/* Medios de pago */}
