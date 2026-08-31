@@ -31,6 +31,7 @@ export default function Comprobantes() {
   const [gastosSueldos, setGastosSueldos] = useState([])
   const [cargandoSueldos, setCargandoSueldos] = useState(false)
   const [hayColMF, setHayColMF] = useState(false)  // consorcio tiene columna monto_fijo activa
+  const [rubroOpts, setRubroOpts] = useState([])   // rubros (categoría→grupo) del consorcio para clasificar el gasto
   const hoy = new Date().toISOString().split('T')[0]
 
   // ¿El consorcio activo tiene alguna columna monto_fijo activa? (habilita "gasto particular")
@@ -39,6 +40,26 @@ export default function Comprobantes() {
     supabase.from('con_columnas_liquidacion')
       .select('id').eq('consorcio_id', consorcioId).eq('activo', true).eq('tipo', 'monto_fijo').limit(1)
       .then(({ data }) => setHayColMF((data || []).length > 0))
+  }, [consorcioId])
+
+  // Rubros disponibles = categorías de los grupos de liquidación del consorcio activo.
+  // Se usan como opciones del selector "Rubro" del comprobante para que, al importarlo,
+  // el gasto caiga en el grupo correcto del PDF (no en el fallback "Varios").
+  useEffect(() => {
+    if (!consorcioId) { setRubroOpts([]); return }
+    supabase.from('con_grupos_liquidacion')
+      .select('numero, nombre, categorias, activo')
+      .eq('consorcio_id', consorcioId).eq('activo', true).order('numero')
+      .then(({ data }) => {
+        const opts = []
+        for (const g of (data || [])) {
+          const gName = String(g.nombre || '').replace(/^\d+\s+/, '')
+          for (const cat of (g.categorias || [])) {
+            opts.push({ v: cat, l: `${g.numero} ${gName} · ${String(cat).replace(/_/g, ' ')}` })
+          }
+        }
+        setRubroOpts(opts)
+      })
   }, [consorcioId])
 
   // ── Extraer datos de factura PDF con IA ───────────────────────────────────
@@ -173,6 +194,7 @@ export default function Comprobantes() {
         otros_impuestos: parseFloat(form.otros_impuestos||0),
         monto_total: total,
         unidad_id: unidadDestino,
+        categoria: form.categoria || null,
         notas: form.notas || null,
       }).eq('id', form.id)
       if (error) setMsg({ tipo:'error', texto: error.message })
@@ -198,6 +220,7 @@ export default function Comprobantes() {
         saldo_pendiente: total,
         estado: 'pendiente',
         unidad_id: unidadDestino,
+        categoria: form.categoria || null,
         notas: form.notas || null,
       }])
       if (error) setMsg({ tipo:'error', texto: error.message })
@@ -504,7 +527,7 @@ export default function Comprobantes() {
           form={form} setForm={setForm}
           guardar={guardar} guardando={guardando}
           proveedores={proveedores} expensas={expensas}
-          unidades={unidades} hayColMF={hayColMF}
+          unidades={unidades} hayColMF={hayColMF} rubroOpts={rubroOpts}
           extraerFacturaConIA={extraerFacturaConIA}
           extrayendoIA={extrayendoIA} archivoFactura={archivoFactura}
         />
@@ -632,7 +655,7 @@ export default function Comprobantes() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function FormComp({ form, setForm, guardar, guardando, proveedores, expensas,
-  unidades = [], hayColMF = false,
+  unidades = [], hayColMF = false, rubroOpts = [],
   extraerFacturaConIA, extrayendoIA, archivoFactura }) {
   const esPart = form.es_particular ?? !!form.unidad_id
   const TIPOS = [
@@ -764,6 +787,18 @@ function FormComp({ form, setForm, guardar, guardando, proveedores, expensas,
             style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
         </div>
       </div>
+      {!esPart && (
+        <div style={{ marginBottom:14 }}>
+          <Sel label="Rubro (clasificación del gasto)"
+            value={form.categoria||''}
+            onChange={v=>setForm(f=>({...f, categoria:v}))}
+            opts={[{v:'',l:'— Sin clasificar (irá a Varios) —'}, ...rubroOpts]} />
+          <div style={{ fontSize:10, color:GR, marginTop:4 }}>
+            Define en qué rubro del PDF aparece el gasto al liquidar. Sin clasificar, cae en “Varios”.
+            {rubroOpts.length===0 && ' (El consorcio activo no tiene grupos de liquidación configurados.)'}
+          </div>
+        </div>
+      )}
       {hayColMF && (
         <div style={{ background:'#faf5ff', border:'1px solid #e9d5ff', borderRadius:8, padding:'10px 14px', marginBottom:14 }}>
           <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:13, color:'#7c3aed', fontWeight:600 }}>
