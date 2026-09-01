@@ -558,7 +558,8 @@ export default function LiquidacionPeriodo() {
       }
       // NC / reintegros / ajustes del período para NATIVOS que NO pasaron por la rama corteMes (nativos
       // puros y meses nativos posteriores al corte): la cta cte los netea, pero el prorrateo los ignoraba
-      // y sobre-facturaba la UF. Se acreditan como "pago" (reducen el saldo, conservan saldo a favor).
+      // y sobre-facturaba la UF. Se aplican como CRÉDITO A FAVOR (reducen la deuda), FUERA de la columna
+      // PAGOS (que queda solo con cobranzas reales y reconcilia con el Estado Financiero).
       // CLAVE: solo créditos con expensa_id NULL = ajuste/NC standalone NO imputado a una expensa (y por
       // ende NO contado en cobranzas/detalle). Los pagos-espejo (categoria 'pago') tienen expensa_id y
       // quedan afuera → sin doble conteo. Ventana = mes calendario del período liquidado.
@@ -577,12 +578,11 @@ export default function LiquidacionPeriodo() {
           if (!monto) continue
           const prev = saldosAnt[nc.unidad_id]
           if (prev) {
-            prev.pagos = (prev.pagos || 0) + monto
+            prev.creditoAjuste = (prev.creditoAjuste || 0) + monto
             if (prev.corteMes === undefined && prev.nativo === undefined) prev.nativo = true
           } else {
-            saldosAnt[nc.unidad_id] = { saldo: 0, pagos: monto, interes: 0, nativo: true }
+            saldosAnt[nc.unidad_id] = { saldo: 0, pagos: 0, interes: 0, creditoAjuste: monto, nativo: true }
           }
-          totalCobradoAnt += monto
         }
       }
       // cobradoPeriodoAnt = pagos del período anterior (para el EF)
@@ -666,6 +666,7 @@ export default function LiquidacionPeriodo() {
       const antUF = saldosAnt[u.id] || { saldo: 0, pagos: 0 }
       const saldo_anterior = antUF.saldo
       const pagos_anterior = antUF.pagos
+      const creditoAjuste = antUF.creditoAjuste || 0
       const tasaMora = parseFloat(consorcioActivo?.interes_mora || 0) / 100
 
       let deuda, ajusteSaldoAnt, interes_mora, saldo_arrastre
@@ -694,6 +695,14 @@ export default function LiquidacionPeriodo() {
         ajusteSaldoAnt = saldo_anterior
         interes_mora = deuda > 0 ? Math.round(deuda * tasaMora * 100) / 100 : 0
         saldo_arrastre = ajusteSaldoAnt + interes_mora
+      }
+
+      // Crédito de ajuste del período (NC/reintegro, expensa_id NULL): reduce la deuda como saldo a
+      // favor y se arrastra al mes siguiente. Va FUERA de PAGOS (que queda solo con cobranzas reales).
+      if (creditoAjuste) {
+        deuda = Math.round((deuda - creditoAjuste) * 100) / 100
+        ajusteSaldoAnt = deuda
+        saldo_arrastre = Math.round((saldo_arrastre - creditoAjuste) * 100) / 100
       }
 
       // TOTAL a pagar: se fuerza a terminar en los centavos = número de UF (identifica el pago en
