@@ -56,7 +56,9 @@ export default function Equipo() {
 
   // Da de alta al colaborador vía Edge Function: crea la cuenta con contraseña temporal,
   // lo agrega a con_equipo (activo) y le envía el email con las credenciales.
-  async function altaColaborador(email, rol, nombre) {
+  // modo='blanqueo' reutiliza el mismo flujo para resetear la clave de un miembro existente
+  // (la EF hace updateUserById si el email ya existe); el texto del mensaje se adapta.
+  async function altaColaborador(email, rol, nombre, modo = 'alta') {
     try {
       const { data: { session: sess } } = await supabase.auth.getSession()
       const r = await fetch(`${SUPA_URL}/functions/v1/enviar-invitacion-equipo`, {
@@ -65,11 +67,20 @@ export default function Equipo() {
         body: JSON.stringify({ admin_id: uid, email, rol, nombre: nombre || null }),
       })
       const d = await r.json().catch(() => ({}))
-      if (!r.ok || !d.ok) { setMsg({ t:'e', m: 'No se pudo dar de alta: ' + (d.error || 'error') }); return { ok:false } }
+      if (!r.ok || !d.ok) {
+        setMsg({ t:'e', m: (modo === 'blanqueo' ? 'No se pudo blanquear la clave: ' : 'No se pudo dar de alta: ') + (d.error || 'error') })
+        return { ok:false }
+      }
       const cred = 'Email: ' + d.email + ' · Contraseña temporal: ' + d.password
-      setMsg({ t:'ok', m: 'Colaborador dado de alta. ' + (d.email_enviado
-        ? 'Se le envió el email con las credenciales. '
-        : 'El email no salió — pasale las credenciales a mano. ') + '(' + cred + ')' })
+      if (modo === 'blanqueo') {
+        setMsg({ t:'ok', m: 'Clave blanqueada. ' + (d.email_enviado
+          ? 'Se le envió el email con la clave nueva. '
+          : 'El email no salió — pasale la clave a mano. ') + '(' + cred + ')' })
+      } else {
+        setMsg({ t:'ok', m: 'Colaborador dado de alta. ' + (d.email_enviado
+          ? 'Se le envió el email con las credenciales. '
+          : 'El email no salió — pasale las credenciales a mano. ') + '(' + cred + ')' })
+      }
       return { ok:true }
     } catch (e) {
       setMsg({ t:'e', m: 'Error: ' + e.message }); return { ok:false }
@@ -89,6 +100,15 @@ export default function Equipo() {
     setLoading(true); setMsg(null)
     const res = await altaColaborador(i.email, i.rol, null)
     if (res.ok) cargar()
+    setLoading(false)
+  }
+
+  // Blanqueo de clave de un miembro ACTIVO. Pasa el rol y nombre ACTUALES de la fila
+  // (no de un form) para que la EF no pise esos datos en con_equipo.
+  async function blanquearClave(m) {
+    if (!confirm('¿Blanquear la contraseña de ' + (m.nombre || m.email) + '?\n\nSe generará una clave temporal nueva y se le enviará por email. La clave anterior dejará de funcionar.')) return
+    setLoading(true); setMsg(null)
+    await altaColaborador(m.email, m.rol, m.nombre, 'blanqueo')
     setLoading(false)
   }
 
@@ -267,6 +287,10 @@ export default function Equipo() {
                           style={{ padding:'5px 8px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, cursor:'pointer' }}>
                           {ROLES_DISP.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
                         </select>
+                        <button onClick={() => blanquearClave(m)} disabled={loading}
+                          style={{ padding:'5px 12px', background:'#fef3c7', color:'#92400e', border:'none', borderRadius:6, cursor:loading?'default':'pointer', fontSize:12, fontWeight:600, opacity:loading?0.6:1 }}>
+                          Blanquear clave
+                        </button>
                         <button onClick={() => toggleActivo(m.id, false)}
                           style={{ padding:'5px 12px', background:'#fee2e2', color:'#dc2626', border:'none', borderRadius:6, cursor:'pointer', fontSize:12, fontWeight:600 }}>
                           Desactivar
