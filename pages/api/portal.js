@@ -80,7 +80,7 @@ export default async function handler(req, res) {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${SRV_KEY}`,
-          'apikey': ANON_KEY,
+          'apikey': SRV_KEY,      // FIX: misma key que Authorization (el gateway nuevo rechaza apikey!=Authorization)
         },
         body: JSON.stringify({ unidad_id: uf.id }),
       })
