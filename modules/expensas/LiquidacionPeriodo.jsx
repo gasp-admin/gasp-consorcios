@@ -244,10 +244,21 @@ export default function LiquidacionPeriodo() {
     if (consorcioActivo?.modelo_cc === 'historico') {
       return setMsg({ tipo:'warn', texto:'Este consorcio está en modo histórico: cargá la liquidación desde Importar PDF/Excel, no desde “Nuevo período”.' })
     }
-    // Calcular próximo período
-    const hoyDate = new Date()
-    const mes     = String(hoyDate.getMonth() + 1).padStart(2,'0')
-    const periodo = `${hoyDate.getFullYear()}-${mes}`
+    // Calcular próximo período = mes siguiente al ÚLTIMO período existente (NO el mes calendario
+    // actual). Las expensas se liquidan vencidas: abrir en septiembre corresponde al período de
+    // agosto. Usar new Date() acá creaba el período del mes en curso (bug: septiembre en vez de agosto).
+    const periodosPrevios = (expensas || [])
+      .filter(e => e.tipo !== 'migracion' && /^\d{4}-\d{2}$/.test(e.periodo || ''))
+      .map(e => e.periodo).sort()
+    let periodo
+    if (periodosPrevios.length > 0) {
+      const [py, pm] = periodosPrevios[periodosPrevios.length - 1].split('-').map(Number)
+      const d = new Date(py, pm, 1)   // pm es 1-based → new Date(y, pm, 1) apunta al mes siguiente
+      periodo = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,'0')}`
+    } else {
+      const hoyDate = new Date()
+      periodo = `${hoyDate.getFullYear()}-${String(hoyDate.getMonth() + 1).padStart(2,'0')}`
+    }
 
     // Verificar que no exista
     const existe = expensas.find(e => e.periodo === periodo && e.tipo !== 'migracion')
@@ -1353,12 +1364,9 @@ export default function LiquidacionPeriodo() {
         unidad_id: d.unidad_id,
         monto: (parseFloat(d.expensa_base)||0) + (parseFloat(d.redondeo)||0),  // expensa del período CON centavos (base del arrastre)
         redondeo: d.redondeo,        // centavos del número de UF (ej: 0.03 para UF 3)
-        // saldo_anterior = deuda arrastrada SIN interés; el interés va en su columna interes_mora.
-        // El total/arrastre sigue siendo saldo_anterior + interes_mora = saldo_arrastre (invariante).
-        // Así la cta cte (get-cuenta-corriente lee interes_mora) muestra el interés, y publicar-deuda lo suma.
-        saldo_anterior: ((d.saldo_arrastre !== undefined ? d.saldo_arrastre : (d.saldo_anterior || saldosAnt[d.unidad_id] || 0)) - (parseFloat(d.interes_mora) || 0)),
+        saldo_anterior: (d.saldo_arrastre !== undefined ? d.saldo_arrastre : (d.saldo_anterior || saldosAnt[d.unidad_id] || 0)),  // arrastre al mes siguiente = deuda + interés neto
         pagos_periodo: 0,
-        interes_mora: (parseFloat(d.interes_mora) || 0),
+        interes_mora: 0,
         estado: ((d.saldo_arrastre !== undefined ? d.saldo_arrastre : (d.saldo_anterior || saldosAnt[d.unidad_id] || 0)) > 0.005) ? 'morosa' : 'pendiente',
       }))
 
