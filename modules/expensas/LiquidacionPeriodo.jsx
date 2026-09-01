@@ -556,6 +556,35 @@ export default function LiquidacionPeriodo() {
           }
         }
       }
+      // NC / reintegros / ajustes del período para NATIVOS que NO pasaron por la rama corteMes (nativos
+      // puros y meses nativos posteriores al corte): la cta cte los netea, pero el prorrateo los ignoraba
+      // y sobre-facturaba la UF. Se acreditan como "pago" (reducen el saldo, conservan saldo a favor).
+      // CLAVE: solo créditos con expensa_id NULL = ajuste/NC standalone NO imputado a una expensa (y por
+      // ende NO contado en cobranzas/detalle). Los pagos-espejo (categoria 'pago') tienen expensa_id y
+      // quedan afuera → sin doble conteo. Ventana = mes calendario del período liquidado.
+      if (!expAntPreCorte && consorcioActivo?.modelo_cc == null && expSel?.periodo) {
+        const [cy, cm] = expSel.periodo.split('-').map(Number)
+        const desdeCred = `${expSel.periodo}-01`
+        const nextM = new Date(cy, cm, 1)
+        const hastaCred = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}-01`
+        const { data: ncPeriodo } = await supabase.from('con_movimientos_unidad')
+          .select('unidad_id, monto').eq('consorcio_id', consorcioId).eq('tipo', 'credito')
+          .is('expensa_id', null)
+          .gte('fecha', desdeCred).lt('fecha', hastaCred).neq('estado', 'anulado')
+          .not('id', 'like', 'MOV-APERT-%').not('id', 'like', 'MOV-COB-%')
+        for (const nc of (ncPeriodo || [])) {
+          const monto = parseFloat(nc.monto) || 0
+          if (!monto) continue
+          const prev = saldosAnt[nc.unidad_id]
+          if (prev) {
+            prev.pagos = (prev.pagos || 0) + monto
+            if (prev.corteMes === undefined && prev.nativo === undefined) prev.nativo = true
+          } else {
+            saldosAnt[nc.unidad_id] = { saldo: 0, pagos: monto, interes: 0, nativo: true }
+          }
+          totalCobradoAnt += monto
+        }
+      }
       // cobradoPeriodoAnt = pagos del período anterior (para el EF)
       // se usa solo para mostrar el Estado Financiero del período que se está liquidando
       // Se guarda el total cobrado del período anterior como referencia histórica
