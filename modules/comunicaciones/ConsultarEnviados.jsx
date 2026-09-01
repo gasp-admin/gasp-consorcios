@@ -53,11 +53,11 @@ export default function ConsultarEnviados() {
     const { data: { session: sess } } = await supabase.auth.getSession()
     for (const log of pendientes) {
       try {
-        await fetch(`\${SUPA_URL}/functions/v1/verificar-email-estado`, {
+        await fetch(`${SUPA_URL}/functions/v1/verificar-email-estado`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer \${sess?.access_token}`,
+            'Authorization': `Bearer ${sess?.access_token}`,
             'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
           },
           body: JSON.stringify({ resend_id: log.resend_id, log_id: log.id })
