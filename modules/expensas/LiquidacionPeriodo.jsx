@@ -952,7 +952,7 @@ export default function LiquidacionPeriodo() {
         <td style="padding:2px 4px;font-size:7pt;max-width:90px;overflow:hidden">${String(d.propietario||'').replace(/</g,'&lt;')}</td>
         <td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap;color:${d.saldo_anterior>0?'#b91c1c':'#374151'}">${fmtN(d.saldo_anterior)}</td>
         <td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${fmtN(d.pagos_anterior)}</td>
-        <td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap;font-weight:${d.deuda>0?700:400};color:${d.deuda>0?'#b91c1c':'#374151'}">${fmtN(d.deuda)}</td>
+        <td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap;font-weight:${d.deuda>0?700:400};color:${d.deuda>0?'#b91c1c':'#374151'}">${(d.deuda>0.005||Math.abs(d.deuda-(d.saldo_anterior||0))>0.005)?fmtN(d.deuda):'—'}</td>
         <td style="text-align:right;padding:2px 4px;font-size:7pt">${fmtN(d.interes_mora||0)}</td>
         <td style="text-align:right;padding:2px 4px;font-size:7pt">${d.pct}%</td>
         ${celdasColumnas}
@@ -965,7 +965,7 @@ export default function LiquidacionPeriodo() {
     // Totales del prorrateo
     const totSaldoAnt = distribucion.reduce((a,d)=>a+d.saldo_anterior,0)
     const totPagosAnt = distribucion.reduce((a,d)=>a+d.pagos_anterior,0)
-    const totDeuda    = distribucion.reduce((a,d)=>a+d.deuda,0)
+    const totDeuda    = distribucion.reduce((a,d)=>a+((d.deuda>0.005||Math.abs(d.deuda-(d.saldo_anterior||0))>0.005)?d.deuda:0),0)
     const totInteres  = distribucion.reduce((a,d)=>a+(d.interes_mora||0),0)
     const totExpensa  = distribucion.reduce((a,d)=>a+d.expensa_base,0)
     const totRedondeo = distribucion.reduce((a,d)=>a+d.redondeo,0)
@@ -2168,13 +2168,13 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                           <td style={{ padding:'5px 8px', fontWeight:700, color:AZ }}>{d.numero_uf}</td>
                           <td style={{ padding:'5px 8px', fontSize:11 }}>{d.propietario}</td>
                           <td style={{ padding:'5px 8px', textAlign:'right', color:d.saldo_anterior>0?RJ:GR, fontSize:10 }}>
-                            {d.saldo_anterior>0 ? fmt(d.saldo_anterior) : '—'}
+                            {d.saldo_anterior!==0 ? fmt(d.saldo_anterior) : '—'}
                           </td>
                           <td style={{ padding:'5px 8px', textAlign:'right', color:GR, fontSize:10 }}>
                             {d.pagos_anterior>0 ? fmt(d.pagos_anterior) : '—'}
                           </td>
                           <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:d.deuda>0?700:400, color:d.deuda>0?RJ:GR, fontSize:10 }}>
-                            {d.deuda!==0 ? fmt(d.deuda) : '—'}
+                            {(d.deuda>0.005 || Math.abs(d.deuda-(d.saldo_anterior||0))>0.005) ? fmt(d.deuda) : '—'}
                           </td>
                           <td style={{ padding:'5px 8px', textAlign:'right',
                             fontWeight: d.interes_mora>0?700:400,
