@@ -1364,9 +1364,13 @@ export default function LiquidacionPeriodo() {
         unidad_id: d.unidad_id,
         monto: (parseFloat(d.expensa_base)||0) + (parseFloat(d.redondeo)||0),  // expensa del período CON centavos (base del arrastre)
         redondeo: d.redondeo,        // centavos del número de UF (ej: 0.03 para UF 3)
-        saldo_anterior: (d.saldo_arrastre !== undefined ? d.saldo_arrastre : (d.saldo_anterior || saldosAnt[d.unidad_id] || 0)),  // arrastre al mes siguiente = deuda + interés neto
+        // saldo_anterior = deuda del período SIN mora (= arrastre − interés); la mora se persiste
+        // aparte en interes_mora para que PDF/email/portal la itemicen (antes se plegaba todo acá y
+        // se guardaba interes_mora:0, invisibilizando el interés en el PDF). El arrastre al mes
+        // siguiente es invariante: se reconstruye como saldo_anterior + monto + interes_mora − pagos.
+        saldo_anterior: (d.saldo_arrastre !== undefined ? Math.round((((d.saldo_arrastre)||0) - ((d.interes_mora)||0)) * 100) / 100 : (d.saldo_anterior || saldosAnt[d.unidad_id] || 0)),
         pagos_periodo: 0,
-        interes_mora: 0,
+        interes_mora: (parseFloat(d.interes_mora) || 0),
         estado: ((d.saldo_arrastre !== undefined ? d.saldo_arrastre : (d.saldo_anterior || saldosAnt[d.unidad_id] || 0)) > 0.005) ? 'morosa' : 'pendiente',
       }))
 
