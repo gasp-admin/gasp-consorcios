@@ -2136,7 +2136,7 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                             {d.pagos_anterior>0 ? fmt(d.pagos_anterior) : '—'}
                           </td>
                           <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:d.deuda>0?700:400, color:d.deuda>0?RJ:GR, fontSize:10 }}>
-                            {d.deuda>0 ? fmt(d.deuda) : '—'}
+                            {d.deuda!==0 ? fmt(d.deuda) : '—'}
                           </td>
                           <td style={{ padding:'5px 8px', textAlign:'right',
                             fontWeight: d.interes_mora>0?700:400,
