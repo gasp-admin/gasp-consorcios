@@ -240,6 +240,15 @@ export default function Expensas() {
                   <Input label="Proveedor" value={formGasto.proveedor_nombre} onChange={v=>setFormGasto(x=>({...x,proveedor_nombre:v}))} />
                   <Input label="N° comprobante" value={formGasto.comprobante} onChange={v=>setFormGasto(x=>({...x,comprobante:v}))} />
                 </div>
+                <label style={{ display:'flex', alignItems:'flex-start', gap:8, marginBottom:10, background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:7, padding:'9px 12px', cursor:'pointer' }}>
+                  <input type="checkbox" checked={formGasto.pagado === false}
+                    onChange={e=>setFormGasto(x=>({ ...x, pagado: e.target.checked ? false : true }))}
+                    style={{ marginTop:2, width:16, height:16, cursor:'pointer' }} />
+                  <span>
+                    <span style={{ display:'block', fontSize:12.5, color:'#c2410c', fontWeight:600 }}>Pendiente de pago (aún no salió de caja)</span>
+                    <span style={{ display:'block', fontSize:10.5, color:'#9a3412', marginTop:2 }}>Igual cuenta como egreso; se informa como “Pendiente de pago” en la liquidación. No afecta el saldo de caja.</span>
+                  </span>
+                </label>
                 <div style={{ display:'flex', gap:8 }}>
                   <Btn small onClick={guardarGasto}>Guardar</Btn>
                   <BtnSec small onClick={()=>setFormGasto(null)}>Cancelar</BtnSec>
