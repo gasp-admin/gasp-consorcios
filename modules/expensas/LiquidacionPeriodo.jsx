@@ -313,6 +313,7 @@ export default function LiquidacionPeriodo() {
       unidad_id: catEsMF ? (formGasto.unidad_id || null) : null,  // UF solo si es gasto particular
       proveedor_nombre: formGasto.proveedor_nombre || null,
       monto: parseFloat(formGasto.monto),
+      pagado: formGasto.pagado !== false,   // false = pendiente de pago; devengado: igual cuenta como egreso, no toca la caja
     }
 
     const { error } = formGasto.id
@@ -336,6 +337,17 @@ export default function LiquidacionPeriodo() {
     if (!confirm('¿Eliminar este gasto?')) return
     await supabase.from('con_gastos').delete().eq('id', id)
     await cargarGastos(expSel.id)
+  }
+
+  // Alterna pagado/pendiente de un gasto (sirve para manuales y comprobantes importados).
+  // Criterio devengado: NO cambia total_egresos ni saldo_caja_final; sólo el flag informativo.
+  async function togglePagado(g) {
+    if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
+    const nuevoPagado = (g.pagado === false)  // pendiente -> pagado ; pagado -> pendiente
+    const { error } = await supabase.from('con_gastos').update({ pagado: nuevoPagado }).eq('id', g.id)
+    if (error) return setMsg({ tipo:'error', texto: error.message })
+    await cargarGastos(expSel.id)
+    setMsg({ tipo:'ok', texto: nuevoPagado ? '✓ Marcado como pagado' : '✓ Marcado como pendiente de pago' })
   }
 
   const totalGastos = gastos.reduce((a,g) => a + (parseFloat(g.monto)||0), 0)
@@ -1811,6 +1823,15 @@ export default function LiquidacionPeriodo() {
                   <div style={{ fontSize:10, color:'#9333ea', marginTop:4 }}>Se carga 100% a la UF elegida (no se prorratea).</div>
                 </div>
               )}
+              <label style={{ display:'flex', alignItems:'flex-start', gap:8, marginBottom:12, background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:7, padding:'9px 12px', cursor:'pointer' }}>
+                <input type="checkbox" checked={formGasto.pagado === false}
+                  onChange={e=>setFormGasto(f=>({ ...f, pagado: e.target.checked ? false : true }))}
+                  style={{ marginTop:2, width:16, height:16, cursor:'pointer' }} />
+                <span>
+                  <span style={{ display:'block', fontSize:12.5, color:'#c2410c', fontWeight:600 }}>Pendiente de pago (aún no salió de caja)</span>
+                  <span style={{ display:'block', fontSize:10.5, color:'#9a3412', marginTop:2 }}>Igual cuenta como egreso del período; se informa como “Pendiente de pago” en la liquidación. No afecta el saldo de caja.</span>
+                </span>
+              </label>
               <div style={{ display:'flex', gap:8 }}>
                 <Btn onClick={guardarGasto}>✓ Guardar</Btn>
                 <BtnSec onClick={()=>{setFormGasto(null);setMsg(null)}}>Cancelar</BtnSec>
@@ -1871,7 +1892,7 @@ export default function LiquidacionPeriodo() {
                         <Badge text={g.categoria?.replace(/_/g,' ')||'varios'}
                           color={AZ} bg='#eff6ff' />
                       </td>
-                      <td style={{ padding:'6px 10px' }}>{g.concepto}</td>
+                      <td style={{ padding:'6px 10px' }}>{g.concepto}{g.pagado===false && <span style={{ marginLeft:6, fontSize:9.5, background:'#ffedd5', color:'#c2410c', borderRadius:4, padding:'1px 6px', fontWeight:700, whiteSpace:'nowrap' }}>PENDIENTE</span>}</td>
                       <td style={{ padding:'6px 10px', color:GR, fontSize:11 }}>{g.proveedor_nombre||'—'}</td>
                       <td style={{ padding:'6px 10px' }}>
                         {g.comprobante_id
@@ -1882,6 +1903,10 @@ export default function LiquidacionPeriodo() {
                       <td style={{ padding:'6px 10px', textAlign:'right', fontWeight:700 }}>{fmt(g.monto)}</td>
                       <td style={{ padding:'6px 10px' }}>
                         <div style={{ display:'flex', gap:4 }}>
+                          <Btn small onClick={()=>togglePagado(g)}
+                            title={g.pagado===false ? 'Marcar como pagado' : 'Marcar como pendiente de pago'}
+                            style={{ background: g.pagado===false ? '#ffedd5' : '#f3f4f6', color: g.pagado===false ? '#c2410c' : '#374151' }}>
+                            {g.pagado===false ? '⏳' : '$'}</Btn>
                           {!g.comprobante_id && (
                             <Btn small onClick={()=>setFormGasto({...g})}
                               style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
