@@ -97,7 +97,7 @@ export default async function handler(req, res) {
       const [
         { data: gastos }, { data: dets }, { data: ufs }, { data: cps }, { data: lufs },
       ] = await Promise.all([
-        db.from('con_gastos').select('categoria, concepto, monto, proveedor_nombre, comprobante').eq('expensa_id', expId).order('categoria'),
+        db.from('con_gastos').select('categoria, concepto, monto, proveedor_nombre, comprobante, pagado').eq('expensa_id', expId).order('categoria'),
         db.from('con_expensas_detalle').select('*').eq('expensa_id', expId),
         db.from('con_unidades').select('*').eq('consorcio_id', uf.consorcio_id),
         db.from('con_copropietarios').select('*').eq('consorcio_id', uf.consorcio_id),
