@@ -82,9 +82,10 @@ export default function Expensas() {
     const { data:conData } = await supabase.from('con_consorcios').select('*').eq('id', consorcioId).single()
     const { data:expFresca } = await supabase.from('con_expensas').select('*').eq('id', expensa.id).single()
     // Traer detalle y gastos frescos de ESTE período: permite generar el PDF directo desde la lista, sin abrir el detalle
-    const [dRes, gRes] = await Promise.all([
+    const [dRes, gRes, cRes] = await Promise.all([
       supabase.from('con_expensas_detalle').select('*').eq('expensa_id', expensa.id).order('created_at'),
-      supabase.from('con_gastos').select('*').eq('expensa_id', expensa.id).order('fecha')
+      supabase.from('con_gastos').select('*').eq('expensa_id', expensa.id).order('fecha'),
+      supabase.from('con_comprobantes_proveedor').select('saldo_pendiente').eq('expensa_id', expensa.id)
     ])
     // Consorcios históricos (ej. Dorado): traer el prorrateo importado para que total_uf mande en el PDF
     let lufsHist = []
@@ -95,7 +96,7 @@ export default function Expensas() {
         .eq('consorcio_id', consorcioId).eq('periodo', periodo)
       lufsHist = lufsData || []
     }
-    generarPDFLiquidacion({ consorcioActivo:conData||{nombre:consorcioId}, expensa:expFresca||expensa, gastos:gRes.data||[], detalles:dRes.data||[], unidades, copropietarios, adminPerfil, lufsHist })
+    generarPDFLiquidacion({ consorcioActivo:conData||{nombre:consorcioId}, expensa:expFresca||expensa, gastos:gRes.data||[], comprobantes:cRes.data||[], detalles:dRes.data||[], unidades, copropietarios, adminPerfil, lufsHist })
   }
   async function generarArchivoGalicia(exp) {
     try {
@@ -240,15 +241,6 @@ export default function Expensas() {
                   <Input label="Proveedor" value={formGasto.proveedor_nombre} onChange={v=>setFormGasto(x=>({...x,proveedor_nombre:v}))} />
                   <Input label="N° comprobante" value={formGasto.comprobante} onChange={v=>setFormGasto(x=>({...x,comprobante:v}))} />
                 </div>
-                <label style={{ display:'flex', alignItems:'flex-start', gap:8, marginBottom:10, background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:7, padding:'9px 12px', cursor:'pointer' }}>
-                  <input type="checkbox" checked={formGasto.pagado === false}
-                    onChange={e=>setFormGasto(x=>({ ...x, pagado: e.target.checked ? false : true }))}
-                    style={{ marginTop:2, width:16, height:16, cursor:'pointer' }} />
-                  <span>
-                    <span style={{ display:'block', fontSize:12.5, color:'#c2410c', fontWeight:600 }}>Pendiente de pago (aún no salió de caja)</span>
-                    <span style={{ display:'block', fontSize:10.5, color:'#9a3412', marginTop:2 }}>Igual cuenta como egreso; se informa como “Pendiente de pago” en la liquidación. No afecta el saldo de caja.</span>
-                  </span>
-                </label>
                 <div style={{ display:'flex', gap:8 }}>
                   <Btn small onClick={guardarGasto}>Guardar</Btn>
                   <BtnSec small onClick={()=>setFormGasto(null)}>Cancelar</BtnSec>
