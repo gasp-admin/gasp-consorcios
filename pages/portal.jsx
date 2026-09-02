@@ -130,6 +130,7 @@ export default function Portal() {
   const [tab, setTab]                 = useState('cuenta')
   const [periodoExpandido, setPeriodoExpandido] = useState(null)
   const [gastosPeriodo, setGastosPeriodo]       = useState([])
+  const [comprobantesPeriodo, setComprobantesPeriodo] = useState([])
   const [loadingGastos, setLoadingGastos]       = useState(false)
   // Cta cte y pago
   const [movsCta, setMovsCta]             = useState([])
@@ -193,6 +194,7 @@ export default function Portal() {
     const resp = await fetch('/api/portal?accion=liq&token=' + encodeURIComponent(token) + '&exp=' + encodeURIComponent(expId))
     const data = await resp.json().catch(() => ({}))
     setGastosPeriodo(data.gastos || [])
+    setComprobantesPeriodo(data.comprobantes || [])
     setTodosDetalles(data.dets || [])
     setTodasUnidades(data.ufs || [])
     setTodosCoprop(data.cps || [])
@@ -213,6 +215,7 @@ export default function Portal() {
         consorcioActivo: consorcio,
         expensa: expensaActual,
         gastos: gastosPeriodo,
+        comprobantes: comprobantesPeriodo,
         detalles: todosDetalles,
         unidades: todasUnidades,
         copropietarios: todosCoprop,
@@ -579,7 +582,7 @@ export default function Portal() {
             {generandoPDF ? '⏳ Generando...' : '📄 Ver planilla completa PDF (imprimible)'}
           </button>
 
-          <button onClick={() => { setPeriodoExpandido(null); setGastosPeriodo([]) }}
+          <button onClick={() => { setPeriodoExpandido(null); setGastosPeriodo([]); setComprobantesPeriodo([]) }}
             style={{ width:'100%', padding:'13px', background:AZ, color:'#fff',
               border:'none', borderRadius:12, fontWeight:700, fontSize:14, cursor:'pointer' }}>
             ← Volver al portal
