@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
-import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/config'
+import { SUPA_URL, SUPA_KEY, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/config'
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
@@ -24,6 +24,7 @@ export default function Reclamos() {
   const [form, setForm]             = useState(null)
   const [detalle, setDetalle]       = useState(null)
   const [respuesta, setRespuesta]   = useState('')
+  const [enviando, setEnviando]     = useState(false)
   const [msg, setMsg]               = useState(null)
   const [filtroCons, setFiltroCons] = useState('')
   const [unidadesMap, setUnidadesMap] = useState({})
@@ -89,6 +90,40 @@ export default function Reclamos() {
     setRespuesta(''); setDetalle(null); cargar()
   }
 
+  // Envía la respuesta al copropietario por email (EF responder-reclamo) y la guarda.
+  // NO cambia el estado del ticket — eso se sigue haciendo con los botones de estado.
+  async function responderPorEmail() {
+    if (!detalle) return
+    if (!respuesta.trim()) return setMsg({ tipo:'warn', texto:'Escribí la respuesta antes de enviar' })
+    if (!confirm('¿Enviar esta respuesta por email al copropietario?\n\nSe guarda la respuesta y se le envía por correo. No cambia el estado del ticket.')) return
+    setEnviando(true); setMsg(null)
+    try {
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const r = await fetch(`${SUPA_URL}/functions/v1/responder-reclamo`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': SUPA_KEY },
+        body: JSON.stringify({ reclamo_id: detalle.id, respuesta: respuesta.trim(), admin_id: uid }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.ok) {
+        const det = d.error === 'sin_email'
+          ? 'El copropietario no tiene email cargado. Cargalo en su ficha o respondé por otro medio.'
+          : (d.detalle || d.error || 'error')
+        setMsg({ tipo:'error', texto:'No se pudo enviar: ' + det })
+      } else if (!d.email_enviado) {
+        setMsg({ tipo:'warn', texto:'Respuesta guardada, pero el email NO salió (revisá Resend). Destino: ' + (d.destino||[]).join(', ') })
+        setDetalle(x => x ? { ...x, respuesta_admin: respuesta.trim() } : x)
+      } else {
+        setMsg({ tipo:'ok', texto:'✓ Respuesta enviada por email a: ' + (d.destino||[]).join(', ') })
+        setDetalle(x => x ? { ...x, respuesta_admin: respuesta.trim() } : x)
+      }
+    } catch (e) {
+      setMsg({ tipo:'error', texto:'Error: ' + e.message })
+    }
+    setEnviando(false)
+    cargar()
+  }
+
   const fmt = d => d ? new Date(d).toLocaleDateString('es-AR') : '—'
   const consPresentes = [...new Set(reclamos.map(r=>r.consorcio_id).filter(Boolean))]
   const filtrados = reclamos.filter(r =>
@@ -126,7 +161,18 @@ export default function Reclamos() {
         <textarea value={respuesta} onChange={e=>setRespuesta(e.target.value)}
           rows={5} placeholder="Escribí la respuesta para el copropietario..."
           style={{ width:'100%', padding:'10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontFamily:'inherit', resize:'vertical', boxSizing:'border-box' }} />
-        <div style={{ display:'flex', gap:8, marginTop:10, flexWrap:'wrap' }}>
+        <div style={{ display:'flex', gap:10, marginTop:10, alignItems:'center', flexWrap:'wrap' }}>
+          <button type="button" onClick={responderPorEmail} disabled={enviando || !respuesta.trim()}
+            style={{ padding:'8px 16px', background:(enviando||!respuesta.trim())?'#93c5fd':AZ,
+              color:'#fff', border:'none', borderRadius:7, fontSize:13, fontWeight:700,
+              cursor:(enviando||!respuesta.trim())?'default':'pointer' }}>
+            {enviando ? 'Enviando…' : '✉ Responder por email'}
+          </button>
+          <span style={{ fontSize:11, color:GR }}>Envía la respuesta al copropietario y la guarda. No cambia el estado.</span>
+        </div>
+        <div style={{ borderTop:'1px solid #f3f4f6', margin:'14px 0 10px' }} />
+        <div style={{ fontSize:12, color:GR, marginBottom:6 }}>Estado del ticket</div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
           {ESTADOS.map(([v,l]) => (
             <button key={v} type="button" onClick={() => cambiarEstado(detalle, v)}
               style={{ padding:'6px 14px', background: detalle.estado===v?COLORS_EST[v]:'#f3f4f6',
