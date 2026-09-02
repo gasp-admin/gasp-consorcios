@@ -226,10 +226,13 @@ export default function Cobranzas() {
     if (!expSel) return
     const { data: gasData } = await supabase.from('con_gastos')
       .select('*').eq('expensa_id', expSel.id).order('fecha')
+    const { data: compData } = await supabase.from('con_comprobantes_proveedor')
+      .select('saldo_pendiente').eq('expensa_id', expSel.id)
     generarPDFLiquidacion({
       consorcioActivo: consorcio || { nombre: consorcioId },
       expensa: expSel,
       gastos: gasData || [],
+      comprobantes: compData || [],
       detalles,
       unidades,
       copropietarios,
