@@ -95,15 +95,16 @@ export default async function handler(req, res) {
       const { data: exp } = await db.from('con_expensas').select('*').eq('id', expId).single()
       if (!exp || exp.consorcio_id !== uf.consorcio_id) return res.status(403).json({ error: 'exp_ajena' })
       const [
-        { data: gastos }, { data: dets }, { data: ufs }, { data: cps }, { data: lufs },
+        { data: gastos }, { data: dets }, { data: ufs }, { data: cps }, { data: lufs }, { data: comprobantes },
       ] = await Promise.all([
-        db.from('con_gastos').select('categoria, concepto, monto, proveedor_nombre, comprobante, pagado').eq('expensa_id', expId).order('categoria'),
+        db.from('con_gastos').select('categoria, concepto, monto, proveedor_nombre, comprobante').eq('expensa_id', expId).order('categoria'),
         db.from('con_expensas_detalle').select('*').eq('expensa_id', expId),
         db.from('con_unidades').select('*').eq('consorcio_id', uf.consorcio_id),
         db.from('con_copropietarios').select('*').eq('consorcio_id', uf.consorcio_id),
         db.from('con_liquidacion_uf').select('unidad_id, total_uf, saldo_anterior, pagos, deuda, interes, expensa_calculada, ajustes').eq('consorcio_id', uf.consorcio_id).eq('periodo', exp.periodo),
+        db.from('con_comprobantes_proveedor').select('saldo_pendiente').eq('expensa_id', expId),
       ])
-      return res.status(200).json({ gastos, dets, ufs, cps, exp, lufs })
+      return res.status(200).json({ gastos, dets, ufs, cps, exp, lufs, comprobantes })
     }
 
     // ── reclamo: crear reclamo / informar pago (POST) ──
