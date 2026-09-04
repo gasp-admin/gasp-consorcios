@@ -64,7 +64,8 @@ export default function GruposLiquidacion() {
       consorcio_id: consorcioId,
       numero: d.numero, nombre: d.nombre, categorias: d.categorias,
     }))
-    await supabase.from('con_grupos_liquidacion').upsert(inserts, { onConflict:'id' })
+    const { error } = await supabase.from('con_grupos_liquidacion').upsert(inserts, { onConflict:'id' })
+    if (error) return setMsg({ tipo:'error', texto:`No se pudieron cargar los rubros: ${error.message}` })
     await cargar()
     setMsg({ tipo:'ok', texto:'✓ Grupos predeterminados cargados' })
   }
@@ -76,12 +77,18 @@ export default function GruposLiquidacion() {
     const payload = {
       admin_id: session.user.id, consorcio_id: consorcioId,
       numero: parseInt(formGrupo.numero), nombre: formGrupo.nombre.trim(),
-      categorias: formGrupo.categorias || [], activo: true,
+      categorias: formGrupo.categorias || [],
+      columnas_coef: formGrupo.columnas_coef || [],
+      activo: true,
     }
-    if (formGrupo.id) {
-      await supabase.from('con_grupos_liquidacion').update(payload).eq('id', formGrupo.id)
-    } else {
-      await supabase.from('con_grupos_liquidacion').insert([{ id:`GRL-${consorcioId}-${Date.now()}`, ...payload }])
+    const { error } = formGrupo.id
+      ? await supabase.from('con_grupos_liquidacion').update(payload).eq('id', formGrupo.id)
+      : await supabase.from('con_grupos_liquidacion').insert([{ id:`GRL-${consorcioId}-${Date.now()}`, ...payload }])
+    if (error) {
+      setGuardando(false)
+      if (error.code === '23505')
+        return setMsg({ tipo:'error', texto:`Ya existe un rubro con el N° ${payload.numero} en este consorcio. Cambiá el número.` })
+      return setMsg({ tipo:'error', texto:`No se pudo guardar el rubro: ${error.message}` })
     }
     setFormGrupo(null); await cargar(); setGuardando(false)
     setMsg({ tipo:'ok', texto:'✓ Grupo guardado' })
@@ -89,7 +96,8 @@ export default function GruposLiquidacion() {
 
   async function eliminarGrupo(id) {
     if (!confirm('¿Eliminar este grupo?')) return
-    await supabase.from('con_grupos_liquidacion').delete().eq('id', id)
+    const { error } = await supabase.from('con_grupos_liquidacion').delete().eq('id', id)
+    if (error) return setMsg({ tipo:'error', texto:`No se pudo eliminar el rubro: ${error.message}` })
     cargar()
   }
 
@@ -106,10 +114,12 @@ export default function GruposLiquidacion() {
       orden: parseInt(formCol.orden||1),
       activo: true,
     }
-    if (formCol.id) {
-      await supabase.from('con_columnas_liquidacion').update(payload).eq('id', formCol.id)
-    } else {
-      await supabase.from('con_columnas_liquidacion').insert([{ id:`COL-${consorcioId}-${Date.now()}`, ...payload }])
+    const { error } = formCol.id
+      ? await supabase.from('con_columnas_liquidacion').update(payload).eq('id', formCol.id)
+      : await supabase.from('con_columnas_liquidacion').insert([{ id:`COL-${consorcioId}-${Date.now()}`, ...payload }])
+    if (error) {
+      setGuardando(false)
+      return setMsg({ tipo:'error', texto:`No se pudo guardar la columna: ${error.message}` })
     }
     setFormCol(null); await cargar(); setGuardando(false)
     setMsg({ tipo:'ok', texto:'✓ Columna guardada' })
@@ -117,7 +127,8 @@ export default function GruposLiquidacion() {
 
   async function eliminarColumna(id) {
     if (!confirm('¿Eliminar esta columna?')) return
-    await supabase.from('con_columnas_liquidacion').delete().eq('id', id)
+    const { error } = await supabase.from('con_columnas_liquidacion').delete().eq('id', id)
+    if (error) return setMsg({ tipo:'error', texto:`No se pudo eliminar la columna: ${error.message}` })
     cargar()
   }
 
@@ -157,7 +168,7 @@ export default function GruposLiquidacion() {
       {tab === 'grupos' && (
         <div>
           <div style={{ display:'flex', gap:8, marginBottom:12 }}>
-            <Btn onClick={()=>setFormGrupo({ numero: grupos.length + 1, categorias:[] })}>+ Nuevo rubro</Btn>
+            <Btn onClick={()=>setFormGrupo({ numero: grupos.reduce((m,g)=>Math.max(m, g.numero||0), 0) + 1, categorias:[], columnas_coef:[] })}>+ Nuevo rubro</Btn>
             {grupos.length === 0 && (
               <BtnSec onClick={cargarDefaults}>⚡ Cargar rubros estándar</BtnSec>
             )}
@@ -201,6 +212,40 @@ export default function GruposLiquidacion() {
                   ))}
                 </div>
               </div>
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:12, color:GR, marginBottom:6, fontWeight:500 }}>
+                  Columna de prorrateo donde aparece este rubro
+                </div>
+                {columnas.length === 0 ? (
+                  <div style={{ fontSize:12, color:GR }}>
+                    Este consorcio no tiene columnas configuradas → el rubro irá a la columna única (coef. fiscal).
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
+                      {columnas.filter(c=>c.activo).map(col => (
+                        <label key={col.codigo} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, cursor:'pointer',
+                          padding:'4px 8px', borderRadius:5, background:(formGrupo.columnas_coef||[]).includes(col.codigo)?'#dbeafe':'#f9fafb',
+                          border:(formGrupo.columnas_coef||[]).includes(col.codigo)?'1px solid #93c5fd':'1px solid #e5e7eb' }}>
+                          <input type="checkbox"
+                            checked={(formGrupo.columnas_coef||[]).includes(col.codigo)}
+                            onChange={e=>setFormGrupo(f=>({...f,
+                              columnas_coef: e.target.checked
+                                ? [...(f.columnas_coef||[]), col.codigo]
+                                : (f.columnas_coef||[]).filter(c=>c!==col.codigo)
+                            }))} />
+                          {col.nombre}
+                        </label>
+                      ))}
+                    </div>
+                    {(!formGrupo.columnas_coef || formGrupo.columnas_coef.length===0) && (
+                      <div style={{ fontSize:11, color:AM, marginTop:6 }}>
+                        Sin columna elegida → el rubro caerá en la primera columna activa por defecto.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
               <div style={{ display:'flex', gap:8 }}>
                 <Btn onClick={guardarGrupo} disabled={guardando}>{guardando?'⏳':'💾 Guardar'}</Btn>
                 <BtnSec onClick={()=>setFormGrupo(null)}>Cancelar</BtnSec>
@@ -219,7 +264,7 @@ export default function GruposLiquidacion() {
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                 <thead>
                   <tr style={{ background:'#f3f4f6' }}>
-                    {['N°','Nombre del rubro','Categorías incluidas',''].map((h,i)=>(
+                    {['N°','Nombre del rubro','Categorías incluidas','Columna',''].map((h,i)=>(
                       <th key={i} style={{ padding:'7px 10px', textAlign:'left', fontSize:11, fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
                     ))}
                   </tr>
@@ -237,6 +282,14 @@ export default function GruposLiquidacion() {
                             </span>
                           ))}
                           {(!g.categorias || g.categorias.length===0) && <span style={{ color:GR, fontSize:11 }}>Sin categorías</span>}
+                        </div>
+                      </td>
+                      <td style={{ padding:'7px 10px' }}>
+                        <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                          {(g.columnas_coef||[]).map(cc=>(
+                            <span key={cc} style={{ fontSize:10, background:'#e0f2fe', color:'#075985', borderRadius:4, padding:'1px 6px' }}>{cc}</span>
+                          ))}
+                          {(!g.columnas_coef || g.columnas_coef.length===0) && <span style={{ color:AM, fontSize:11 }}>1ª col (default)</span>}
                         </div>
                       </td>
                       <td style={{ padding:'7px 10px' }}>
