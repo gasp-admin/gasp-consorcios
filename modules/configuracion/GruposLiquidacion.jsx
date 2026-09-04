@@ -22,8 +22,9 @@ export default function GruposLiquidacion() {
 
   const CATS_DISPONIBLES = [
     'sueldos','cargas_sociales','electricidad','agua','gas','servicios_publicos',
-    'honorarios_admin','contratos','seguros','mantenimiento','varios',
-    'gastos_bancarios','impuesto_municipal','impuesto_provincial','reintegros',
+    'honorarios_admin','contratos','seguros',
+    'mantenimiento','mantenimiento_general','mantenimiento_parques','limpieza','varios',
+    'gastos_bancarios','impuesto_municipal','impuesto_provincial','arba','reintegros',
   ]
 
   const CAMPOS_COEF = [
