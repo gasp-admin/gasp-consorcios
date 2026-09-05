@@ -1,5 +1,10 @@
 // modules — ListadoConsorcios.jsx
 // Extraído del V59. Props → useApp().
+// 2026-09-05: selector de columnas configurable (pantalla + PDF + Excel).
+//   - Catálogo único COLS → una sola fuente de verdad para los 3 renders.
+//   - Selección persistida en localStorage (módulo ssr:false).
+//   - "Nombre" es columna ancla (no desmarcable).
+//   - Cero cambios en BarraListado / exportExcel / exportPdf / BD.
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
@@ -11,12 +16,80 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
+// ── Formateo de fecha ISO (yyyy-mm-dd) → dd/mm/yyyy sin desfase de timezone ──
+function fFecha(v) {
+  if (!v) return ''
+  const s = String(v).slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`
+  return s
+}
+
+// ── Catálogo único de columnas ──────────────────────────────────────────────
+// val(c) → texto plano (usado por Excel y como base de PDF/pantalla).
+// Flags de estilo: strong (nombre), mono (CBU), azul (alias), mora (color condicional).
+// align: 'left' (def) | 'center' | 'right'. nowrap: no cortar.
+const COLS = [
+  { key:'nombre',          label:'Nombre',        val:c=>c.nombre||'',                              ancla:true, strong:true },
+  { key:'cuit',            label:'CUIT',          val:c=>c.cuit||'—',                               nowrap:true },
+  { key:'direccion',       label:'Dirección',     val:c=>c.direccion||'—' },
+  { key:'localidad',       label:'Localidad',     val:c=>c.localidad||'—' },
+  { key:'provincia',       label:'Provincia',     val:c=>c.provincia||'—' },
+  { key:'banco',           label:'Banco',         val:c=>c.banco||'—' },
+  { key:'cbu',             label:'CBU',           val:c=>c.cbu||'—',                                mono:true },
+  { key:'alias_cbu',       label:'Alias CBU',     val:c=>c.alias_cbu||'—',                          azul:true },
+  { key:'nro_cuenta',      label:'N° Cuenta',     val:c=>c.nro_cuenta||'—',                         align:'center' },
+  { key:'clave_suterh',    label:'SUTERH',        val:c=>c.clave_suterh||'—',                       align:'center' },
+  { key:'interes_mora',    label:'Mora %',        val:c=>c.interes_mora?c.interes_mora+'%':'—',     align:'right', mora:true },
+  { key:'email_consorcio', label:'Email',         val:c=>c.email_consorcio||'—' },
+  { key:'telefono',        label:'Teléfono',      val:c=>c.telefono||'—',                           nowrap:true },
+  { key:'aseguradora',     label:'Aseguradora',   val:c=>c.aseguradora||'—' },
+  { key:'poliza_nro',      label:'Póliza N°',     val:c=>c.poliza_nro||'—',                         align:'center' },
+  { key:'poliza_vto_hasta',label:'Vto. Póliza',   val:c=>fFecha(c.poliza_vto_hasta)||'—',           align:'center' },
+  { key:'matricula_rpi',   label:'Matrícula RPI', val:c=>c.matricula_rpi||'—',                      align:'center' },
+]
+
+// Columnas mostradas por defecto (las mismas que traía el listado original).
+const DEFAULT_KEYS = ['nombre','cuit','direccion','localidad','banco','cbu','alias_cbu','nro_cuenta','clave_suterh','interes_mora']
+const LS_KEY = 'gasp_cols_consorcios'
+
+function cargarPref() {
+  try {
+    const raw = typeof window !== 'undefined' && window.localStorage.getItem(LS_KEY)
+    if (!raw) return null
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr) || !arr.length) return null
+    // filtrar contra el catálogo actual (por si cambió) y garantizar el ancla
+    const validas = arr.filter(k => COLS.some(c => c.key === k))
+    return validas.includes('nombre') ? validas : ['nombre', ...validas]
+  } catch { return null }
+}
+
 export default function ListadoConsorcios() {
   const { session, consorcioActivo, consorcios, cargando, setPagina } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
   const [busqueda, setBusqueda] = useState('')
+  const [colsKeys, setColsKeys] = useState(() => cargarPref() || DEFAULT_KEYS)
+  const [panelCols, setPanelCols] = useState(false)
+
+  // Persistir selección (módulo ssr:false → window disponible)
+  useEffect(() => {
+    try { window.localStorage.setItem(LS_KEY, JSON.stringify(colsKeys)) } catch {}
+  }, [colsKeys])
+
+  // Columnas seleccionadas, respetando el orden del catálogo
+  const colsSel = COLS.filter(c => colsKeys.includes(c.key))
+
+  function toggleCol(key) {
+    if (key === 'nombre') return // ancla: no se desmarca
+    setColsKeys(prev => prev.includes(key)
+      ? prev.filter(k => k !== key)
+      : COLS.filter(c => prev.includes(c.key) || c.key === key).map(c => c.key))
+  }
+  const seleccionarTodas = () => setColsKeys(COLS.map(c => c.key))
+  const seleccionarMin    = () => setColsKeys(DEFAULT_KEYS)
 
   const filtrados = (consorcios||[]).filter(c => {
     const q = busqueda.toLowerCase()
@@ -25,25 +98,38 @@ export default function ListadoConsorcios() {
       || c.banco?.toLowerCase().includes(q) || c.clave_suterh?.toLowerCase().includes(q)
   })
 
+  // ── Estilo de celda de PDF según flags de la columna ──
+  function pdfTd(col, c) {
+    const raw = col.val(c)
+    const txt = String(raw).replace(/</g, '&lt;')
+    let style = `padding:3px 6px;font-size:7pt`
+    if (col.strong) style = `padding:3px 6px;font-size:7.5pt;font-weight:600;color:#1A3FA0`
+    else if (col.mono) style = `padding:3px 6px;font-size:6.5pt;font-family:monospace`
+    else if (col.azul) style = `padding:3px 6px;font-size:7pt;color:#1A3FA0`
+    if (col.nowrap) style += `;white-space:nowrap`
+    if (col.align === 'center') style += `;text-align:center`
+    if (col.align === 'right')  style += `;text-align:right`
+    if (col.mora) {
+      const v = parseFloat(c.interes_mora || 0)
+      style += `;text-align:center;color:${v>0?'#92400e':'#6b7280'};font-weight:${v>0?700:400}`
+    }
+    return `<td style="${style}">${txt}</td>`
+  }
+
   function handlePDF() {
-    // PDF en landscape para tener más espacio horizontal
-    const fmtN = n => (Number(n)||0).toLocaleString('es-AR', { minimumFractionDigits:2 })
     const logo = null ? `<img src="${null}" style="height:44px;width:auto;object-fit:contain"/>` : ''
+
+    const thHTML = colsSel.map(col => {
+      const al = col.align === 'center' ? ';text-align:center' : col.align === 'right' ? ';text-align:right' : ''
+      const mw = col.key === 'nombre' ? 'min-width:120px' : col.key === 'cbu' ? 'width:150px' : ''
+      return `<th style="${mw}${al}">${col.label}</th>`
+    }).join('')
 
     const filasHTML = filtrados.map((c,i) => {
       const bg = i%2===0 ? '#fff' : '#f4f8fc'
-      const dir = [c.direccion, c.localidad].filter(Boolean).join(' — ') || '—'
-      return `<tr style="background:${bg};border-bottom:1px solid #e0e8f0">
-        <td style="padding:3px 6px;font-size:7.5pt;font-weight:600;color:#1A3FA0">${(c.nombre||'').replace(/</g,'&lt;')}</td>
-        <td style="padding:3px 6px;font-size:7pt;white-space:nowrap">${(c.cuit||'—').replace(/</g,'&lt;')}</td>
-        <td style="padding:3px 6px;font-size:7pt">${dir.replace(/</g,'&lt;')}</td>
-        <td style="padding:3px 6px;font-size:7pt">${(c.banco||'—').replace(/</g,'&lt;')}</td>
-        <td style="padding:3px 6px;font-size:6.5pt;font-family:monospace">${(c.cbu||'—')}</td>
-        <td style="padding:3px 6px;font-size:7pt;color:#1A3FA0">${(c.alias_cbu||'—').replace(/</g,'&lt;')}</td>
-        <td style="padding:3px 6px;font-size:7pt;text-align:center">${(c.nro_cuenta||'—').replace(/</g,'&lt;')}</td>
-        <td style="padding:3px 6px;font-size:7pt;text-align:center">${c.clave_suterh||'—'}</td>
-        <td style="padding:3px 6px;font-size:7pt;text-align:center;color:${parseFloat(c.interes_mora||0)>0?'#92400e':'#6b7280'};font-weight:${parseFloat(c.interes_mora||0)>0?700:400}">${c.interes_mora ? c.interes_mora+'%' : '—'}</td>
-      </tr>`
+      return `<tr style="background:${bg};border-bottom:1px solid #e0e8f0">${
+        colsSel.map(col => pdfTd(col, c)).join('')
+      }</tr>`
     }).join('')
 
     const html = `<!DOCTYPE html>
@@ -75,22 +161,12 @@ export default function ListadoConsorcios() {
 
   <table>
     <thead>
-      <tr>
-        <th style="min-width:120px">Nombre</th>
-        <th style="width:105px">CUIT</th>
-        <th style="min-width:100px">Dirección / Localidad</th>
-        <th style="width:80px">Banco</th>
-        <th style="width:155px">CBU</th>
-        <th style="width:90px">Alias</th>
-        <th style="width:70px">N° Cuenta</th>
-        <th style="width:70px;text-align:center">SUTERH</th>
-        <th style="width:52px;text-align:center">Mora %</th>
-      </tr>
+      <tr>${thHTML}</tr>
     </thead>
     <tbody>${filasHTML}</tbody>
     <tfoot>
       <tr style="background:#0d2b3e;color:#fff;font-weight:700">
-        <td colspan="9" style="padding:4px 6px;font-size:8pt">
+        <td colspan="${colsSel.length}" style="padding:4px 6px;font-size:8pt">
           Total: ${filtrados.length} consorcio${filtrados.length!==1?'s':''} administrado${filtrados.length!==1?'s':''}
         </td>
       </tr>
@@ -114,25 +190,15 @@ export default function ListadoConsorcios() {
   function handleExcel() {
     exportarExcel({
       titulo: 'Consorcios',
-      columnas: [
-        { key:'nombre',   label:'Nombre' },
-        { key:'cuit',     label:'CUIT' },
-        { key:'direccion',label:'Dirección' },
-        { key:'localidad',label:'Localidad' },
-        { key:'banco',    label:'Banco' },
-        { key:'cbu',      label:'CBU' },
-        { key:'alias',    label:'Alias CBU' },
-        { key:'nro_cta',  label:'N° Cuenta' },
-        { key:'suterh',   label:'Clave SUTERH' },
-        { key:'mora',     label:'Interés Mora %' },
-      ],
-      filas: filtrados.map(c => ({
-        nombre: c.nombre||'', cuit: c.cuit||'',
-        direccion: c.direccion||'', localidad: c.localidad||'',
-        banco: c.banco||'', cbu: c.cbu||'', alias: c.alias_cbu||'',
-        nro_cta: c.nro_cuenta||'', suterh: c.clave_suterh||'',
-        mora: c.interes_mora||'',
-      }))
+      columnas: colsSel.map(col => ({ key: col.key, label: col.label })),
+      filas: filtrados.map(c => {
+        const o = {}
+        colsSel.forEach(col => {
+          const v = col.val(c)
+          o[col.key] = v === '—' ? '' : v   // en Excel, vacío en vez de guión
+        })
+        return o
+      })
     })
   }
 
@@ -154,10 +220,52 @@ export default function ListadoConsorcios() {
         </button>
       </div>
 
-      <BarraListado
-        busqueda={busqueda} onBuscar={setBusqueda}
-        onPDF={handlePDF} onExcel={handleExcel}
-        placeholder="Buscar por nombre, CUIT, dirección, banco, SUTERH..." />
+      <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+        <div style={{ flex:1, minWidth:200 }}>
+          <BarraListado
+            busqueda={busqueda} onBuscar={setBusqueda}
+            onPDF={handlePDF} onExcel={handleExcel}
+            placeholder="Buscar por nombre, CUIT, dirección, banco, SUTERH..." />
+        </div>
+        <button onClick={() => setPanelCols(v => !v)}
+          style={{ padding:'8px 12px', fontSize:13, fontWeight:600, background: panelCols?AZ:'#fff',
+            color: panelCols?'#fff':AZ, border:`1px solid ${AZ}`, borderRadius:7, cursor:'pointer',
+            whiteSpace:'nowrap', marginBottom:12 }}>
+          ⚙️ Columnas ({colsSel.length})
+        </button>
+      </div>
+
+      {panelCols && (
+        <Card style={{ padding:14, marginBottom:12, background:'#f8fafc' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10, flexWrap:'wrap', gap:8 }}>
+            <div style={{ fontWeight:700, fontSize:13, color:AZ }}>Columnas a incluir (pantalla, PDF y Excel)</div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={seleccionarTodas}
+                style={{ padding:'4px 10px', fontSize:12, background:'#fff', color:AZ, border:`1px solid ${AZ}`, borderRadius:6, cursor:'pointer' }}>
+                Seleccionar todas
+              </button>
+              <button onClick={seleccionarMin}
+                style={{ padding:'4px 10px', fontSize:12, background:'#fff', color:GR, border:'1px solid #d1d5db', borderRadius:6, cursor:'pointer' }}>
+                Restablecer
+              </button>
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:'6px 14px' }}>
+            {COLS.map(col => (
+              <label key={col.key}
+                style={{ display:'flex', alignItems:'center', gap:7, fontSize:13,
+                  cursor: col.ancla?'default':'pointer', color: col.ancla?GR:'#111', userSelect:'none' }}>
+                <input type="checkbox"
+                  checked={colsKeys.includes(col.key)}
+                  disabled={col.ancla}
+                  onChange={() => toggleCol(col.key)}
+                  style={{ cursor: col.ancla?'default':'pointer' }} />
+                {col.label}{col.ancla && <span style={{ fontSize:10, color:GR }}>(fija)</span>}
+              </label>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {filtrados.length === 0 ? (
         <Card style={{ textAlign:'center', padding:32, color:GR }}>
@@ -169,40 +277,43 @@ export default function ListadoConsorcios() {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
             <thead>
               <tr style={{ background:'#2e4057' }}>
-                {['Nombre','CUIT','Dirección','Banco','CBU','Alias','N° Cuenta','SUTERH','Mora%'].map((h,i) => (
-                  <th key={i} style={{ padding:'8px 10px', textAlign:'left', fontSize:11,
-                    fontWeight:700, color:'#fff', whiteSpace:'nowrap' }}>{h}</th>
+                {colsSel.map(col => (
+                  <th key={col.key} style={{ padding:'8px 10px', fontSize:11, fontWeight:700, color:'#fff',
+                    whiteSpace:'nowrap',
+                    textAlign: col.align==='right'?'right':col.align==='center'?'center':'left' }}>
+                    {col.label}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtrados.map((c,i) => (
                 <tr key={c.id} style={{ borderBottom:'1px solid #e5e7eb', background: i%2===0?'#fff':'#f4f8fc' }}>
-                  <td style={{ padding:'9px 10px', fontWeight:700, color:AZ }}>{c.nombre}</td>
-                  <td style={{ padding:'9px 10px', fontSize:11, color:GR, whiteSpace:'nowrap' }}>{c.cuit||'—'}</td>
-                  <td style={{ padding:'9px 10px', fontSize:11 }}>
-                    {c.direccion && <div>{c.direccion}</div>}
-                    {c.localidad && <div style={{ color:GR, fontSize:10 }}>{c.localidad}</div>}
-                    {!c.direccion && !c.localidad && '—'}
-                  </td>
-                  <td style={{ padding:'9px 10px', fontSize:11 }}>{c.banco||'—'}</td>
-                  <td style={{ padding:'9px 10px', fontSize:10, fontFamily:'monospace' }}>{c.cbu||'—'}</td>
-                  <td style={{ padding:'9px 10px', fontSize:11, color:AZ }}>{c.alias_cbu||'—'}</td>
-                  <td style={{ padding:'9px 10px', fontSize:11 }}>{c.nro_cuenta||'—'}</td>
-                  <td style={{ padding:'9px 10px', fontSize:11, fontWeight:c.clave_suterh?600:400 }}>
-                    {c.clave_suterh||'—'}
-                  </td>
-                  <td style={{ padding:'9px 10px', fontSize:12, textAlign:'right',
-                    fontWeight: parseFloat(c.interes_mora||0) > 0 ? 700 : 400,
-                    color: parseFloat(c.interes_mora||0) > 0 ? AM : GR }}>
-                    {c.interes_mora ? c.interes_mora + '%' : '—'}
-                  </td>
+                  {colsSel.map(col => {
+                    const base = {
+                      padding:'9px 10px', fontSize:11,
+                      whiteSpace: col.nowrap?'nowrap':undefined,
+                      textAlign: col.align==='right'?'right':col.align==='center'?'center':'left',
+                    }
+                    if (col.strong) return <td key={col.key} style={{ ...base, fontWeight:700, color:AZ, fontSize:12 }}>{c.nombre||'—'}</td>
+                    if (col.mono)   return <td key={col.key} style={{ ...base, fontSize:10, fontFamily:'monospace' }}>{c.cbu||'—'}</td>
+                    if (col.azul)   return <td key={col.key} style={{ ...base, color:AZ }}>{c.alias_cbu||'—'}</td>
+                    if (col.mora) {
+                      const v = parseFloat(c.interes_mora||0)
+                      return <td key={col.key} style={{ ...base, fontSize:12, fontWeight:v>0?700:400, color:v>0?AM:GR }}>
+                        {c.interes_mora ? c.interes_mora + '%' : '—'}
+                      </td>
+                    }
+                    if (col.key === 'clave_suterh')
+                      return <td key={col.key} style={{ ...base, fontWeight:c.clave_suterh?600:400 }}>{c.clave_suterh||'—'}</td>
+                    return <td key={col.key} style={{ ...base, color: col.key==='cuit'?GR:undefined }}>{col.val(c)}</td>
+                  })}
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr style={{ background:'#f0f4ff', borderTop:'2px solid '+AZ }}>
-                <td colSpan={9} style={{ padding:'8px 10px', fontWeight:700, color:AZ, fontSize:12 }}>
+                <td colSpan={colsSel.length} style={{ padding:'8px 10px', fontWeight:700, color:AZ, fontSize:12 }}>
                   Total: {filtrados.length} consorcio{filtrados.length!==1?'s':''} administrado{filtrados.length!==1?'s':''}
                 </td>
               </tr>
