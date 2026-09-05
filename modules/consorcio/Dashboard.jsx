@@ -119,20 +119,20 @@ export default function Dashboard() {
           Bienvenido a GASP Consorcios
         </div>
         <div style={{ fontSize: 14, color: GR, marginBottom: 24 }}>
-          Administrás <strong>{consorcios.length}</strong> consorcio{consorcios.length !== 1 ? 's' : ''}.
+          Administrás <strong>{consorcios.filter(c=>!c.archivado).length}</strong> consorcio{consorcios.filter(c=>!c.archivado).length !== 1 ? 's' : ''}.
           Seleccioná uno desde el menú lateral para ver el dashboard.
         </div>
-        {consorcios.length > 0 && (
+        {consorcios.filter(c=>!c.archivado).length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center', maxWidth: 600, margin: '0 auto' }}>
-            {consorcios.slice(0, 8).map(c => (
+            {consorcios.filter(c=>!c.archivado).slice(0, 8).map(c => (
               <div key={c.id} style={{ background: '#f0f4ff', borderRadius: 8, padding: '8px 14px',
                 fontSize: 13, color: AZ, fontWeight: 600 }}>
                 {c.nombre}
               </div>
             ))}
-            {consorcios.length > 8 && (
+            {consorcios.filter(c=>!c.archivado).length > 8 && (
               <div style={{ background: '#f3f4f6', borderRadius: 8, padding: '8px 14px', fontSize: 13, color: GR }}>
-                +{consorcios.length - 8} más
+                +{consorcios.filter(c=>!c.archivado).length - 8} más
               </div>
             )}
           </div>
