@@ -14,6 +14,7 @@ import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
+import { setArchivadoConsorcio } from '../../api/index'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 // ── Formateo de fecha ISO (yyyy-mm-dd) → dd/mm/yyyy sin desfase de timezone ──
@@ -66,13 +67,16 @@ function cargarPref() {
 }
 
 export default function ListadoConsorcios() {
-  const { session, consorcioActivo, consorcios, cargando, setPagina } = useApp()
+  const { session, consorcioActivo, consorcios, setConsorcios, cargando, setPagina } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
   const [busqueda, setBusqueda] = useState('')
   const [colsKeys, setColsKeys] = useState(() => cargarPref() || DEFAULT_KEYS)
   const [panelCols, setPanelCols] = useState(false)
+  const [verArchivados, setVerArchivados] = useState(false)
+  const [procId, setProcId] = useState(null)   // id en proceso de archivar/reactivar
+  const [msgArch, setMsgArch] = useState(null)
 
   // Persistir selección (módulo ssr:false → window disponible)
   useEffect(() => {
@@ -91,7 +95,31 @@ export default function ListadoConsorcios() {
   const seleccionarTodas = () => setColsKeys(COLS.map(c => c.key))
   const seleccionarMin    = () => setColsKeys(DEFAULT_KEYS)
 
+  const archivadosCount = (consorcios||[]).filter(c => c.archivado).length
+
+  async function handleArchivar(c) {
+    const archivar = !c.archivado
+    const txt = archivar
+      ? `¿Archivar "${c.nombre}"?\n\nQuedará oculto de los listados pero seguirá accesible desde el selector de consorcio para consultar cta cte, liquidaciones, pagos, etc.`
+      : `¿Reactivar "${c.nombre}"? Volverá a aparecer en los listados como consorcio vigente.`
+    if (!window.confirm(txt)) return
+    setProcId(c.id); setMsgArch(null)
+    try {
+      await setArchivadoConsorcio(c.id, archivar)
+      // Actualización en memoria (evita recarga completa)
+      setConsorcios(prev => (prev||[]).map(x => x.id === c.id
+        ? { ...x, archivado: archivar, archivado_at: archivar ? new Date().toISOString() : null }
+        : x))
+      setMsgArch({ tipo:'ok', txt: archivar ? `✓ "${c.nombre}" archivado` : `✓ "${c.nombre}" reactivado` })
+    } catch (e) {
+      setMsgArch({ tipo:'err', txt: 'Error al actualizar: ' + (e.message || e) })
+    } finally {
+      setProcId(null)
+    }
+  }
+
   const filtrados = (consorcios||[]).filter(c => {
+    if (!verArchivados && c.archivado) return false        // ocultar archivados salvo toggle
     const q = busqueda.toLowerCase()
     return !q || c.nombre?.toLowerCase().includes(q) || c.cuit?.toLowerCase().includes(q)
       || c.direccion?.toLowerCase().includes(q) || c.localidad?.toLowerCase().includes(q)
@@ -233,7 +261,25 @@ export default function ListadoConsorcios() {
             whiteSpace:'nowrap', marginBottom:12 }}>
           ⚙️ Columnas ({colsSel.length})
         </button>
+        {archivadosCount > 0 && (
+          <button onClick={() => setVerArchivados(v => !v)}
+            title={verArchivados ? 'Ocultar los consorcios archivados' : 'Mostrar los consorcios archivados'}
+            style={{ padding:'8px 12px', fontSize:13, fontWeight:600, background: verArchivados?AM:'#fff',
+              color: verArchivados?'#fff':AM, border:`1px solid ${AM}`, borderRadius:7, cursor:'pointer',
+              whiteSpace:'nowrap', marginBottom:12 }}>
+            📦 Archivados ({archivadosCount})
+          </button>
+        )}
       </div>
+
+      {msgArch && (
+        <div style={{ marginBottom:12, padding:'8px 12px', borderRadius:7, fontSize:13,
+          background: msgArch.tipo==='ok' ? '#ecfdf5' : '#fef2f2',
+          color: msgArch.tipo==='ok' ? '#065f46' : '#991b1b',
+          border: `1px solid ${msgArch.tipo==='ok' ? '#a7f3d0' : '#fecaca'}` }}>
+          {msgArch.txt}
+        </div>
+      )}
 
       {panelCols && (
         <Card style={{ padding:14, marginBottom:12, background:'#f8fafc' }}>
@@ -284,11 +330,15 @@ export default function ListadoConsorcios() {
                     {col.label}
                   </th>
                 ))}
+                <th style={{ padding:'8px 10px', fontSize:11, fontWeight:700, color:'#fff',
+                  whiteSpace:'nowrap', textAlign:'center', width:110 }}>Acción</th>
               </tr>
             </thead>
             <tbody>
               {filtrados.map((c,i) => (
-                <tr key={c.id} style={{ borderBottom:'1px solid #e5e7eb', background: i%2===0?'#fff':'#f4f8fc' }}>
+                <tr key={c.id} style={{ borderBottom:'1px solid #e5e7eb',
+                  background: c.archivado ? '#fff7ed' : (i%2===0?'#fff':'#f4f8fc'),
+                  opacity: c.archivado ? 0.72 : 1 }}>
                   {colsSel.map(col => {
                     const base = {
                       padding:'9px 10px', fontSize:11,
@@ -308,13 +358,29 @@ export default function ListadoConsorcios() {
                       return <td key={col.key} style={{ ...base, fontWeight:c.clave_suterh?600:400 }}>{c.clave_suterh||'—'}</td>
                     return <td key={col.key} style={{ ...base, color: col.key==='cuit'?GR:undefined }}>{col.val(c)}</td>
                   })}
+                  <td style={{ padding:'9px 10px', textAlign:'center', whiteSpace:'nowrap' }}>
+                    {c.archivado && (
+                      <span style={{ display:'inline-block', fontSize:9, fontWeight:800, color:'#fff',
+                        background:AM, borderRadius:4, padding:'1px 5px', marginRight:6, verticalAlign:'middle' }}>
+                        ARCHIVADO
+                      </span>
+                    )}
+                    <button onClick={() => handleArchivar(c)} disabled={procId===c.id}
+                      title={c.archivado ? 'Reactivar consorcio' : 'Archivar (ocultar de listados, conserva el acceso)'}
+                      style={{ padding:'4px 9px', fontSize:11, fontWeight:600, cursor: procId===c.id?'default':'pointer',
+                        borderRadius:6, border:`1px solid ${c.archivado?VD:'#d1d5db'}`,
+                        background: c.archivado?'#fff':'#fff', color: c.archivado?VD:GR,
+                        opacity: procId===c.id?0.5:1 }}>
+                      {procId===c.id ? '…' : (c.archivado ? '♻️ Reactivar' : '📦 Archivar')}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr style={{ background:'#f0f4ff', borderTop:'2px solid '+AZ }}>
-                <td colSpan={colsSel.length} style={{ padding:'8px 10px', fontWeight:700, color:AZ, fontSize:12 }}>
-                  Total: {filtrados.length} consorcio{filtrados.length!==1?'s':''} administrado{filtrados.length!==1?'s':''}
+                <td colSpan={colsSel.length + 1} style={{ padding:'8px 10px', fontWeight:700, color:AZ, fontSize:12 }}>
+                  Total: {filtrados.length} consorcio{filtrados.length!==1?'s':''}{verArchivados ? ' (incluye archivados)' : ' vigente'+(filtrados.length!==1?'s':'')}
                 </td>
               </tr>
             </tfoot>
