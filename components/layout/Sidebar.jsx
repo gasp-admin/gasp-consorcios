@@ -22,7 +22,12 @@ export default function Sidebar() {
         <div style={{ marginTop:8 }}>
           <select value={consorcioActivo?.id||''} onChange={e=>{ const c=consorcios.find(x=>x.id===e.target.value); if(c){setConsorcioActivo(c);cargarConsorcio(c.id,session?.user?.id)} }} style={{ width:'100%', padding:'6px 8px', background:'rgba(26,63,160,0.3)', border:'1px solid rgba(122,172,255,0.3)', borderRadius:6, color:'#7ab4ff', fontSize:11, fontWeight:700, cursor:'pointer', outline:'none' }}>
             {consorcios.length===0&&<option value="">Sin consorcios</option>}
-            {consorcios.map(c=><option key={c.id} value={c.id} style={{ background:'#0f1f3d', color:'#fff' }}>{c.nombre}</option>)}
+            {consorcios.filter(c=>!c.archivado).map(c=><option key={c.id} value={c.id} style={{ background:'#0f1f3d', color:'#fff' }}>{c.nombre}</option>)}
+            {consorcios.some(c=>c.archivado) && (
+              <optgroup label="Archivados" style={{ background:'#0f1f3d', color:'#7ab4ff' }}>
+                {consorcios.filter(c=>c.archivado).map(c=><option key={c.id} value={c.id} style={{ background:'#0f1f3d', color:'#fff' }}>📦 {c.nombre}</option>)}
+              </optgroup>
+            )}
           </select>
           {consorcioActivo&&<div style={{ fontSize:9, color:'#4a6a8a', marginTop:3, textAlign:'center' }}>{unidades.length} UFs · {consorcioActivo.banco||'Sin banco'}</div>}
         </div>
