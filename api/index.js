@@ -31,7 +31,11 @@ export async function saveConsorcio(form, adminId) {
     if (error) throw error
   }
 }
-
+export async function setArchivadoConsorcio(id, archivado) {
+  const patch = { archivado, archivado_at: archivado ? new Date().toISOString() : null }
+  const { error } = await supabase.from('con_consorcios').update(patch).eq('id', id)
+  if (error) throw error
+}
 // UNIDADES
 export async function getUnidades(adminId, consorcioId) {
   const { data, error } = await supabase.from('con_unidades').select('*').eq('admin_id', adminId).eq('consorcio_id', consorcioId)
