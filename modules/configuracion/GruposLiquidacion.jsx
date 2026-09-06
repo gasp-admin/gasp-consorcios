@@ -25,6 +25,7 @@ export default function GruposLiquidacion() {
     'honorarios_admin','contratos','seguros',
     'mantenimiento','mantenimiento_general','mantenimiento_parques','limpieza','varios',
     'gastos_bancarios','impuesto_municipal','impuesto_provincial','arba','reintegros',
+    'gastos_particulares',
   ]
 
   const CAMPOS_COEF = [
