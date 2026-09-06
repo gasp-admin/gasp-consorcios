@@ -8,6 +8,14 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
+// Resuelve cada código de columnas_coef al código REAL de la columna (case-insensitive):
+// evita que un grupo con 'EXP_COMUN' no matchee la columna 'exp_comun' y el gasto se pierda en $0.
+function resolverCodigosColumna(rawCodigos, colsActivas) {
+  const byLower = {}
+  for (const c of (colsActivas || [])) byLower[String(c.codigo).toLowerCase()] = c.codigo
+  return (rawCodigos || []).map(cc => byLower[String(cc).toLowerCase()] ?? cc)
+}
+
 export default function LiquidacionPeriodo() {
   const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, puede, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo } = useApp()
   const uid = session?.user?.id
@@ -66,10 +74,10 @@ export default function LiquidacionPeriodo() {
   const columnasMF = columnasLiq.filter(c => c.activo && c.tipo === 'monto_fijo')
   // Categorías que caen (vía grupo) en alguna columna monto_fijo activa
   const categoriasMF = (() => {
-    const codigosMF = new Set(columnasMF.map(c => c.codigo))
+    const codigosMF = new Set(columnasMF.map(c => String(c.codigo).toLowerCase()))
     const set = new Set()
     gruposLiq.forEach(gr => {
-      if ((gr.columnas_coef || []).some(cc => codigosMF.has(cc))) {
+      if ((gr.columnas_coef || []).some(cc => codigosMF.has(String(cc).toLowerCase()))) {
         (gr.categorias || []).forEach(cat => set.add(cat))
       }
     })
@@ -81,8 +89,8 @@ export default function LiquidacionPeriodo() {
   // grupo que mapea a la primera columna monto_fijo activa del consorcio).
   const categoriaParticularPorDefecto = (() => {
     if (columnasMF.length === 0) return null
-    const cod = columnasMF[0].codigo
-    const grp = gruposLiq.find(gr => (gr.columnas_coef || []).includes(cod))
+    const cod = String(columnasMF[0].codigo).toLowerCase()
+    const grp = gruposLiq.find(gr => (gr.columnas_coef || []).some(cc => String(cc).toLowerCase() === cod))
     return grp?.categorias?.[0] || null
   })()
 
@@ -361,9 +369,9 @@ export default function LiquidacionPeriodo() {
     gastos.forEach(g => {
       // Buscar a qué columnas pertenece este gasto según los grupos de liquidación
       const grp = gruposOrdenados.find(gr => gr.categorias?.includes(g.categoria))
-      const colsCodigos = grp?.columnas_coef?.length > 0
+      const colsCodigos = resolverCodigosColumna(grp?.columnas_coef?.length > 0
         ? grp.columnas_coef
-        : [colsActivas[0]?.codigo]   // fallback: primera columna activa
+        : [colsActivas[0]?.codigo], colsActivas)   // fallback: 1ª columna activa (case-insensitive)
       const monto = parseFloat(g.monto) || 0
       // IMPORTANTE: el gasto va completo a CADA columna indicada.
       // Si un gasto de electricidad figura en [EXPENSAS_A, SUB_2DO], significa
@@ -864,9 +872,9 @@ export default function LiquidacionPeriodo() {
       // Un gasto puede aparecer en MÚLTIPLES columnas si el grupo así lo indica
       if (tieneMulticol) {
         const grp = gruposOrdenados.find(gr => gr.categorias?.includes(g.categoria))
-        const colsCodigos = grp?.columnas_coef?.length > 0
+        const colsCodigos = resolverCodigosColumna(grp?.columnas_coef?.length > 0
           ? grp.columnas_coef
-          : [colsActivas[0]?.codigo]
+          : [colsActivas[0]?.codigo], colsActivas)
         const monto = parseFloat(g.monto) || 0
         colsCodigos.forEach(cc => {
           rubrosAgrup[label].porCol[cc] = (rubrosAgrup[label].porCol[cc]||0) + monto
@@ -888,9 +896,9 @@ export default function LiquidacionPeriodo() {
           if (tieneMulticol) {
             // Determinar en qué columnas aparece este gasto (por categoría del grupo)
             const grp = gruposOrdenados.find(gr => gr.categorias?.includes(g.categoria))
-            const colsCod = grp?.columnas_coef?.length > 0
+            const colsCod = resolverCodigosColumna(grp?.columnas_coef?.length > 0
               ? grp.columnas_coef
-              : [colsActivas[0]?.codigo]
+              : [colsActivas[0]?.codigo], colsActivas)
             const celdas = colsActivas.map(c =>
               `<td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${colsCod.includes(c.codigo)?fmtN(montoG):'—'}</td>`
             ).join('') + `<td style="text-align:right;padding:2px 4px;font-size:7pt;white-space:nowrap">${fmtN(montoG)}</td>`
@@ -1101,7 +1109,7 @@ export default function LiquidacionPeriodo() {
         colsActivas.forEach(c => { totBrutosPorCol[c.codigo] = 0 })
         gastos.forEach(g => {
           const grp = gruposOrdenados.find(gr => gr.categorias?.includes(g.categoria))
-          const cols = grp?.columnas_coef?.length > 0 ? grp.columnas_coef : [colsActivas[0]?.codigo]
+          const cols = resolverCodigosColumna(grp?.columnas_coef?.length > 0 ? grp.columnas_coef : [colsActivas[0]?.codigo], colsActivas)
           cols.forEach(cc => { if (totBrutosPorCol[cc] !== undefined) totBrutosPorCol[cc] += parseFloat(g.monto)||0 })
         })
         // Fila 2: Importes a prorratear configurados en el paso 3
@@ -1963,7 +1971,7 @@ export default function LiquidacionPeriodo() {
                             const gruposOrd = [...gruposLiq].sort((a,b) => a.numero - b.numero)
                             return gastos.reduce((acc, g) => {
                               const grp = gruposOrd.find(gr => gr.categorias?.includes(g.categoria))
-                              const cols = grp?.columnas_coef?.length > 0 ? grp.columnas_coef : [colsActivas[0]?.codigo]
+                              const cols = resolverCodigosColumna(grp?.columnas_coef?.length > 0 ? grp.columnas_coef : [colsActivas[0]?.codigo], colsActivas)
                               if (cols.includes(col.codigo)) acc += (parseFloat(g.monto)||0) / cols.length
                               return acc
                             }, 0)
