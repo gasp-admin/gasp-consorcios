@@ -1,4 +1,4 @@
-// modules/consorcio/Dashboard.jsx — v1781305245
+// modules/consorcio/Dashboard.jsx — v1788400000 (Cobrado/Sin pagar: filtra por expensa_id del período activo + estado='acreditado')
 // Dashboard GASP Consorcios — KPIs reales desde el context.
 
 import { useState, useEffect } from 'react'
@@ -14,6 +14,7 @@ export default function Dashboard() {
   } = useApp()
   const uid  = session?.user?.id
   const cid  = consorcioActivo?.id
+  const expActiva = expensas.find(e => e.estado === 'abierta') || expensas[0]
 
   // KPIs extras que no están en el context global
   const [kpis, setKpis]   = useState(null)
@@ -29,12 +30,17 @@ export default function Dashboard() {
         const mesActual = new Date().toISOString().slice(0, 7) // YYYY-MM
         const fechaDesde = `${mesActual}-01`
 
+        // Cobranzas imputadas al período ACTIVO (no por mes calendario). estado='acreditado' (único válido en con_cobranzas).
+        const cobP = expActiva?.id
+          ? supabase.from('con_cobranzas')
+              .select('monto, unidad_id')
+              .eq('admin_id', uid).eq('consorcio_id', cid)
+              .eq('estado', 'acreditado')
+              .eq('expensa_id', expActiva.id)
+          : Promise.resolve({ data: [] })
+
         const [cobRes, recRes, compRes, gasRes] = await Promise.all([
-          supabase.from('con_cobranzas')
-            .select('monto, unidad_id')
-            .eq('admin_id', uid).eq('consorcio_id', cid)
-            .eq('estado', 'vigente')
-            .gte('fecha', fechaDesde),
+          cobP,
           supabase.from('con_reclamos')
             .select('id, estado, prioridad')
             .eq('admin_id', uid).eq('consorcio_id', cid)
@@ -97,10 +103,9 @@ export default function Dashboard() {
       setCargando(false)
     }
     cargarKpis()
-  }, [cid, uid])
+  }, [cid, uid, expActiva?.id])
 
   // KPIs del context
-  const expActiva   = expensas.find(e => e.estado === 'abierta') || expensas[0]
   const totalUFs    = unidades.length
   const pctCobranza = expActiva?.total_expensa > 0
     ? Math.round((expActiva.total_cobrado / expActiva.total_expensa) * 100)
