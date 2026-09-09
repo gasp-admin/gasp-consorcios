@@ -30,7 +30,7 @@ export default function ReporteMovimientos() {
     ] = await Promise.all([
       supabase.from('con_expensas_detalle').select('*').eq('expensa_id', eid),
       supabase.from('con_gastos').select('*, con_proveedores(razon_social)').eq('expensa_id', eid),
-      supabase.from('con_cobranzas').select('*').eq('expensa_id', eid).eq('estado','vigente'),
+      supabase.from('con_cobranzas').select('*').eq('expensa_id', eid).eq('estado','acreditado'),
       supabase.from('con_pagos_proveedor').select('*, con_proveedores(razon_social)')
         .eq('consorcio_id', consorcioId)
         .gte('fecha', exp?.periodo ? exp.periodo + '-01' : '2000-01-01')
