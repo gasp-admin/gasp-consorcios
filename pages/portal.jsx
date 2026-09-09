@@ -329,8 +329,22 @@ export default function Portal() {
   const detOrdenados = [...detalles].sort((a,b) =>
     (b.con_expensas?.periodo||'').localeCompare(a.con_expensas?.periodo||'')
   )
-  const deudaReal = detOrdenados[0] ? saldoDet(detOrdenados[0]) : 0
-  const estaAlDia = deudaReal === 0
+  // §14: en liquidaciones NATIVAS ya cerradas, pagos_periodo queda congelado en 0
+  // (el pago va a con_cobranzas / cta cte). El pago real se lee de con_cobranzas
+  // imputadas a esa expensa (fallback a pagos_periodo). Históricos: sin cambio.
+  const pagadoReal = d => {
+    if (d?.con_expensas?.fuente !== 'gasp') return parseFloat(d?.pagos_periodo)||0
+    const c = (cobranzas||[])
+      .filter(x => x.expensa_id === d.expensa_id)
+      .reduce((a,x) => a + (parseFloat(x.monto)||0), 0)
+    return c > 0 ? c : (parseFloat(d.pagos_periodo)||0)
+  }
+  const saldoDetReal = d => Math.max(0,
+    (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0)
+    + (parseFloat(d.interes_mora)||0) - pagadoReal(d)
+  )
+  const deudaReal = detOrdenados[0] ? saldoDetReal(detOrdenados[0]) : 0
+  const estaAlDia = deudaReal <= 0.005
   const ultimoPago = cobranzas[0] || null
   const cbu    = cuentaBanco?.cbu   || consorcio?.cbu   || null
   const alias  = cuentaBanco?.alias || consorcio?.alias_cbu || '—'
@@ -405,9 +419,9 @@ export default function Portal() {
     const salAnt  = parseFloat(detExpandido.saldo_anterior)||0
     const monto   = parseFloat(detExpandido.monto)||0
     const mora    = parseFloat(detExpandido.interes_mora)||0
-    const pagado  = parseFloat(detExpandido.pagos_periodo)||0
-    const saldo   = saldoDet(detExpandido)
-    const esPag   = detExpandido.estado === 'pagada'
+    const pagado  = pagadoReal(detExpandido)
+    const saldo   = saldoDetReal(detExpandido)
+    const esPag   = detExpandido.estado === 'pagada' || saldo <= 0.005
     const totalGastos = gastosPeriodo.reduce((a,g) => a + (parseFloat(g.monto)||0), 0)
     const gastosPorCat = {}
     for (const g of gastosPeriodo) {
@@ -737,12 +751,12 @@ export default function Portal() {
             ) : (
               <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                 {detOrdenados.map((d, idx) => {
-                  const s      = saldoDet(d)
+                  const s      = saldoDetReal(d)
                   const monto  = parseFloat(d.monto)||0
                   const salAnt = parseFloat(d.saldo_anterior)||0
                   const mora   = parseFloat(d.interes_mora)||0
-                  const pagado = parseFloat(d.pagos_periodo)||0
-                  const esPag  = d.estado === 'pagada'
+                  const pagado = pagadoReal(d)
+                  const esPag  = d.estado === 'pagada' || s <= 0.005
                   const esMor  = d.estado === 'morosa'
                   const per    = d.con_expensas?.periodo || ''
                   return (
