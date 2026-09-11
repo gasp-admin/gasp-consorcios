@@ -121,6 +121,9 @@ export default async function handler(req, res) {
         descripcion: String(b.descripcion || '').slice(0, 4000),
         estado: 'abierto',
         prioridad: b.prioridad || 'normal',
+        adjuntos: (Array.isArray(b.adjuntos) && b.adjuntos.length)
+          ? b.adjuntos.slice(0, 5).map((x) => String(x))
+          : null,
       }
       const { error } = await db.from('con_reclamos').insert([row])
       if (error) return res.status(500).json({ error: 'insert', detalle: error.message })
