@@ -91,6 +91,37 @@ function normImporte(v) {
   return parseFloat(s.replace(/[^\d.\-]/g, '')) || 0
 }
 
+// Parser del listado Roela "Transferencias Recibidas" SECCIONADO (multi-cuenta).
+// Cada bloque abre con "Convenio: … - Cuenta Nro.: NN/N"; las filas siguientes
+// heredan esa cuenta. Funciona igual para 1 sola cuenta (single) que para N.
+const RE_CONVENIO = /Cuenta Nro\.?:\s*([0-9]+\/[0-9])/i
+function parseSeccionesRoela(rows, perfil) {
+  const hdr = (rows[perfil.headerRow] || []).map((c) => String(c || '').trim().toLowerCase())
+  const idxDe = (nombre) => hdr.findIndex((h) => h === String(nombre).trim().toLowerCase())
+  const cIdx = {}; for (const [k, nom] of Object.entries(perfil.cols)) cIdx[k] = idxDe(nom)
+  const out = []
+  let cuentaActual = null
+  for (let i = perfil.headerRow + 1; i < rows.length; i++) {
+    const row = rows[i]; if (!row) continue
+    const c0 = String(row[0] == null ? '' : row[0])
+    const mc = c0.match(RE_CONVENIO)
+    if (mc) { cuentaActual = mc[1]; continue }          // línea de convenio → fija la cuenta
+    const get = (k) => (cIdx[k] >= 0 ? row[cIdx[k]] : null)
+    const importe = normImporte(get('importe'))
+    if (!(importe > 0)) continue                        // solo créditos; saltea subtotales/vacías
+    let cuit = get('cuit') ? String(get('cuit')).replace(/\D/g, '') : null
+    if (cuit && cuit.length !== 11) cuit = null
+    out.push({
+      fecha: normFecha(get('fecha')), importe,
+      nombre: get('nombre') ? String(get('nombre')).trim() : null,
+      cuit, concepto: null,
+      referencia: get('referencia') != null ? String(get('referencia')).trim() : null,
+      cuenta: cuentaActual,
+    })
+  }
+  return out
+}
+
 const th = { padding: '7px 10px', fontSize: 11, fontWeight: 600, color: '#6B7280', textTransform: 'uppercase', textAlign: 'left', whiteSpace: 'nowrap' }
 const td = { padding: '6px 10px', fontSize: 12, verticalAlign: 'top', borderTop: '1px solid #f3f4f6' }
 
@@ -108,7 +139,12 @@ export default function ConciliarPagos() {
   const [conciliando, setConciliando] = useState(false)
   const [sel, setSel] = useState(() => new Set())
   const [confirmando, setConfirmando] = useState(false)
+  // Modo multi-consorcio (solo perfil roela_transf): ruteo por cuenta→consorcio.
+  const [lotes, setLotes] = useState([])               // lotes creados (uno por consorcio)
+  const [loteConsorcioId, setLoteConsorcioId] = useState(null)
+  const [consorciosById, setConsorciosById] = useState({})
 
+  const esMulti = banco === 'roela_transf'
   const puedeCobrar = puede ? puede('cobrar') : true
 
   async function onArchivo(e) {
@@ -116,6 +152,7 @@ export default function ConciliarPagos() {
     if (!file) return
     if (!banco) { setMsg({ t:'w', m:'Elegí primero el banco de la planilla.' }); e.target.value = ''; return }
     setArchivo(file); setLineas([]); setMsg(null); setCargando(true)
+    setLotes([]); setLoteId(null); setLineasLote([])
     try {
       const perfil = PERFILES[banco]
       const XLSX = await cargarXLSX()
@@ -131,6 +168,9 @@ export default function ConciliarPagos() {
       }
       const ws = wb.Sheets[wb.SheetNames[0]]
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' })
+
+      // Perfil roela_transf → camino multi-consorcio (ruteo por cuenta). Sale acá.
+      if (esMulti) { await computeRuteoRoela(rows, perfil); setCargando(false); return }
 
       const hdr = (rows[perfil.headerRow] || []).map((c) => String(c || '').trim().toLowerCase())
       const idxDe = (nombre) => hdr.findIndex((h) => h === String(nombre).trim().toLowerCase())
@@ -168,6 +208,88 @@ export default function ConciliarPagos() {
       setMsg({ t:'e', m:'Error al leer la planilla: ' + err.message })
     }
     setCargando(false)
+  }
+
+  // Rutea cada fila del listado multi-cuenta a su(s) consorcio(s) vía con_cuenta_roela.
+  async function computeRuteoRoela(rows, perfil) {
+    const crudas = parseSeccionesRoela(rows, perfil)
+    if (!crudas.length) { setLineas([]); setMsg({ t:'w', m:'No se detectaron créditos en el listado.' }); return }
+    const { data: mapRows } = await supabase.from('con_cuenta_roela').select('cuenta, consorcio_id, ignorar')
+    const mapa = {}
+    for (const r of (mapRows || [])) {
+      const k = r.cuenta; if (!mapa[k]) mapa[k] = { consorcios: [], ignorar: false }
+      if (r.ignorar) mapa[k].ignorar = true
+      if (r.consorcio_id) mapa[k].consorcios.push(r.consorcio_id)
+    }
+    const ids = [...new Set(Object.values(mapa).flatMap((m) => m.consorcios))]
+    const { data: cons } = await supabase.from('con_consorcios').select('id, nombre').in('id', ids.length ? ids : ['__none__'])
+    const byId = {}; for (const c of (cons || [])) byId[c.id] = c.nombre
+    setConsorciosById(byId)
+    const anotadas = crudas.map((l) => {
+      const m = mapa[l.cuenta]
+      let ruteo = 'ignorada', candidatos = [], consorcioAsignado = null
+      if (m && m.consorcios.length === 1) { ruteo = 'auto'; candidatos = m.consorcios; consorcioAsignado = m.consorcios[0] }
+      else if (m && m.consorcios.length >= 2) { ruteo = 'compartida'; candidatos = m.consorcios }
+      return { ...l, ruteo, candidatos, consorcioAsignado }
+    })
+    setLineas(anotadas)
+    const nAuto = anotadas.filter((l) => l.ruteo === 'auto').length
+    const nComp = anotadas.filter((l) => l.ruteo === 'compartida').length
+    const nIgn  = anotadas.filter((l) => l.ruteo === 'ignorada').length
+    setMsg({ t: nComp ? 'w' : 'ok', m:
+      `Leídas ${anotadas.length} transferencias — ${nAuto} ruteadas a consorcio único` +
+      (nComp ? `, ${nComp} en cuenta compartida (elegí consorcio)` : '') +
+      (nIgn ? `, ${nIgn} en cuenta ignorada/no mapeada` : '') + '.' })
+  }
+
+  function setLineaConsorcio(idx, cid) {
+    setLineas((prev) => prev.map((l, i) => (i === idx ? { ...l, consorcioAsignado: cid || null } : l)))
+  }
+
+  // Crea un lote por consorcio con las líneas asignadas. Ignoradas y compartidas
+  // sin resolver quedan afuera (nunca se imputan sin consorcio).
+  async function importarMulti() {
+    if (!puedeCobrar) return setMsg({ t:'w', m:'Tu rol no permite importar cobranzas.' })
+    const asignables = lineas.filter((l) => l.ruteo !== 'ignorada' && l.consorcioAsignado)
+    const compSinResolver = lineas.filter((l) => l.ruteo === 'compartida' && !l.consorcioAsignado)
+    if (!asignables.length) return setMsg({ t:'w', m:'No hay líneas con consorcio asignado para importar.' })
+    setImportando(true); setMsg(null)
+    try {
+      const uid = session.user.id
+      const grupos = {}
+      for (const l of asignables) { (grupos[l.consorcioAsignado] = grupos[l.consorcioAsignado] || []).push(l) }
+      const creados = []
+      for (const [cid, ls] of Object.entries(grupos)) {
+        const totalImporte = ls.reduce((a, l) => a + l.importe, 0)
+        const loteId = 'LOTE-' + cid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
+        const { error: eLote } = await supabase.from('con_cobranza_lote').insert({
+          id: loteId, admin_id: uid, consorcio_id: cid, sistema: banco,
+          archivo_nombre: archivo?.name || 'planilla', fecha_archivo: new Date().toISOString().slice(0, 10),
+          estado: 'importado', total_registros: ls.length, registros_pendientes: ls.length,
+          total_importe: totalImporte, importe_pendiente: totalImporte,
+        })
+        if (eLote) throw eLote
+        const filas = ls.map((l, i) => ({
+          id: loteId + '-L' + String(i + 1).padStart(3, '0'),
+          admin_id: uid, lote_id: loteId, consorcio_id: cid,
+          fecha_pago: l.fecha, importe: l.importe, concepto_original: l.concepto,
+          cuit_pagador: l.cuit, nombre_pagador: l.nombre, referencia_bancaria: l.referencia, estado: 'pendiente',
+        }))
+        const { error: eLin } = await supabase.from('con_cobranza_lote_linea').insert(filas)
+        if (eLin) throw eLin
+        creados.push({ id: loteId, consorcioId: cid, nombre: consorciosById[cid] || cid, n: ls.length, total: totalImporte })
+      }
+      setLotes(creados); setLineas([])
+      const aviso = compSinResolver.length ? ` (${compSinResolver.length} compartidas sin asignar quedaron afuera)` : ''
+      setMsg({ t:'ok', m:`✓ ${creados.length} lote(s) creado(s) con ${asignables.length} líneas${aviso}. Elegí un consorcio abajo para conciliar.` })
+    } catch (err) { setMsg({ t:'e', m:'No se pudo importar: ' + err.message }) }
+    setImportando(false)
+  }
+
+  async function abrirLote(l) {
+    setLoteId(l.id); setLoteConsorcioId(l.consorcioId); setSel(new Set())
+    await cargarUFs(l.consorcioId)
+    await cargarLineasLote(l.id)
   }
 
   async function importar() {
@@ -209,12 +331,14 @@ export default function ConciliarPagos() {
     setImportando(false)
   }
 
-  async function cargarUFs() {
+  async function cargarUFs(cid) {
+    const consId = cid || consorcioActivo?.id
+    if (!consId) { setUfMap({}); return }
     const [{ data: uni }, { data: props }, { data: expR }, { data: consR }] = await Promise.all([
-      supabase.from('con_unidades').select('id, nro_uf_pdf, numero, propietario_id').eq('consorcio_id', consorcioActivo.id),
-      supabase.from('con_copropietarios').select('id, apellido_nombre').eq('consorcio_id', consorcioActivo.id),
-      supabase.from('con_expensas').select('id, periodo').eq('consorcio_id', consorcioActivo.id).order('periodo', { ascending: false }).limit(1),
-      supabase.from('con_consorcios').select('fecha_corte_nativo, interes_mora_2').eq('id', consorcioActivo.id).maybeSingle(),
+      supabase.from('con_unidades').select('id, nro_uf_pdf, numero, propietario_id').eq('consorcio_id', consId),
+      supabase.from('con_copropietarios').select('id, apellido_nombre').eq('consorcio_id', consId),
+      supabase.from('con_expensas').select('id, periodo').eq('consorcio_id', consId).order('periodo', { ascending: false }).limit(1),
+      supabase.from('con_consorcios').select('fecha_corte_nativo, interes_mora_2').eq('id', consId).maybeSingle(),
     ])
     const pm = {}; for (const p of (props || [])) pm[p.id] = p.apellido_nombre
     const tp = {}
@@ -226,7 +350,7 @@ export default function ConciliarPagos() {
     const usarAperturas = !!corte && !!ultPeriodo && ultPeriodo < String(corte).slice(0, 7)
     if (usarAperturas) {
       const { data: aperts } = await supabase.from('con_movimientos_unidad')
-        .select('unidad_id, tipo, monto').eq('consorcio_id', consorcioActivo.id).like('id', 'MOV-APERT-%')
+        .select('unidad_id, tipo, monto').eq('consorcio_id', consId).like('id', 'MOV-APERT-%')
       for (const a of (aperts || [])) tp[a.unidad_id] = a.tipo === 'credito' ? -(+a.monto||0) : (+a.monto||0)
     } else if (expId) {
       const { data: dets } = await supabase.from('con_expensas_detalle')
@@ -306,15 +430,16 @@ export default function ConciliarPagos() {
     <div style={{ padding: 20, maxWidth: 1050, margin: '0 auto' }}>
       <h2 style={{ margin: 0, color: AZ, fontSize: 20 }}>🏦 Importar pagos del banco</h2>
       <p style={{ color: GR, fontSize: 13, marginTop: 4 }}>
-        Subí la planilla de movimientos de la cuenta del consorcio <strong>{consorcioActivo?.nombre || '—'}</strong>.
-        Cada banco tiene su formato; elegí cuál es. Se leen solo los créditos (ingresos) y se dejan listos para conciliar.
+        {esMulti
+          ? <>Listado de <strong>Transferencias Recibidas de Roela (multi-cuenta)</strong>. Cada transferencia se rutea al consorcio por su número de cuenta. Se crea un lote por consorcio.</>
+          : <>Subí la planilla de movimientos de la cuenta del consorcio <strong>{consorcioActivo?.nombre || '—'}</strong>. Cada banco tiene su formato; elegí cuál es. Se leen solo los créditos (ingresos) y se dejan listos para conciliar.</>}
       </p>
 
       <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:18, margin:'16px 0' }}>
         <div style={{ display:'flex', gap:14, flexWrap:'wrap', alignItems:'flex-end' }}>
           <div>
             <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:5 }}>Banco de la planilla</label>
-            <select value={banco} onChange={(e) => { setBanco(e.target.value); setLineas([]); setArchivo(null) }}
+            <select value={banco} onChange={(e) => { setBanco(e.target.value); setLineas([]); setArchivo(null); setLotes([]); setLoteId(null); setLineasLote([]) }}
               style={{ padding:'9px 12px', border:'1px solid #d1d5db', borderRadius:8, fontSize:14, minWidth:200, background:'#fff' }}>
               <option value="">— Elegir banco —</option>
               {Object.entries(PERFILES).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
@@ -341,41 +466,83 @@ export default function ConciliarPagos() {
             <span><strong>{lineas.length}</strong> líneas</span>
             <span>Total: <strong>${totImp.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</strong></span>
             <span>Con CUIT: <strong>{conCuit}</strong></span>
-            <span>Con nombre: <strong>{conNombre}</strong></span>
+            {esMulti
+              ? <>
+                  <span>Ruteadas: <strong>{lineas.filter((l)=>l.ruteo==='auto'||(l.ruteo==='compartida'&&l.consorcioAsignado)).length}</strong></span>
+                  <span style={{ color: lineas.some((l)=>l.ruteo==='compartida'&&!l.consorcioAsignado)?'#c07d10':GR }}>Compartidas s/asignar: <strong>{lineas.filter((l)=>l.ruteo==='compartida'&&!l.consorcioAsignado).length}</strong></span>
+                  <span>Ignoradas: <strong>{lineas.filter((l)=>l.ruteo==='ignorada').length}</strong></span>
+                </>
+              : <span>Con nombre: <strong>{conNombre}</strong></span>}
           </div>
           <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:8, maxHeight:420, overflowY:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead style={{ position:'sticky', top:0, background:BG }}>
-                <tr><th style={th}>Fecha</th><th style={th}>Importe</th><th style={th}>Nombre ordenante</th><th style={th}>CUIT</th><th style={th}>Concepto</th><th style={th}>Ref.</th></tr>
+                <tr><th style={th}>Fecha</th><th style={th}>Importe</th><th style={th}>Nombre ordenante</th><th style={th}>CUIT</th>
+                  {esMulti ? <th style={th}>Cuenta</th> : null}
+                  {esMulti ? <th style={th}>Consorcio</th> : <><th style={th}>Concepto</th><th style={th}>Ref.</th></>}
+                </tr>
               </thead>
               <tbody>
                 {lineas.map((l, i) => (
-                  <tr key={i}>
+                  <tr key={i} style={{ background: esMulti && l.ruteo==='ignorada' ? '#f9fafb' : '#fff', opacity: esMulti && l.ruteo==='ignorada' ? 0.6 : 1 }}>
                     <td style={{ ...td, whiteSpace:'nowrap', color: l.fecha?'#111':'#dc2626' }}>{l.fecha || 'sin fecha'}</td>
                     <td style={{ ...td, textAlign:'right', fontWeight:600, whiteSpace:'nowrap' }}>${l.importe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
                     <td style={td}>{l.nombre || <span style={{ color:GR }}>—</span>}</td>
                     <td style={{ ...td, fontFamily:'monospace' }}>{l.cuit || <span style={{ color:GR }}>—</span>}</td>
-                    <td style={{ ...td, fontSize:11, color:GR, maxWidth:260 }}>{l.concepto}</td>
-                    <td style={{ ...td, fontSize:11, color:GR }}>{l.referencia}</td>
+                    {esMulti ? <td style={{ ...td, fontFamily:'monospace', fontSize:12 }}>{l.cuenta || <span style={{ color:GR }}>—</span>}</td> : null}
+                    {esMulti
+                      ? <td style={td}>
+                          {l.ruteo === 'auto'
+                            ? <span style={{ fontSize:12, color:'#15803d', fontWeight:600 }}>{consorciosById[l.consorcioAsignado] || l.consorcioAsignado}</span>
+                            : l.ruteo === 'compartida'
+                              ? <select value={l.consorcioAsignado || ''} onChange={(e) => setLineaConsorcio(i, e.target.value)}
+                                  style={{ padding:'4px 6px', border:'1px solid '+(l.consorcioAsignado?'#d1d5db':'#c07d10'), borderRadius:6, fontSize:12, background:'#fff' }}>
+                                  <option value="">— elegí consorcio —</option>
+                                  {l.candidatos.map((cid) => <option key={cid} value={cid}>{consorciosById[cid] || cid}</option>)}
+                                </select>
+                              : <span style={{ fontSize:12, color:GR }}>— ignorada —</span>}
+                        </td>
+                      : <><td style={{ ...td, fontSize:11, color:GR, maxWidth:260 }}>{l.concepto}</td><td style={{ ...td, fontSize:11, color:GR }}>{l.referencia}</td></>}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <div style={{ marginTop:16 }}>
-            <button onClick={importar} disabled={importando || !puedeCobrar}
-              style={{ padding:'11px 26px', background:VD, color:'#fff', border:'none', borderRadius:8, fontSize:14, fontWeight:700, cursor: importando?'default':'pointer', opacity: importando?0.7:1 }}>
-              {importando ? 'Importando…' : `Importar ${lineas.length} líneas al lote`}
-            </button>
+            {esMulti
+              ? <button onClick={importarMulti} disabled={importando || !puedeCobrar || !lineas.some((l)=>l.ruteo!=='ignorada'&&l.consorcioAsignado)}
+                  style={{ padding:'11px 26px', background:VD, color:'#fff', border:'none', borderRadius:8, fontSize:14, fontWeight:700, cursor: importando?'default':'pointer', opacity: importando?0.7:1 }}>
+                  {importando ? 'Importando…' : `Crear lotes e importar ${lineas.filter((l)=>l.ruteo!=='ignorada'&&l.consorcioAsignado).length} líneas`}
+                </button>
+              : <button onClick={importar} disabled={importando || !puedeCobrar}
+                  style={{ padding:'11px 26px', background:VD, color:'#fff', border:'none', borderRadius:8, fontSize:14, fontWeight:700, cursor: importando?'default':'pointer', opacity: importando?0.7:1 }}>
+                  {importando ? 'Importando…' : `Importar ${lineas.length} líneas al lote`}
+                </button>}
             <span style={{ fontSize:12, color:GR, marginLeft:12 }}>Esto solo guarda las líneas; la imputación a cada UF viene en el siguiente paso.</span>
           </div>
         </>
       )}
 
+      {lotes.length > 0 && (
+        <div style={{ marginTop: 22, background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:14 }}>
+          <h3 style={{ margin:'0 0 10px', color:AZ, fontSize:15 }}>Lotes creados \u2014 elegí uno para conciliar</h3>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            {lotes.map((lt) => (
+              <button key={lt.id} onClick={() => abrirLote(lt)}
+                style={{ padding:'8px 14px', border:'1px solid '+(loteId===lt.id?AZ:'#d1d5db'), background: loteId===lt.id?BG:'#fff',
+                  borderRadius:8, fontSize:13, cursor:'pointer', textAlign:'left' }}>
+                <div style={{ fontWeight:700, color:AZ }}>{lt.nombre}</div>
+                <div style={{ fontSize:11, color:GR }}>{lt.n} pagos \u00b7 ${lt.total.toLocaleString('es-AR',{minimumFractionDigits:2})}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {loteId && lineasLote.length > 0 && (
         <div style={{ marginTop: 22 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:10 }}>
-            <h3 style={{ margin:0, color:AZ, fontSize:16 }}>Lote \u2014 {lineasLote.length} pagos</h3>
+            <h3 style={{ margin:0, color:AZ, fontSize:16 }}>{loteConsorcioId ? (consorciosById[loteConsorcioId] || loteConsorcioId) + ' \u2014 ' : 'Lote \u2014 '}{lineasLote.length} pagos</h3>
             <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
               <button onClick={conciliar} disabled={conciliando || confirmando}
                 style={{ padding:'9px 16px', background:AZ, color:'#fff', border:'none', borderRadius:8, fontSize:13, fontWeight:700, cursor:'pointer' }}>
