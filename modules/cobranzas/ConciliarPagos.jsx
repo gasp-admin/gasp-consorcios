@@ -25,6 +25,15 @@ const PERFILES = {
       return { cuit: only ? only[1] : null, nombre: null }
     },
   },
+  roela_transf: {
+    // Reporte "Listado de Transferencias Recibidas" (.xls binario). Header en
+    // fila 1 (fila 0 = título; fila 2 = "Convenio: …", se saltea sola porque
+    // no trae importe). Cliente y CUIT vienen en columnas propias → cascada
+    // por CUIT (confianza alta), sin extractor. Fecha = fecha de acreditación.
+    label: 'Banco Roela — Transferencias (.xls)', headerRow: 1,
+    cols: { fecha:'Fecha Acred.', importe:'Importe', nombre:'Cliente',
+            cuit:'CUIT', referencia:'Referencia' },
+  },
   macro: {
     label: 'Banco Macro', headerRow: 7,
     cols: { fecha:'Fecha', importe:'Importe', concepto:'Concepto', referencia:'Nro. de Referencia' },
