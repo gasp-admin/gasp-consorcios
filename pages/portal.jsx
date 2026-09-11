@@ -32,6 +32,56 @@ const saldoDet = d => Math.max(0,
 const AZ = '#1A3FA0', VD = '#1B6B35', RJ = '#B91C1C', AM = '#C07D10', GR = '#6B7280'
 
 
+// ── Adjuntos del portal (comprobante de pago / adjunto de reclamo) ──
+// El WebView Android bloquea supabase.co → el archivo sube a /api/portal-adjunto (mismo dominio),
+// que lo guarda con service role en el bucket privado `consorcios-adjuntos`. Se envían BYTES CRUDOS
+// (sin base64) para no inflar +33% ni chocar el tope de ~4,5 MB de Vercel.
+// Poné true para EXIGIR el comprobante al informar un pago:
+const ADJUNTO_PAGO_OBLIGATORIO = false
+const MIME_ADJUNTO = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf']
+const MAX_PDF = 4 * 1024 * 1024
+
+async function comprimirImagen(file) {
+  // Redimensiona a lado máx 1600px y re-encoda JPEG 0.72. Si algo falla, devuelve el original.
+  if (!file || !file.type || !file.type.startsWith('image/')) return file
+  try {
+    const dataUrl = await new Promise((ok, no) => {
+      const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = no; fr.readAsDataURL(file)
+    })
+    const img = await new Promise((ok, no) => {
+      const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = dataUrl
+    })
+    const MAXL = 1600
+    let w = img.width, h = img.height
+    if (w > MAXL || h > MAXL) { const r = Math.min(MAXL / w, MAXL / h); w = Math.round(w * r); h = Math.round(h * r) }
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+    cv.getContext('2d').drawImage(img, 0, 0, w, h)
+    const blob = await new Promise((ok) => cv.toBlob(ok, 'image/jpeg', 0.72))
+    if (!blob) return file
+    return new File([blob], (file.name || 'foto').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' })
+  } catch { return file }
+}
+
+async function subirAdjunto(fileRaw, token) {
+  // Valida, comprime imágenes y sube al server. Devuelve el path en Storage.
+  let file = fileRaw
+  const mime = (file.type || '').toLowerCase()
+  if (!MIME_ADJUNTO.includes(mime)) throw new Error('Formato no permitido. Adjuntá una imagen (JPG/PNG/WEBP) o un PDF.')
+  if (mime === 'application/pdf' && file.size > MAX_PDF) throw new Error('El PDF supera 4 MB. Reducilo e intentá de nuevo.')
+  if (mime.startsWith('image/')) file = await comprimirImagen(file)
+  const tk = Array.isArray(token) ? token[0] : token
+  const qs = 'token=' + encodeURIComponent(tk) + '&nombre=' + encodeURIComponent(file.name || 'adjunto')
+  const resp = await fetch('/api/portal-adjunto?' + qs, {
+    method: 'POST', headers: { 'Content-Type': file.type }, body: file,
+  })
+  const data = await resp.json().catch(() => ({}))
+  if (!resp.ok || !data.ok) {
+    const M = { tipo_no_permitido: 'Formato no permitido.', muy_grande: 'El archivo es demasiado grande (máx. 4 MB).', link_invalido: 'Enlace inválido.', vacio: 'El archivo está vacío.' }
+    throw new Error(M[data.error] || ('Error al subir el adjunto' + (data.error ? ': ' + data.error : '')))
+  }
+  return data.path
+}
+
 function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail, adminId, token }) {
   const [asunto, setAsunto]   = useState('')
   const [detalle, setDetalle] = useState('')
@@ -39,6 +89,8 @@ function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail, adminId, 
   const [enviado, setEnviado] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [msg, setMsg]         = useState(null)
+  const [fileRec, setFileRec] = useState(null)
+  const [subiendoRec, setSubiendoRec] = useState(false)
 
   const TIPOS = [
     ['reclamo',    '🔧 Reclamo técnico'],
@@ -52,15 +104,22 @@ function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail, adminId, 
     if (!asunto.trim() || !detalle.trim()) return setMsg('Completá el asunto y el detalle')
     setEnviando(true)
     try {
+      let adjuntos = null
+      if (fileRec) {
+        setSubiendoRec(true)
+        try { adjuntos = [await subirAdjunto(fileRec, token)] }
+        catch (e) { setSubiendoRec(false); setEnviando(false); return setMsg(e.message) }
+        setSubiendoRec(false)
+      }
       const resp = await fetch('/api/portal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accion: 'reclamo', token, prefijo: 'REC', categoria: tipo, titulo: asunto, descripcion: detalle }),
+        body: JSON.stringify({ accion: 'reclamo', token, prefijo: 'REC', categoria: tipo, titulo: asunto, descripcion: detalle, adjuntos }),
       })
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok || data.error) throw new Error(data.error || 'error')
       setEnviado(true)
-      setAsunto(''); setDetalle(''); setMsg(null)
+      setAsunto(''); setDetalle(''); setMsg(null); setFileRec(null)
     } catch (e) {
       setMsg('Error al enviar. Intentá de nuevo.')
     }
@@ -101,12 +160,19 @@ function Reclamo({ unidadId, copropietarioId, consorcioId, adminEmail, adminId, 
           placeholder="Describí el problema con el mayor detalle posible..."
           style={{ width:'100%', padding:'10px', border:'1px solid #d1d5db', borderRadius:8, fontSize:13, fontFamily:'inherit', resize:'vertical', boxSizing:'border-box' }}/>
       </div>
-      <button onClick={enviar} disabled={enviando || !asunto.trim() || !detalle.trim()}
+      <div style={{ marginBottom:16 }}>
+        <div style={{ fontSize:12, color:GR, marginBottom:4 }}>Adjuntar imagen o PDF (opcional · máx. 4 MB)</div>
+        <input type="file" accept="image/*,application/pdf"
+          onChange={e => setFileRec(e.target.files?.[0] || null)}
+          style={{ width:'100%', fontSize:12 }} />
+        {fileRec && <div style={{ fontSize:11, color:GR, marginTop:4 }}>📎 {fileRec.name}</div>}
+      </div>
+      <button onClick={enviar} disabled={enviando || subiendoRec || !asunto.trim() || !detalle.trim()}
         style={{ width:'100%', padding:'12px', background:AZ, color:'#fff', border:'none', borderRadius:8,
-          cursor: enviando||!asunto.trim()||!detalle.trim() ? 'not-allowed' : 'pointer',
-          opacity: enviando||!asunto.trim()||!detalle.trim() ? 0.5 : 1,
+          cursor: enviando||subiendoRec||!asunto.trim()||!detalle.trim() ? 'not-allowed' : 'pointer',
+          opacity: enviando||subiendoRec||!asunto.trim()||!detalle.trim() ? 0.5 : 1,
           fontWeight:700, fontSize:14 }}>
-        {enviando ? '⏳ Enviando...' : '📤 Enviar reclamo'}
+        {subiendoRec ? '⏳ Subiendo adjunto...' : enviando ? '⏳ Enviando...' : '📤 Enviar reclamo'}
       </button>
     </div>
   )
@@ -139,6 +205,7 @@ export default function Portal() {
   const [formPago, setFormPago]           = useState(null)
   const [msgPago, setMsgPago]             = useState(null)
   const [enviandoPago, setEnviandoPago]   = useState(false)
+  const [archivoPago, setArchivoPago]     = useState(null)
 
   useEffect(() => { if (token) cargar(token) }, [token])
 
@@ -304,20 +371,29 @@ export default function Portal() {
     if (!formPago || !formPago.monto || !formPago.fecha) {
       return setMsgPago({ tipo:'warn', texto:'Complete monto y fecha del pago.' })
     }
+    if (ADJUNTO_PAGO_OBLIGATORIO && !archivoPago) {
+      return setMsgPago({ tipo:'warn', texto:'Adjunte el comprobante del pago (imagen o PDF).' })
+    }
     setEnviandoPago(true)
     try {
+      let adjuntos = null
+      if (archivoPago) {
+        setMsgPago({ tipo:'warn', texto:'⏳ Subiendo comprobante...' })
+        adjuntos = [await subirAdjunto(archivoPago, token)]
+      }
       // Insertar aviso en con_reclamos (con tipo especial de pago)
       const resp = await fetch('/api/portal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion: 'reclamo', token, prefijo: 'PAY', categoria: 'pago_informado',
           titulo: `Aviso de pago — ${coprop?.apellido_nombre}`,
-          descripcion: `PAGO INFORMADO POR PROPIETARIO:\nMonto: $${formPago.monto}\nFecha: ${formPago.fecha}\nMedio: ${formPago.medio||'No especificado'}\nComprobante: ${formPago.comprobante||'Sin comprobante adjunto'}\nObservaciones: ${formPago.obs||'—'}` }),
+          adjuntos,
+          descripcion: `PAGO INFORMADO POR PROPIETARIO:\nMonto: $${formPago.monto}\nFecha: ${formPago.fecha}\nMedio: ${formPago.medio||'No especificado'}\nComprobante: ${formPago.comprobante||'Sin referencia'}\nAdjunto: ${adjuntos ? 'Sí (ver en el sistema)' : 'No'}\nObservaciones: ${formPago.obs||'—'}` }),
       })
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok || data.error) throw new Error(data.error || 'error')
       setMsgPago({ tipo:'ok', texto:'✓ Aviso enviado al administrador. Se verificará su pago a la brevedad.' })
-      setFormPago(null)
+      setFormPago(null); setArchivoPago(null)
     } catch(e) {
       setMsgPago({ tipo:'error', texto:'Error al enviar: ' + e.message })
     }
@@ -952,6 +1028,15 @@ export default function Portal() {
                       onChange={e=>setFormPago(f=>({...f,obs:e.target.value}))}
                       style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db',
                         borderRadius:9, fontSize:13, boxSizing:'border-box', resize:'vertical' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>
+                      Comprobante {ADJUNTO_PAGO_OBLIGATORIO ? '*' : '(opcional)'} — imagen o PDF (máx. 4 MB)
+                    </div>
+                    <input type="file" accept="image/*,application/pdf"
+                      onChange={e=>setArchivoPago(e.target.files?.[0]||null)}
+                      style={{ width:'100%', fontSize:12, padding:'8px 0' }} />
+                    {archivoPago && <div style={{ fontSize:11, color:VD, marginTop:4 }}>📎 {archivoPago.name}</div>}
                   </div>
                   <div style={{ padding:'10px 12px', background:'#eff6ff', borderRadius:8, fontSize:11, color:'#1e40af' }}>
                     ℹ️ Los pagos realizados por Expensas Pagas o SIRO se acreditan automáticamente y no requieren aviso.
