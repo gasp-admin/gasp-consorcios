@@ -140,6 +140,16 @@ export default function Reclamos() {
     { l:'Urgentes',     v:reclamos.filter(r=>r.prioridad==='urgente').length,  c:RJ },
   ]
 
+  async function verAdjunto(path) {
+    try {
+      const { data, error } = await supabase.storage.from('consorcios-adjuntos').createSignedUrl(path, 300)
+      if (error || !data?.signedUrl) return setMsg({ tipo:'error', texto:'No se pudo abrir el adjunto: ' + (error?.message || 'sin URL') })
+      window.open(data.signedUrl, '_blank', 'noopener')
+    } catch (e) {
+      setMsg({ tipo:'error', texto:'No se pudo abrir el adjunto: ' + (e?.message || e) })
+    }
+  }
+
   if (detalle) return (
     <div>
       <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
@@ -156,6 +166,20 @@ export default function Reclamos() {
       <Card style={{ marginBottom:14 }}>
         <div style={{ fontSize:13, lineHeight:1.8, whiteSpace:'pre-wrap' }}>{detalle.descripcion || 'Sin descripción.'}</div>
       </Card>
+      {Array.isArray(detalle.adjuntos) && detalle.adjuntos.length > 0 && (
+        <Card style={{ marginBottom:14 }}>
+          <div style={{ fontWeight:600, color:AZ, marginBottom:8 }}>📎 Comprobantes adjuntos</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            {detalle.adjuntos.map((p, i) => (
+              <button key={i} type="button" onClick={() => verAdjunto(p)}
+                style={{ textAlign:'left', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:7,
+                  padding:'8px 12px', fontSize:12, color:AZ, cursor:'pointer' }}>
+                🔗 {String(p).split('/').pop()}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
       <Card style={{ marginBottom:14 }}>
         <div style={{ fontWeight:600, color:AZ, marginBottom:10 }}>Respuesta al copropietario</div>
         <textarea value={respuesta} onChange={e=>setRespuesta(e.target.value)}
