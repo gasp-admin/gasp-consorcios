@@ -479,6 +479,12 @@ export default function ConciliarPagos() {
   const conCuit = lineas.filter((l) => l.cuit).length
   const conNombre = lineas.filter((l) => l.nombre).length
 
+  // Líneas confirmables (con UF, no ignoradas ni ya confirmadas) para el "seleccionar todos".
+  const idsSeleccionables = lineasLote
+    .filter((l) => l.estado !== 'ignorada' && l.estado !== 'confirmada' && l.unidad_id)
+    .map((l) => l.id)
+  const todosSeleccionados = idsSeleccionables.length > 0 && idsSeleccionables.every((id) => sel.has(id))
+
   return (
     <div style={{ padding: 20, maxWidth: 1050, margin: '0 auto' }}>
       <h2 style={{ margin: 0, color: AZ, fontSize: 20 }}>🏦 Importar pagos del banco</h2>
@@ -619,7 +625,13 @@ export default function ConciliarPagos() {
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead style={{ position:'sticky', top:0, background:BG, zIndex:1 }}>
                 <tr>
-                  <th style={{ ...th, width:26 }}></th>
+                  <th style={{ ...th, width:26, textAlign:'center' }}>
+                    {idsSeleccionables.length > 0 && (
+                      <input type="checkbox" title="Seleccionar todas las confirmables"
+                        checked={todosSeleccionados}
+                        onChange={() => setSel(todosSeleccionados ? new Set() : new Set(idsSeleccionables))} />
+                    )}
+                  </th>
                   <th style={th}>Fecha</th><th style={th}>Importe</th><th style={th}>Ordenante</th>
                   <th style={th}>UF imputada</th><th style={th}>1er venc</th><th style={th}>2º venc</th><th style={th}>Confianza</th><th style={th}>Motivo</th>
                 </tr>
