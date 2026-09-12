@@ -208,6 +208,9 @@ export default function Portal() {
   const [archivoPago, setArchivoPago]     = useState(null)
 
   useEffect(() => { if (token) cargar(token) }, [token])
+  // Cargar la cta cte (EF get-cuenta-corriente) apenas se conoce la unidad: es la
+  // fuente única del saldo. El badge de estado se calcula de acá, no del detalle.
+  useEffect(() => { if (unidad?.id) cargarCtaCte(unidad.id) }, [unidad?.id]) // eslint-disable-line
 
   useEffect(() => {
     if (loading || !token) return
@@ -419,7 +422,13 @@ export default function Portal() {
     (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0)
     + (parseFloat(d.interes_mora)||0) - pagadoReal(d)
   )
-  const deudaReal = detOrdenados[0] ? saldoDetReal(detOrdenados[0]) : 0
+  // Fuente única del saldo: la cta cte de la EF (get-cuenta-corriente). El saldo
+  // corrido incluye la deuda arrastrada de períodos anteriores. Fallback al detalle
+  // del último período solo mientras la cta cte no cargó todavía.
+  const saldoCta = movsCta.length ? (movsCta[movsCta.length - 1].saldo || 0) : null
+  const deudaReal = saldoCta != null
+    ? Math.max(0, saldoCta)
+    : (detOrdenados[0] ? saldoDetReal(detOrdenados[0]) : 0)
   const estaAlDia = deudaReal <= 0.005
   const ultimoPago = cobranzas[0] || null
   const cbu    = cuentaBanco?.cbu   || consorcio?.cbu   || null
