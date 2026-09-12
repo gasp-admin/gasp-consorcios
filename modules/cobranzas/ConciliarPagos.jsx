@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
 import { SUPA_URL, AZ, GR, BG, VD } from '../../lib/config'
@@ -143,6 +143,10 @@ export default function ConciliarPagos() {
   const [lotes, setLotes] = useState([])               // lotes creados (uno por consorcio)
   const [loteConsorcioId, setLoteConsorcioId] = useState(null)
   const [consorciosById, setConsorciosById] = useState({})
+  // Desglose de una línea en varias UF (un pago que cubre 2+ unidades)
+  const [desgLine, setDesgLine] = useState(null)      // { id, importe, nombre }
+  const [desgRows, setDesgRows] = useState([])        // [{ unidad_id, monto }]
+  const [desglosando, setDesglosando] = useState(false)
 
   const esMulti = banco === 'roela_transf'
   const puedeCobrar = puede ? puede('cobrar') : true
@@ -418,6 +422,44 @@ export default function ConciliarPagos() {
     } catch (e) { setMsg({ t:'e', m:'Error: ' + e.message }) }
     setConfirmando(false)
   }
+
+  // ---- Desglose: partir una línea en varias UF ----
+  function abrirDesglose(l) {
+    setDesgLine({ id: l.id, importe: Number(l.importe), nombre: l.nombre_pagador })
+    setDesgRows([{ unidad_id: l.unidad_id || '', monto: '' }, { unidad_id: '', monto: '' }])
+    setMsg(null)
+  }
+  function cerrarDesglose() { setDesgLine(null); setDesgRows([]) }
+  function setDesgRow(i, campo, val) { setDesgRows((p) => p.map((r, idx) => (idx === i ? { ...r, [campo]: val } : r))) }
+  function addDesgRow() { setDesgRows((p) => [...p, { unidad_id: '', monto: '' }]) }
+  function delDesgRow(i) { setDesgRows((p) => p.filter((_, idx) => idx !== i)) }
+
+  async function confirmarDesglose() {
+    if (!desgLine) return
+    const imps = desgRows.filter((r) => r.unidad_id && Number(r.monto) > 0)
+      .map((r) => ({ unidad_id: r.unidad_id, monto: Math.round(Number(r.monto) * 100) / 100 }))
+    if (imps.length < 2) return setMsg({ t:'w', m:'El desglose necesita al menos 2 UF con importe.' })
+    const us = imps.map((r) => r.unidad_id)
+    if (new Set(us).size !== us.length) return setMsg({ t:'w', m:'Hay UF repetidas en el desglose.' })
+    const suma = Math.round(imps.reduce((a, r) => a + r.monto, 0) * 100)
+    const total = Math.round(desgLine.importe * 100)
+    if (suma !== total) return setMsg({ t:'w', m:`La suma ($${(suma / 100).toLocaleString('es-AR', { minimumFractionDigits: 2 })}) no coincide con el importe de la línea ($${(total / 100).toLocaleString('es-AR', { minimumFractionDigits: 2 })}).` })
+    setDesglosando(true); setMsg(null)
+    try {
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const r = await fetch(`${SUPA_URL}/functions/v1/confirmar-cobranza`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}` },
+        body: JSON.stringify({ lote_id: loteId, modo: 'desglose', line_id: desgLine.id, imputaciones: imps }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.ok) { setMsg({ t:'e', m:'Error al desglosar: ' + (d.error || '') }); setDesglosando(false); return }
+      setMsg({ t:'ok', m:`✓ Línea desglosada en ${d.cobranzas} UF.` })
+      cerrarDesglose()
+      await cargarLineasLote(loteId)
+    } catch (e) { setMsg({ t:'e', m:'Error: ' + e.message }) }
+    setDesglosando(false)
+  }
   const ufOpciones = Object.entries(ufMap)
     .map(([id, u]) => ({ id, nro: u.nro, label: `UF ${u.nro} — ${u.ape || 's/prop'}` }))
     .sort((a, b) => ((parseInt(a.nro,10)||999) - (parseInt(b.nro,10)||999)))
@@ -584,7 +626,8 @@ export default function ConciliarPagos() {
                   const coincide2 = pagar2 != null && Math.abs(pagar2 - Number(l.importe)) < 1
                   const rowBg = conf ? '#f0fdf4' : ign ? '#f9fafb' : '#fff'
                   return (
-                    <tr key={l.id} style={{ background:rowBg, opacity: ign ? 0.6 : 1 }}>
+                    <Fragment key={l.id}>
+                    <tr style={{ background:rowBg, opacity: ign ? 0.6 : 1 }}>
                       <td style={{ ...td, textAlign:'center' }}>
                         {editable && l.unidad_id ? <input type="checkbox" checked={sel.has(l.id)} onChange={() => toggleSel(l.id)} /> : conf ? '\u2713' : ''}
                       </td>
@@ -594,24 +637,68 @@ export default function ConciliarPagos() {
                       <td style={td}>
                         {ign ? <span style={{ color:GR }}>\u2014 ignorado \u2014</span>
                           : conf ? <span style={{ color:'#15803d', fontWeight:600 }}>UF {uf?.nro} \u2014 {uf?.ape}</span>
-                          : <select value={l.unidad_id || ''} onChange={(e) => cambiarUF(l.id, e.target.value)}
-                              style={{ padding:'4px 6px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, maxWidth:220, background:'#fff' }}>
-                              <option value="">\u2014 sin imputar \u2014</option>
-                              {ufOpciones.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-                            </select>}
+                          : <>
+                              <select value={l.unidad_id || ''} onChange={(e) => cambiarUF(l.id, e.target.value)}
+                                style={{ padding:'4px 6px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, maxWidth:220, background:'#fff' }}>
+                                <option value="">\u2014 sin imputar \u2014</option>
+                                {ufOpciones.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                              </select>
+                              <div><button onClick={() => abrirDesglose(l)}
+                                style={{ background:'none', border:'none', color:AZ, fontSize:11, cursor:'pointer', padding:'2px 0 0', textDecoration:'underline' }}>
+                                \u21c4 Desglosar en varias UF</button></div>
+                            </>}
                       </td>
                       <td style={{ ...td, textAlign:'right', whiteSpace:'nowrap', fontSize:11, color: pagar==null ? GR : coincide ? '#15803d' : '#c07d10', fontWeight: coincide ? 700 : 400 }}>{pagar != null ? '$'+pagar.toLocaleString('es-AR',{minimumFractionDigits:2}) : '\u2014'}</td>
                       <td style={{ ...td, textAlign:'right', whiteSpace:'nowrap', fontSize:11, color: pagar2==null ? GR : coincide2 ? '#15803d' : '#c07d10', fontWeight: coincide2 ? 700 : 400 }}>{pagar2 != null ? '$'+pagar2.toLocaleString('es-AR',{minimumFractionDigits:2}) : '\u2014'}</td>
                       <td style={{ ...td, color:cColor, fontWeight:600, fontSize:12 }}>{conf ? 'confirmada' : ign ? '\u2014' : (l.confianza_matching || (l.estado==='sin_match' ? 'sin match' : '\u2014'))}</td>
                       <td style={{ ...td, fontSize:11, color: (l.motivo_pendiente||'').includes('distinto') ? '#c2410c' : GR }}>{l.motivo_pendiente}</td>
                     </tr>
+                    {desgLine && desgLine.id === l.id && (() => {
+                      const suma = desgRows.reduce((a, r) => a + (Number(r.monto) || 0), 0)
+                      const dif = Math.round((desgLine.importe - suma) * 100) / 100
+                      const ok = Math.abs(dif) < 0.005 && desgRows.filter((r) => r.unidad_id && Number(r.monto) > 0).length >= 2
+                      return (
+                        <tr>
+                          <td colSpan={9} style={{ background:'#f8fafc', padding:'12px 16px', borderBottom:'2px solid '+AZ }}>
+                            <div style={{ fontSize:13, fontWeight:700, color:AZ, marginBottom:8 }}>
+                              Desglosar ${desgLine.importe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}{desgLine.nombre ? ' \u00b7 ' + desgLine.nombre : ''} en varias UF
+                            </div>
+                            {desgRows.map((r, ri) => (
+                              <div key={ri} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6 }}>
+                                <select value={r.unidad_id} onChange={(e) => setDesgRow(ri, 'unidad_id', e.target.value)}
+                                  style={{ padding:'5px 8px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, minWidth:240, background:'#fff' }}>
+                                  <option value="">\u2014 UF \u2014</option>
+                                  {ufOpciones.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                                </select>
+                                <input type="number" step="0.01" value={r.monto} placeholder="importe"
+                                  onChange={(e) => setDesgRow(ri, 'monto', e.target.value)}
+                                  style={{ padding:'5px 8px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, width:130, textAlign:'right' }} />
+                                {desgRows.length > 2 && <button onClick={() => delDesgRow(ri)} style={{ border:'none', background:'none', color:'#dc2626', cursor:'pointer', fontSize:15 }}>\u2715</button>}
+                              </div>
+                            ))}
+                            <div style={{ display:'flex', gap:12, alignItems:'center', marginTop:8, flexWrap:'wrap' }}>
+                              <button onClick={addDesgRow} style={{ border:'1px dashed #94a3b8', background:'#fff', color:AZ, borderRadius:6, padding:'4px 10px', fontSize:12, cursor:'pointer' }}>+ Agregar UF</button>
+                              <span style={{ fontSize:12, color: ok ? '#15803d' : '#c07d10', fontWeight:600 }}>
+                                Suma: ${suma.toLocaleString('es-AR', { minimumFractionDigits: 2 })} {Math.abs(dif) < 0.005 ? '\u2713 coincide' : `\u00b7 falta $${dif.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`}
+                              </span>
+                              <button onClick={confirmarDesglose} disabled={desglosando || !ok}
+                                style={{ padding:'7px 16px', background: ok ? VD : '#cbd5e1', color:'#fff', border:'none', borderRadius:8, fontSize:13, fontWeight:700, cursor: ok ? 'pointer' : 'default' }}>
+                                {desglosando ? 'Confirmando\u2026' : 'Confirmar desglose'}
+                              </button>
+                              <button onClick={cerrarDesglose} style={{ padding:'7px 14px', background:'none', border:'1px solid #d1d5db', borderRadius:8, fontSize:13, cursor:'pointer' }}>Cancelar</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })()}
+                    </Fragment>
                   )
                 })}
               </tbody>
             </table>
           </div>
           <p style={{ fontSize:12, color:GR, marginTop:10 }}>
-            Ajust\u00e1 la UF donde haga falta. <strong>Confirmar</strong> crea el recibo en cada UF, imputa a la expensa m\u00e1s reciente por el importe completo y aprende la regla por CUIT.
+            Ajust\u00e1 la UF donde haga falta. <strong>Confirmar</strong> crea el recibo en cada UF, imputa a la expensa m\u00e1s reciente por el importe completo y aprende la regla por CUIT. Si un pago cubre 2+ unidades, us\u00e1 <strong>Desglosar</strong> para repartirlo (la suma debe dar el importe exacto).
           </p>
         </div>
       )}
