@@ -338,16 +338,27 @@ export default function ConciliarPagos() {
   async function cargarUFs(cid) {
     const consId = cid || consorcioActivo?.id
     if (!consId) { setUfMap({}); return }
-    const [{ data: uni }, { data: props }, { data: expR }, { data: consR }] = await Promise.all([
+    // Expensa de referencia para el "a pagar": la última CERRADA (donde vive la deuda),
+    // NO la más reciente (que suele ser el período ABIERTO sin detalle → daría "—").
+    // Consistente con la EF confirmar-cobranza (imputa a la última cerrada).
+    let { data: expCerr } = await supabase.from('con_expensas')
+      .select('id, periodo').eq('consorcio_id', consId).eq('estado', 'cerrada')
+      .order('periodo', { ascending: false }).limit(1)
+    let expRow = expCerr?.[0] || null
+    if (!expRow) {
+      const { data: expAny } = await supabase.from('con_expensas')
+        .select('id, periodo').eq('consorcio_id', consId).order('periodo', { ascending: false }).limit(1)
+      expRow = expAny?.[0] || null
+    }
+    const [{ data: uni }, { data: props }, { data: consR }] = await Promise.all([
       supabase.from('con_unidades').select('id, nro_uf_pdf, numero, propietario_id').eq('consorcio_id', consId),
       supabase.from('con_copropietarios').select('id, apellido_nombre').eq('consorcio_id', consId),
-      supabase.from('con_expensas').select('id, periodo').eq('consorcio_id', consId).order('periodo', { ascending: false }).limit(1),
       supabase.from('con_consorcios').select('fecha_corte_nativo, interes_mora_2').eq('id', consId).maybeSingle(),
     ])
     const pm = {}; for (const p of (props || [])) pm[p.id] = p.apellido_nombre
     const tp = {}
-    const expId = expR?.[0]?.id
-    const ultPeriodo = expR?.[0]?.periodo
+    const expId = expRow?.id
+    const ultPeriodo = expRow?.periodo
     const corte = consR?.fecha_corte_nativo || null
     // Si la última expensa es ANTERIOR al corte nativo, su detalle es historia (puede estar corrupto
     // en consorcios migrados): el total a pagar se toma de la apertura del corte (= cta cte).
