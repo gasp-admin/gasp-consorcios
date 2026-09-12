@@ -664,7 +664,7 @@ export default function ConciliarPagos() {
                               Desglosar ${desgLine.importe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}{desgLine.nombre ? ' \u00b7 ' + desgLine.nombre : ''} en varias UF
                             </div>
                             {desgRows.map((r, ri) => (
-                              <div key={ri} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6 }}>
+                              <div key={ri} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6, flexWrap:'wrap' }}>
                                 <select value={r.unidad_id} onChange={(e) => setDesgRow(ri, 'unidad_id', e.target.value)}
                                   style={{ padding:'5px 8px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, minWidth:240, background:'#fff' }}>
                                   <option value="">\u2014 UF \u2014</option>
@@ -673,6 +673,23 @@ export default function ConciliarPagos() {
                                 <input type="number" step="0.01" value={r.monto} placeholder="importe"
                                   onChange={(e) => setDesgRow(ri, 'monto', e.target.value)}
                                   style={{ padding:'5px 8px', border:'1px solid #d1d5db', borderRadius:6, fontSize:12, width:130, textAlign:'right' }} />
+                                {(() => {
+                                  const u = r.unidad_id ? ufMap[r.unidad_id] : null
+                                  if (!u) return null
+                                  const p1 = u.pagar, p2 = u.pagar2
+                                  if (p1 == null && p2 == null) return <span style={{ fontSize:11, color:GR }}>sin deuda registrada</span>
+                                  return (
+                                    <span style={{ fontSize:11, color:GR, display:'inline-flex', gap:10, alignItems:'center' }}>
+                                      a pagar:
+                                      {p1 != null && <button type="button" onClick={() => setDesgRow(ri, 'monto', String(p1))} title="Usar este importe"
+                                        style={{ border:'none', background:'none', color:AZ, cursor:'pointer', fontSize:11, textDecoration:'underline', padding:0 }}>
+                                        1er venc ${p1.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</button>}
+                                      {p2 != null && <button type="button" onClick={() => setDesgRow(ri, 'monto', String(p2))} title="Usar este importe"
+                                        style={{ border:'none', background:'none', color:'#c07d10', cursor:'pointer', fontSize:11, textDecoration:'underline', padding:0 }}>
+                                        2\u00ba ${p2.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</button>}
+                                    </span>
+                                  )
+                                })()}
                                 {desgRows.length > 2 && <button onClick={() => delDesgRow(ri)} style={{ border:'none', background:'none', color:'#dc2626', cursor:'pointer', fontSize:15 }}>\u2715</button>}
                               </div>
                             ))}
