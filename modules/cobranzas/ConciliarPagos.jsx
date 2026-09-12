@@ -401,7 +401,7 @@ export default function ConciliarPagos() {
       })
       const d = await r.json().catch(() => ({}))
       if (!r.ok || !d.ok) { setMsg({ t:'e', m:'Error al conciliar: ' + (d.error || '') }); setConciliando(false); return }
-      setMsg({ t:'ok', m:`Conciliado: ${d.procesadas} sugeridas${d.por_ia?` (${d.por_ia} por IA)`:''}, ${d.sin_match||0} sin coincidencia.` })
+      setMsg({ t: d.duplicados ? 'w' : 'ok', m:`Conciliado: ${d.procesadas} sugeridas${d.por_ia?` (${d.por_ia} por IA)`:''}, ${d.sin_match||0} sin coincidencia${d.duplicados?` · \u26a0 ${d.duplicados} ya acreditada(s) — duplicado`:''}.` })
       await cargarLineasLote(loteId)
     } catch (e) { setMsg({ t:'e', m:'Error: ' + e.message }) }
     setConciliando(false)
@@ -647,10 +647,11 @@ export default function ConciliarPagos() {
                   const pagar2 = uf && uf.pagar2 != null ? uf.pagar2 : null
                   const coincide = pagar != null && Math.abs(pagar - Number(l.importe)) < 1
                   const coincide2 = pagar2 != null && Math.abs(pagar2 - Number(l.importe)) < 1
-                  const rowBg = conf ? '#f0fdf4' : ign ? '#f9fafb' : '#fff'
+                  const dup = l.confianza_matching === 'duplicado'
+                  const rowBg = dup ? '#fef3c7' : conf ? '#f0fdf4' : ign ? '#f9fafb' : '#fff'
                   return (
                     <Fragment key={l.id}>
-                    <tr style={{ background:rowBg, opacity: ign ? 0.6 : 1 }}>
+                    <tr style={{ background:rowBg, opacity: (ign && !dup) ? 0.6 : 1 }}>
                       <td style={{ ...td, textAlign:'center' }}>
                         {editable && l.unidad_id ? <input type="checkbox" checked={sel.has(l.id)} onChange={() => toggleSel(l.id)} /> : conf ? '\u2713' : ''}
                       </td>
