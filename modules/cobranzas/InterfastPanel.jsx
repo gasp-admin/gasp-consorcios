@@ -168,9 +168,10 @@ export default function InterfastPanel() {
   }
   function parseFecha(v) {
     if (v instanceof Date && !isNaN(v)) { const z = new Date(v.getTime() - v.getTimezoneOffset() * 60000); return z.toISOString().slice(0, 10) }
+    if (typeof v === 'number' && v > 20000 && v < 90000) { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000); return d.toISOString().slice(0, 10) }
     const s = String(v).trim()
-    let m = /(\d{4})-(\d{2})-(\d{2})/.exec(s); if (m) return `${m[1]}-${m[2]}-${m[3]}`
-    m = /(\d{2})\/(\d{2})\/(\d{4})/.exec(s); if (m) return `${m[3]}-${m[2]}-${m[1]}`
+    let m = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s); if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`
+    m = /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/.exec(s); if (m) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return `${y}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}` }
     return ''
   }
   function detectarBanco(aoa) {
@@ -191,7 +192,7 @@ export default function InterfastPanel() {
     const cuit = (cCuit || '').replace(/\D/g, '')
     const out = { nombre: file.name, banco: 'desconocido', single: true, consorcio_id: '', lineas: [], total: 0 }
     for (const sh of wb.SheetNames) {
-      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sh], { header: 1, raw: false, defval: '' })
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sh], { header: 1, raw: true, defval: '' })
       if (!aoa.length) continue
       out.banco = detectarBanco(aoa)
       out.single = out.banco !== 'roela'
