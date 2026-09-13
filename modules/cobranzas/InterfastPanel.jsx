@@ -29,6 +29,7 @@ export default function InterfastPanel() {
   const [cHasta, setCHasta] = useState(new Date().toISOString().slice(0, 10))
   const [cTodos, setCTodos] = useState(true)
   const [cSoloProb, setCSoloProb] = useState(true)
+  const [cVista, setCVista] = useState('pagos')
   const [concil, setConcil] = useState(null)
 
   useEffect(() => { if (consorcioId) { cargarCfg(); cargarUfs(); cargarPubs() } }, [consorcioId])
@@ -110,17 +111,26 @@ export default function InterfastPanel() {
     setMsg({ t: 'ok', x: `✓ ${c.nombre}: imputados ${d.imputados} · ya estaban ${d.ya_imputados} · sin UF ${d.sin_match}` })
     conciliar()
   }
+  function descargarCSV(rows, sufijo) {
+    const csv = rows.map(r => r.map(x => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\n')
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `${sufijo}_${cDesde}_${cHasta}.csv`; a.click(); URL.revokeObjectURL(url)
+  }
   function exportCSV() {
     if (!concil) return
+    if (cVista === 'depositos') {
+      const rows = [['Consorcio', 'Fecha acreditación', 'Pagos', 'Bruto', 'Comisión', 'Neto depositado']]
+      for (const c of concil.consorcios || []) for (const d of c.depositos || []) rows.push([c.nombre, d.fecha, d.cant, String(d.bruto).replace('.', ','), String(d.comision).replace('.', ','), String(d.neto).replace('.', ',')])
+      descargarCSV(rows, 'depositos_interfast')
+      return
+    }
     const rows = [['Consorcio', 'Fecha', 'UF', 'CodCliente', 'Canal', 'Monto', 'Estado', 'IdPago']]
     for (const c of concil.consorcios || []) {
       for (const p of c.pagos || []) rows.push([c.nombre, p.fecha, p.uf_label, p.codCliente, p.canal || '', String(p.monto).replace('.', ','), p.estado, p.idPago])
       for (const hg of c.huerfanos_gasp || []) rows.push([c.nombre, hg.fecha, hg.uf_label, '', '', String(hg.monto).replace('.', ','), 'huerfano_gasp', hg.idPago])
     }
-    const csv = rows.map(r => r.map(x => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\n')
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `conciliacion_interfast_${cDesde}_${cHasta}.csv`; a.click(); URL.revokeObjectURL(url)
+    descargarCSV(rows, 'conciliacion_interfast')
   }
 
   const card = (label, cant, monto, color) => (
@@ -152,6 +162,7 @@ export default function InterfastPanel() {
     ...(c.huerfanos_gasp || []).map(hg => ({ consorcio: c.nombre, fecha: hg.fecha, uf_label: hg.uf_label, canal: '', monto: hg.monto, estado: 'huerfano_gasp', idPago: hg.idPago })),
   ]) : []
   const detalleVis = detalle.filter(d => !cSoloProb || d.estado !== 'conciliado').sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0))
+  const depositos = concil ? (concil.consorcios || []).flatMap(c => (c.depositos || []).map(d => ({ consorcio: c.nombre, ...d }))).sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : (a.consorcio < b.consorcio ? -1 : 1))) : []
 
   return (
     <div style={{ maxWidth: 900 }}>
@@ -283,6 +294,46 @@ export default function InterfastPanel() {
         </div>
 
         {concil && (
+          <div style={{ display: 'flex', gap: 6, margin: '12px 0 4px' }}>
+            <button onClick={() => setCVista('pagos')} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid ' + (cVista === 'pagos' ? AZ : '#d1d5db'), background: cVista === 'pagos' ? AZ : '#fff', color: cVista === 'pagos' ? '#fff' : '#374151', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Pagos (imputación)</button>
+            <button onClick={() => setCVista('depositos')} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid ' + (cVista === 'depositos' ? AZ : '#d1d5db'), background: cVista === 'depositos' ? AZ : '#fff', color: cVista === 'depositos' ? '#fff' : '#374151', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Depósitos (neto a cuenta)</button>
+          </div>
+        )}
+
+        {concil && cVista === 'depositos' && (
+          <div>
+            <div style={{ fontSize: 12, color: GR, margin: '8px 0 12px' }}>Neto depositado = importe pagado − comisión Interfast, agrupado por <b>fecha de acreditación al consorcio</b>. Es lo que cae en la cuenta bancaria de cada consorcio; concilia contra el extracto.</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '0 0 14px' }}>
+              {card('Bruto cobrado', concil.totales?.rendido_cant || 0, concil.totales?.bruto_total || 0, '#111')}
+              {card('Comisión Interfast', (concil.totales?.bruto_total ? ((concil.totales.comision_total / concil.totales.bruto_total) * 100).toFixed(2) + '%' : '—'), concil.totales?.comision_total || 0, RJ)}
+              {card('Neto depositado', '', concil.totales?.neto_total || 0, VD)}
+            </div>
+            <div style={{ maxHeight: 360, overflow: 'auto', border: '1px solid #eee', borderRadius: 8 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead><tr style={{ background: '#f8fafc' }}>
+                  <th style={{ padding: 6, textAlign: 'left' }}>Fecha acred.</th>
+                  {cTodos && <th style={{ padding: 6, textAlign: 'left' }}>Consorcio</th>}
+                  <th style={{ padding: 6, textAlign: 'center' }}>Pagos</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>Bruto</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>Comisión</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>Neto depositado</th>
+                </tr></thead>
+                <tbody>{depositos.length ? depositos.map((d, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: 6 }}>{d.fecha}</td>
+                    {cTodos && <td style={{ padding: 6 }}>{d.consorcio}</td>}
+                    <td style={{ padding: 6, textAlign: 'center' }}>{d.cant}</td>
+                    <td style={{ padding: 6, textAlign: 'right' }}>{fmtN(d.bruto)}</td>
+                    <td style={{ padding: 6, textAlign: 'right', color: '#991b1b' }}>{fmtN(d.comision)}</td>
+                    <td style={{ padding: 6, textAlign: 'right', color: '#166534', fontWeight: 600 }}>{fmtN(d.neto)}</td>
+                  </tr>
+                )) : <tr><td colSpan={cTodos ? 6 : 5} style={{ padding: 10, textAlign: 'center', color: GR }}>Sin depósitos en el rango.</td></tr>}</tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {concil && cVista === 'pagos' && (
           <div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '14px 0' }}>
               {card('Rendido IF', concil.totales?.rendido_cant || 0, concil.totales?.rendido_total || 0, '#111')}
