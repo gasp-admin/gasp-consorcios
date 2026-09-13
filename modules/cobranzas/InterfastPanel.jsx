@@ -31,8 +31,24 @@ export default function InterfastPanel() {
   const [cSoloProb, setCSoloProb] = useState(true)
   const [cVista, setCVista] = useState('pagos')
   const [concil, setConcil] = useState(null)
+  const [cCuit, setCCuit] = useState('30716248794')
+  const [cArchivos, setCArchivos] = useState([])
+  const [cuentasMap, setCuentasMap] = useState(null)
 
   useEffect(() => { if (consorcioId) { cargarCfg(); cargarUfs(); cargarPubs() } }, [consorcioId])
+  useEffect(() => { cargarCuentas() }, [])
+
+  async function cargarCuentas() {
+    const [cb, cr] = await Promise.all([
+      supabase.from('con_cuentas_banco').select('consorcio_id, nro_cuenta, cbu'),
+      supabase.from('con_cuenta_roela').select('consorcio_id, cuenta, ignorar'),
+    ])
+    const m = new Map()
+    const add = (k, cid) => { if (!k || !cid) return; const kk = normCuenta(k); if (!m.has(kk)) m.set(kk, new Set()); m.get(kk).add(cid) }
+    for (const r of cb.data || []) { add(r.nro_cuenta, r.consorcio_id); add(r.cbu, r.consorcio_id) }
+    for (const r of cr.data || []) { if (!r.ignorar) add(r.cuenta, r.consorcio_id) }
+    setCuentasMap(m)
+  }
 
   async function cargarCfg() {
     const { data } = await supabase.from('con_config_cobranza').select('*').eq('consorcio_id', consorcioId).maybeSingle()
@@ -119,6 +135,13 @@ export default function InterfastPanel() {
   }
   function exportCSV() {
     if (!concil) return
+    if (cVista === 'banco') {
+      const { filas } = computeBanco()
+      const rows = [['Consorcio', 'Fecha acreditación', 'Neto esperado (IF)', 'Real banco (RAPIFAST)', 'Diferencia', 'Estado']]
+      for (const f of filas) rows.push([f.nombre, f.fecha, String(f.esp).replace('.', ','), String(f.real).replace('.', ','), String(f.dif).replace('.', ','), f.est])
+      descargarCSV(rows, 'conciliacion_deposito_interfast')
+      return
+    }
     if (cVista === 'depositos') {
       const rows = [['Consorcio', 'Fecha acreditación', 'Pagos', 'Bruto', 'Comisión', 'Neto depositado']]
       for (const c of concil.consorcios || []) for (const d of c.depositos || []) rows.push([c.nombre, d.fecha, d.cant, String(d.bruto).replace('.', ','), String(d.comision).replace('.', ','), String(d.neto).replace('.', ',')])
@@ -131,6 +154,114 @@ export default function InterfastPanel() {
       for (const hg of c.huerfanos_gasp || []) rows.push([c.nombre, hg.fecha, hg.uf_label, '', '', String(hg.monto).replace('.', ','), 'huerfano_gasp', hg.idPago])
     }
     descargarCSV(rows, 'conciliacion_interfast')
+  }
+
+  // ── Conciliar banco (depósitos Interfast/RAPIFAST contra el neto) ──
+  function normCuenta(k) { return String(k || '').trim().replace(/\s+/g, '').toUpperCase() }
+  function parseNum(v) {
+    if (typeof v === 'number') return v
+    let s = String(v).trim().replace(/[^\d.,-]/g, '')
+    if (!s) return 0
+    if (s.includes(',') && s.includes('.')) { if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.'); else s = s.replace(/,/g, '') }
+    else if (s.includes(',')) s = s.replace(',', '.')
+    const n = parseFloat(s); return isNaN(n) ? 0 : n
+  }
+  function parseFecha(v) {
+    if (v instanceof Date && !isNaN(v)) { const z = new Date(v.getTime() - v.getTimezoneOffset() * 60000); return z.toISOString().slice(0, 10) }
+    const s = String(v).trim()
+    let m = /(\d{4})-(\d{2})-(\d{2})/.exec(s); if (m) return `${m[1]}-${m[2]}-${m[3]}`
+    m = /(\d{2})\/(\d{2})\/(\d{4})/.exec(s); if (m) return `${m[3]}-${m[2]}-${m[1]}`
+    return ''
+  }
+  function detectarBanco(aoa) {
+    const txt = aoa.slice(0, 5).map(r => r.join(' ')).join(' ').toUpperCase()
+    if (txt.includes('TRANSFERENCIAS RECIBIDAS') || txt.includes('CUENTA NRO')) return 'roela'
+    if (txt.includes('DESCRIPCIÓN EXTENDIDA') || txt.includes('DESCRIPCION EXTENDIDA') || txt.includes('PROVINCIA')) return 'provincia'
+    if (txt.includes('LEYENDAS ADICIONALES') || txt.includes('CRÉDITOS') || txt.includes('CREDITOS')) return 'galicia'
+    return 'generico'
+  }
+  async function loadXLSX() {
+    if (window.XLSX) return window.XLSX
+    await new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'; s.onload = res; s.onerror = () => rej(new Error('No se pudo cargar el lector de Excel')); document.head.appendChild(s) })
+    return window.XLSX
+  }
+  async function parseExtracto(file) {
+    const XLSX = await loadXLSX()
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true })
+    const cuit = (cCuit || '').replace(/\D/g, '')
+    const out = { nombre: file.name, banco: 'desconocido', single: true, consorcio_id: '', lineas: [], total: 0 }
+    for (const sh of wb.SheetNames) {
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sh], { header: 1, raw: false, defval: '' })
+      if (!aoa.length) continue
+      out.banco = detectarBanco(aoa)
+      out.single = out.banco !== 'roela'
+      let hi = aoa.findIndex(r => r.some(c => /importe|cr[eé]ditos/i.test(String(c))))
+      if (hi < 0) hi = 0
+      const heads = aoa[hi].map(c => String(c).toLowerCase().trim())
+      const findCol = (...names) => { for (const n of names) { const i = heads.findIndex(h => h.includes(n)); if (i >= 0) return i } return -1 }
+      const iImp = findCol('importe', 'créditos', 'creditos')
+      const iFAcr = findCol('fecha acred')
+      const iF = iFAcr >= 0 ? iFAcr : findCol('fecha')
+      const iCuit = findCol('cuit')
+      let seccion = ''
+      for (let r = hi + 1; r < aoa.length; r++) {
+        const row = aoa[r]; const joined = row.join(' ')
+        const ms = /cuenta\s*nro\.?:\s*([0-9]+\/[0-9])/i.exec(joined)
+        if (ms) { seccion = ms[1]; continue }
+        const digits = joined.replace(/\D/g, '')
+        const esIF = (cuit && ((iCuit >= 0 && String(row[iCuit]).replace(/\D/g, '').includes(cuit)) || digits.includes(cuit))) || /rapifast/i.test(joined)
+        if (!esIF) continue
+        const importe = parseNum(iImp >= 0 ? row[iImp] : '')
+        const fecha = parseFecha(iF >= 0 ? row[iF] : '')
+        if (!(importe > 0) || !fecha) continue
+        out.lineas.push({ cuenta: seccion || null, fecha, importe })
+        out.total = Math.round((out.total + importe) * 100) / 100
+      }
+      if (out.lineas.length) break
+    }
+    return out
+  }
+  async function onFiles(files) {
+    setBusy('banco'); setMsg(null)
+    try {
+      const arr = []
+      for (const f of Array.from(files)) arr.push(await parseExtracto(f))
+      setCArchivos(prev => [...prev, ...arr])
+      const sinIF = arr.filter(a => !a.lineas.length).map(a => a.nombre)
+      if (sinIF.length) setMsg({ t: 'w', x: `Sin líneas de Interfast (CUIT ${cCuit}) en: ${sinIF.join(', ')}` })
+    } catch (e) { setMsg({ t: 'e', x: 'Error leyendo extracto: ' + e.message }) }
+    finally { setBusy('') }
+  }
+  function ruteaLinea(arch, ln) {
+    if (arch.single) return arch.consorcio_id || null
+    if (!ln.cuenta || !cuentasMap) return null
+    const cand = [...(cuentasMap.get(normCuenta(ln.cuenta)) || [])]
+    const activos = new Set((concil?.consorcios || []).map(c => c.consorcio_id))
+    const f = cand.filter(c => activos.has(c))
+    return f.length === 1 ? f[0] : (cand.length === 1 ? cand[0] : null)
+  }
+  function computeBanco() {
+    const nombreCid = new Map(); const espMap = new Map()
+    for (const c of (concil?.consorcios || [])) { nombreCid.set(c.consorcio_id, c.nombre); for (const d of c.depositos || []) espMap.set(c.consorcio_id + '|' + d.fecha, d.neto) }
+    const realMap = new Map(); let sinRuteo = 0
+    for (const arch of cArchivos) for (const ln of arch.lineas) {
+      const cid = ruteaLinea(arch, ln); if (!cid) { sinRuteo++; continue }
+      const k = cid + '|' + ln.fecha
+      realMap.set(k, Math.round(((realMap.get(k) || 0) + ln.importe) * 100) / 100)
+    }
+    const claves = new Set([...espMap.keys(), ...realMap.keys()])
+    const filas = [...claves].map(k => {
+      const [cid, fecha] = k.split('|')
+      const esp = espMap.get(k) || 0, real = realMap.get(k) || 0
+      const dif = Math.round((real - esp) * 100) / 100
+      let est = 'conciliado'
+      if (esp > 0 && real === 0) est = 'falta_banco'
+      else if (esp === 0 && real > 0) est = 'extra_banco'
+      else if (Math.abs(dif) > 0.02) est = 'diferencia'
+      return { cid, nombre: nombreCid.get(cid) || cid, fecha, esp, real, dif, est }
+    }).sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : (a.nombre < b.nombre ? -1 : 1)))
+    const tot = filas.reduce((s, f) => ({ esp: s.esp + f.esp, real: s.real + f.real, ok: s.ok + (f.est === 'conciliado' ? 1 : 0) }), { esp: 0, real: 0, ok: 0 })
+    return { filas, esp: Math.round(tot.esp * 100) / 100, real: Math.round(tot.real * 100) / 100, ok: tot.ok, sinRuteo }
   }
 
   const card = (label, cant, monto, color) => (
@@ -147,6 +278,9 @@ export default function InterfastPanel() {
       sin_match_uf: { bg: '#ffedd5', c: '#9a3412', t: 'Sin match UF' },
       monto_cero: { bg: '#f1f5f9', c: '#475569', t: 'Monto 0' },
       huerfano_gasp: { bg: '#fef9c3', c: '#854d0e', t: 'Huérfano GASP' },
+      falta_banco: { bg: '#fee2e2', c: '#991b1b', t: 'Falta en banco' },
+      extra_banco: { bg: '#fef9c3', c: '#854d0e', t: 'Extra en banco' },
+      diferencia: { bg: '#ffedd5', c: '#9a3412', t: 'Diferencia' },
     })[est] || { bg: '#f1f5f9', c: '#475569', t: est }
     return <span style={{ background: m.bg, color: m.c, padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>{m.t}</span>
   }
@@ -297,6 +431,7 @@ export default function InterfastPanel() {
           <div style={{ display: 'flex', gap: 6, margin: '12px 0 4px' }}>
             <button onClick={() => setCVista('pagos')} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid ' + (cVista === 'pagos' ? AZ : '#d1d5db'), background: cVista === 'pagos' ? AZ : '#fff', color: cVista === 'pagos' ? '#fff' : '#374151', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Pagos (imputación)</button>
             <button onClick={() => setCVista('depositos')} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid ' + (cVista === 'depositos' ? AZ : '#d1d5db'), background: cVista === 'depositos' ? AZ : '#fff', color: cVista === 'depositos' ? '#fff' : '#374151', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Depósitos (neto a cuenta)</button>
+            <button onClick={() => setCVista('banco')} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid ' + (cVista === 'banco' ? AZ : '#d1d5db'), background: cVista === 'banco' ? AZ : '#fff', color: cVista === 'banco' ? '#fff' : '#374151', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Conciliar banco</button>
           </div>
         )}
 
@@ -332,6 +467,72 @@ export default function InterfastPanel() {
             </div>
           </div>
         )}
+
+        {concil && cVista === 'banco' && (() => {
+          const banco = computeBanco()
+          const difTot = Math.round((banco.real - banco.esp) * 100) / 100
+          return (
+            <div>
+              <div style={{ fontSize: 12, color: GR, margin: '8px 0 12px' }}>Cruza el <b>neto que Interfast informa</b> (por día de acreditación) contra los <b>créditos de RAPIFAST</b> (CUIT Interfast) en el extracto de la cuenta de cada consorcio. Subí el/los extractos que bajás del banco. No se imputa nada; es control de tesorería.</div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10 }}>
+                <div><label style={lbl}>CUIT Interfast</label><input style={{ ...inp, width: 150 }} value={cCuit} onChange={e => setCCuit(e.target.value)} /></div>
+                <label style={{ ...btn(AZ, busy === 'banco'), display: 'inline-block' }}>{busy === 'banco' ? 'Leyendo…' : 'Subir extractos'}
+                  <input type="file" accept=".xls,.xlsx" multiple style={{ display: 'none' }} disabled={B} onChange={e => { onFiles(e.target.files); e.target.value = '' }} />
+                </label>
+                {cArchivos.length > 0 && <button style={btn(GR, false)} disabled={B} onClick={() => setCArchivos([])}>Limpiar</button>}
+                {banco.filas.length > 0 && <button style={btn(GR, false)} disabled={B} onClick={exportCSV}>Exportar CSV</button>}
+              </div>
+
+              {cArchivos.map((a, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, padding: '6px 8px', border: '1px solid #eef2f7', borderRadius: 8, marginBottom: 6 }}>
+                  <span>📄 {a.nombre}</span>
+                  <span style={{ color: GR }}>· {a.banco} · {a.lineas.length} líneas IF · {fmtN(a.total)}</span>
+                  {a.single && (
+                    <select style={{ ...inp, width: 'auto', padding: '4px 8px' }} value={a.consorcio_id || ''} onChange={e => setCArchivos(prev => prev.map((x, j) => j === i ? { ...x, consorcio_id: e.target.value } : x))}>
+                      <option value="">— Asignar consorcio —</option>
+                      {(concil?.consorcios || []).map(c => <option key={c.consorcio_id} value={c.consorcio_id}>{c.nombre}</option>)}
+                    </select>
+                  )}
+                  <button style={{ ...btn(RJ, false), padding: '4px 8px' }} onClick={() => setCArchivos(prev => prev.filter((_, j) => j !== i))}>✕</button>
+                </div>
+              ))}
+
+              {cArchivos.length > 0 && (
+                <div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '12px 0' }}>
+                    {card('Neto esperado (IF)', banco.filas.filter(f => f.esp > 0).length, banco.esp, '#111')}
+                    {card('Real en banco', '', banco.real, VD)}
+                    {card('Diferencia', '', difTot, Math.abs(difTot) > 0.02 ? RJ : VD)}
+                    {card('Días conciliados', banco.ok, 0, VD)}
+                  </div>
+                  {banco.sinRuteo > 0 && <div style={{ fontSize: 12, color: '#9a3412', marginBottom: 8 }}>⚠ {banco.sinRuteo} línea(s) de Interfast sin poder rutear a un consorcio (asigná el consorcio del archivo, o revisá la cuenta).</div>}
+                  <div style={{ maxHeight: 360, overflow: 'auto', border: '1px solid #eee', borderRadius: 8 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead><tr style={{ background: '#f8fafc' }}>
+                        <th style={{ padding: 6, textAlign: 'left' }}>Fecha acred.</th>
+                        <th style={{ padding: 6, textAlign: 'left' }}>Consorcio</th>
+                        <th style={{ padding: 6, textAlign: 'right' }}>Neto esperado</th>
+                        <th style={{ padding: 6, textAlign: 'right' }}>Real banco</th>
+                        <th style={{ padding: 6, textAlign: 'right' }}>Diferencia</th>
+                        <th style={{ padding: 6, textAlign: 'left' }}>Estado</th>
+                      </tr></thead>
+                      <tbody>{banco.filas.length ? banco.filas.map((f, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid #f1f5f9', background: f.est === 'conciliado' ? '#fff' : '#fffbeb' }}>
+                          <td style={{ padding: 6 }}>{f.fecha}</td>
+                          <td style={{ padding: 6 }}>{f.nombre}</td>
+                          <td style={{ padding: 6, textAlign: 'right' }}>{fmtN(f.esp)}</td>
+                          <td style={{ padding: 6, textAlign: 'right' }}>{fmtN(f.real)}</td>
+                          <td style={{ padding: 6, textAlign: 'right', color: Math.abs(f.dif) > 0.02 ? '#991b1b' : '#166534', fontWeight: 600 }}>{fmtN(f.dif)}</td>
+                          <td style={{ padding: 6 }}>{estBadge(f.est)}</td>
+                        </tr>
+                      )) : <tr><td colSpan={6} style={{ padding: 10, textAlign: 'center', color: GR }}>Cargá un extracto para ver el cruce.</td></tr>}</tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {concil && cVista === 'pagos' && (
           <div>
