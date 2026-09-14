@@ -11,6 +11,12 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
+// Nro real de UF (nro_uf_pdf) como entero, igual que en la liquidación. Fallback al crudo.
+function ufNum(u) {
+  const n = parseInt(u?.nro_uf_pdf, 10)
+  return isNaN(n) ? (u?.nro_uf_pdf ?? '—') : n
+}
+
 export default function CtaCorriente() {
   const { session, consorcioActivo, unidades, copropietarios, expensas, adminPerfil } = useApp()
   const consorcioId = consorcioActivo?.id
@@ -153,14 +159,14 @@ export default function CtaCorriente() {
             opts={[{ v:'', l:'— Seleccione UF —' },
               ...unidades.map(u => {
                 const cp2 = copropietarios.find(c => c.id === u.propietario_id)
-                return { v: u.id, l: `${u.numero} — ${cp2?.apellido_nombre||'Sin propietario'}` }
+                return { v: u.id, l: `UF ${ufNum(u)} · ${u.numero} — ${cp2?.apellido_nombre||'Sin propietario'}` }
               })
             ]} />
           {uf && (
             <div style={{ padding:'10px 14px', background:'#f0f4ff', borderRadius:8, fontSize:13 }}>
               <strong>{cp?.apellido_nombre||'—'}</strong>
               <div style={{ fontSize:11, color:GR }}>
-                {uf.tipo} {uf.piso ? `· Piso ${uf.piso}` : ''}
+                UF {ufNum(uf)} · {uf.numero} · {uf.tipo} {uf.piso ? `· Piso ${uf.piso}` : ''}
                 {uf.porcentaje_fiscal ? ` · Coef: ${Number(uf.porcentaje_fiscal).toFixed(4)}%` : ''}
               </div>
             </div>
