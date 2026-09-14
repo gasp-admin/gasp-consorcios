@@ -15,6 +15,13 @@ function ordUF(a, b) {
   return String(a?.nro_uf_pdf ?? a?.numero ?? '').localeCompare(String(b?.nro_uf_pdf ?? b?.numero ?? ''), 'es', { numeric: true })
 }
 
+// Nro real de UF tal como sale en la liquidación (nro_uf_pdf), como entero (sin cero a la izq.).
+// Fallback al valor crudo si no fuera numérico.
+function ufNum(u) {
+  const n = parseInt(u?.nro_uf_pdf, 10)
+  return isNaN(n) ? (u?.nro_uf_pdf ?? '—') : n
+}
+
 export default function Unidades() {
   const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo, puede } = useApp()
   const uid = session?.user?.id
@@ -53,7 +60,7 @@ export default function Unidades() {
   const filtradas = unidades.filter(u => {
     const q = busqueda.toLowerCase()
     const cp = copropietarios.find(c=>c.id===u.propietario_id)
-    return !q || u.numero?.toLowerCase().includes(q) || u.tipo?.toLowerCase().includes(q)
+    return !q || String(ufNum(u)).toLowerCase().includes(q) || u.numero?.toLowerCase().includes(q) || u.tipo?.toLowerCase().includes(q)
       || cp?.apellido_nombre?.toLowerCase().includes(q) || u.piso?.toLowerCase().includes(q)
   })
 
@@ -299,7 +306,7 @@ export default function Unidades() {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead>
               <tr style={{ background:'#f3f4f6' }}>
-                {['UF','Tipo','Piso','Extra','Sup.','Coef. %','Copropietario','Cob. Auto','Estado',''].map((h,i) => (
+                {['UF','Dpto','Tipo','Piso','Extra','Sup.','Coef. %','Copropietario','Cob. Auto','Estado',''].map((h,i) => (
                   <th key={i} style={{ padding:'8px 12px', textAlign:'left', fontSize:11, fontWeight:'bold', color:GR, textTransform:'uppercase', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
                 ))}
               </tr>
@@ -310,7 +317,8 @@ export default function Unidades() {
                 const ec={ocupada:{c:VD,bg:'#dcfce7'},desocupada:{c:AM,bg:'#fef9c3'},en_venta:{c:AZ,bg:'#dbeafe'}}[u.estado]||{c:GR,bg:'#f3f4f6'}
                 return (
                   <tr key={u.id} style={{ borderBottom:'1px solid #f3f4f6' }}>
-                    <td style={{ padding:'10px 12px', fontWeight:700, color:AZ }}>{u.numero}</td>
+                    <td style={{ padding:'10px 12px', fontWeight:700, color:AZ }}>{ufNum(u)}</td>
+                    <td style={{ padding:'10px 12px', fontWeight:600 }}>{u.numero}</td>
                     <td style={{ padding:'10px 12px', textTransform:'capitalize' }}>{u.tipo}</td>
                     <td style={{ padding:'10px 12px' }}>{u.piso||'—'}</td>
                     <td style={{ padding:'10px 12px', whiteSpace:'pre' }}>{u.extra||'—'}</td>
