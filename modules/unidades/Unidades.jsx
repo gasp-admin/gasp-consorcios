@@ -66,26 +66,26 @@ export default function Unidades() {
 
   function handlePDF() {
     const cols = [
-      {key:'uf',label:'UF'},{key:'tipo',label:'Tipo'},{key:'piso',label:'Piso'},{key:'extra',label:'Extra'},
+      {key:'ufreal',label:'UF'},{key:'uf',label:'Dpto'},{key:'tipo',label:'Tipo'},{key:'piso',label:'Piso'},{key:'extra',label:'Extra'},
       {key:'sup',label:'Sup.',align:'right'},{key:'coef',label:'Coef.%',align:'right'},
       {key:'propietario',label:'Propietario'},{key:'estado',label:'Estado'},
     ]
     const rows = filtradas.map(u=>{
       const cp=copropietarios.find(c=>c.id===u.propietario_id)
-      return {uf:u.numero,tipo:u.tipo,piso:u.piso||'—',extra:u.extra||'—',sup:u.superficie_cubierta?u.superficie_cubierta+' m²':'—',
+      return {ufreal:ufNum(u),uf:u.numero,tipo:u.tipo,piso:u.piso||'—',extra:u.extra||'—',sup:u.superficie_cubierta?u.superficie_cubierta+' m²':'—',
         coef:u.porcentaje_fiscal?Number(u.porcentaje_fiscal).toFixed(4)+'%':'—',
         propietario:cp?.apellido_nombre||'—',estado:u.estado||'—'}
     })
     exportarPDF({titulo:'Listado de Unidades Funcionales',columnas:cols,filas:rows,logoB64:LOGO_ADM_B64,
-      totales:{uf:'TOTAL',tipo:'',piso:'',extra:'',sup:'',coef:totalCoef.toFixed(4)+'%',propietario:`${filtradas.length} UFs`,estado:''}})
+      totales:{ufreal:'TOTAL',uf:'',tipo:'',piso:'',extra:'',sup:'',coef:totalCoef.toFixed(4)+'%',propietario:`${filtradas.length} UFs`,estado:''}})
   }
   function handleExcel() {
-    const cols = [{key:'uf',label:'UF'},{key:'tipo',label:'Tipo'},{key:'piso',label:'Piso'},{key:'extra',label:'Extra'},
+    const cols = [{key:'ufreal',label:'UF'},{key:'uf',label:'Dpto'},{key:'tipo',label:'Tipo'},{key:'piso',label:'Piso'},{key:'extra',label:'Extra'},
       {key:'sup',label:'Sup.'},{key:'coef',label:'Coef.%'},{key:'propietario',label:'Propietario'},
       {key:'nro_ep',label:'N° EP'},{key:'nro_siro',label:'N° SIRO'},{key:'estado',label:'Estado'}]
     const rows = filtradas.map(u=>{
       const cp=copropietarios.find(c=>c.id===u.propietario_id)
-      return {uf:u.numero,tipo:u.tipo,piso:u.piso||'',extra:u.extra||'',sup:u.superficie_cubierta||'',
+      return {ufreal:ufNum(u),uf:u.numero,tipo:u.tipo,piso:u.piso||'',extra:u.extra||'',sup:u.superficie_cubierta||'',
         coef:u.porcentaje_fiscal||'',propietario:cp?.apellido_nombre||'',
         nro_ep:u.nro_ep||'',nro_siro:u.nro_siro||'',estado:u.estado||''}
     })
