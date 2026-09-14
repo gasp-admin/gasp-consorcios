@@ -91,7 +91,7 @@ export default function Copropietarios() {
       filas:filtrados.map(cp=>{
         const ufs = ufsMap[cp.id] || []
         const ufsStr = ufs.length === 0 ? '—'
-          : ufs.map(u => `UF ${u.numero}${u.tipo ? ' · ' + u.tipo : ''}`).join(', ')
+          : ufs.map(u => `UF ${ufNum(u)} · ${u.numero}${u.tipo ? ' · ' + u.tipo : ''}`).join(', ')
         return {
           nombre: cp.apellido_nombre||'',
           ufs:    ufsStr,
@@ -119,7 +119,7 @@ export default function Copropietarios() {
         const ufs = ufsMap[cp.id] || []
         return {
           nombre:   cp.apellido_nombre||'',
-          ufs:      ufs.map(u => `UF ${u.numero}`).join(' / ') || '—',
+          ufs:      ufs.map(u => `UF ${ufNum(u)} · ${u.numero}`).join(' / ') || '—',
           cant_ufs: ufs.length,
           dni:      cp.dni||'',
           tel:      cp.telefono||'',
