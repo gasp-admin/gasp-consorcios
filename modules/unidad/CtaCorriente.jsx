@@ -86,7 +86,7 @@ export default function CtaCorriente() {
 
   function handlePDFCtaCorriente() {
     exportarPDF({
-      titulo: `Cuenta Corriente UF — ${uf?.numero||''} — ${cp?.apellido_nombre||''}`,
+      titulo: `Cuenta Corriente — UF ${uf?ufNum(uf):''} · ${uf?.numero||''} — ${cp?.apellido_nombre||''}`,
       subtitulo: (fDesde||fHasta) ? `Período: ${fDesde?fmtD(fDesde):'inicio'} al ${fHasta?fmtD(fHasta):'hoy'}` : 'Historial completo',
       consorcioNombre: '',
       logoB64: null,
@@ -114,7 +114,7 @@ export default function CtaCorriente() {
 
   function handleExcelCtaCorriente() {
     exportarExcel({
-      titulo: `CtaCte-UF-${uf?.numero||''}`,
+      titulo: `CtaCte-UF-${uf?ufNum(uf):''}`,
       columnas: [
         { key:'fecha',    label:'Fecha' },
         { key:'concepto', label:'Concepto' },
