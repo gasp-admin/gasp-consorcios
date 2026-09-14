@@ -11,6 +11,12 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
+// Nro real de UF (nro_uf_pdf) como entero, igual que en la liquidación. Fallback al crudo.
+function ufNum(u) {
+  const n = parseInt(u?.nro_uf_pdf, 10)
+  return isNaN(n) ? (u?.nro_uf_pdf ?? '—') : n
+}
+
 export default function Copropietarios() {
   const { session, consorcioActivo, copropietarios, setCopropietarios, unidades, expensas, puede } = useApp()
   const consorcioId = consorcioActivo?.id
@@ -28,7 +34,7 @@ export default function Copropietarios() {
     const [{ data: cpData }, { data: ufData }] = await Promise.all([
       supabase.from('con_copropietarios').select('*')
         .eq('admin_id', uid).eq('consorcio_id', consorcioId).order('apellido_nombre'),
-      supabase.from('con_unidades').select('id, numero, propietario_id, tipo, piso')
+      supabase.from('con_unidades').select('id, numero, propietario_id, tipo, piso, nro_uf_pdf')
         .eq('consorcio_id', consorcioId).eq('estado', 'ocupada').order('numero')
     ])
     const cps = cpData || []
@@ -216,7 +222,7 @@ export default function Copropietarios() {
                   background: ufs.length > 1 ? '#fef3c7' : ufs.length === 1 ? '#f0f4ff' : '#f3f4f6',
                   color:      ufs.length > 1 ? '#92400e' : ufs.length === 1 ? '#1A3FA0' : '#9ca3af'
                 }}>
-                  {ufs.length === 0 ? 'Sin UF asignada' : ufs.length === 1 ? `UF ${ufs[0].numero}` : `${ufs.length} UFs`}
+                  {ufs.length === 0 ? 'Sin UF asignada' : ufs.length === 1 ? `UF ${ufNum(ufs[0])} · ${ufs[0].numero}` : `${ufs.length} UFs`}
                 </span>
               </div>
               {/* Listado de UFs cuando tiene más de 1 */}
@@ -227,7 +233,7 @@ export default function Copropietarios() {
                       fontSize:10, padding:'1px 7px', borderRadius:10,
                       background:'#e0e7ff', color:'#3730a3', fontWeight:600
                     }}>
-                      UF {uf.numero}{uf.tipo ? ` · ${uf.tipo}` : ''}
+                      UF {ufNum(uf)} · {uf.numero}{uf.tipo ? ` · ${uf.tipo}` : ''}
                     </span>
                   ))}
                 </div>
