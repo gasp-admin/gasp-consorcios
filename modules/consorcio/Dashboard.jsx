@@ -14,7 +14,11 @@ export default function Dashboard() {
   } = useApp()
   const uid  = session?.user?.id
   const cid  = consorcioActivo?.id
-  const expActiva = expensas.find(e => e.estado === 'abierta') || expensas[0]
+  // La "boleta vigente" que se cobra es la última expensa CERRADA (ahí se imputan los pagos; el
+  // período ABIERTO recién acumula y no tiene detalle). Fallback a la abierta / más reciente.
+  // Consistente con la conciliación y la cta cte (última cerrada).
+  const expsOrd = [...(expensas || [])].sort((a, b) => String(b.periodo || '').localeCompare(String(a.periodo || '')))
+  const expActiva = expsOrd.find(e => e.estado === 'cerrada') || expsOrd.find(e => e.estado === 'abierta') || expsOrd[0]
 
   // KPIs extras que no están en el context global
   const [kpis, setKpis]   = useState(null)
