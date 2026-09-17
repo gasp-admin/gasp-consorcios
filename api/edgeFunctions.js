@@ -51,6 +51,10 @@ export const enviarLiquidacion = (payload, token) =>
 export const enviarNotificacion = (payload, token) =>
   callEF('enviar-notificacion', payload, token)
 
+// Aviso de "Pago registrado" al copropietario (envío real por Resend + log con tracking)
+export const notificarPago = (payload, token) =>
+  callEF('notificar-pago', payload, token)
+
 // Certificado libre de deuda
 export const generarCertificadoLibreDeuda = (payload, token) =>
   callEF('generar-certificado-libre-deuda', payload, token)
