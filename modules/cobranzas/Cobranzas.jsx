@@ -5,7 +5,7 @@ import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/con
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
-import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
+import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios, notificarPago } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function Cobranzas() {
@@ -141,9 +141,8 @@ export default function Cobranzas() {
       const uf = unidades.find(u => u.id === form.unidad_id)
       const cp = copropietarios.find(c => c.id === uf?.propietario_id)
       if (cp?.email) {
-        await supabase.rpc('registrar_notificacion_pago', {
-          p_cobranza_id: cobId, p_admin_id: session.user.id, p_consorcio_id: consorcioId
-        })
+        const { data: { session: sess } } = await supabase.auth.getSession()
+        await notificarPago({ cobranza_id: cobId, consorcio_id: consorcioId }, sess?.access_token)
       }
     } catch(e) { /* no crítico */ }
     seleccionarExpensa(expSel)
