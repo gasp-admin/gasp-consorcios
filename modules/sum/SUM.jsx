@@ -57,27 +57,29 @@ export default function SUM() {
   useEffect(() => { cargarDetalle() }, [cargarDetalle])
 
   function nuevoEspacio() {
-    setForm({ activo: true, requiere_pago: false, requiere_aprobacion: false, registrar_ingreso_caja: false, auto_confirmar_pago: false, tarifa: 0, anticipacion_max_dias: 60, max_reservas_activas_uf: 1, dur_min_h: 1, dur_max_h: 6, gran_min: 30 })
+    setForm({ activo: true, requiere_pago: false, requiere_aprobacion: false, registrar_ingreso_caja: false, auto_confirmar_pago: false, tarifa: 0, anticipacion_max_dias: 60, max_reservas_activas_uf: 1, dur_min_h: 1, dur_max_h: 6, gran_min: 30, capacidad: 1, recursos_txt: '' })
   }
   function editarEspacio(e) {
     const r = e.reglas || {}
-    setForm({ ...e, dur_min_h: (r.dur_min_min || 60) / 60, dur_max_h: (r.dur_max_min || 360) / 60, gran_min: r.granularidad_min || 30 })
+    setForm({ ...e, dur_min_h: (r.dur_min_min || 60) / 60, dur_max_h: (r.dur_max_min || 360) / 60, gran_min: r.granularidad_min || 30, capacidad: e.capacidad || 1, recursos_txt: (Array.isArray(r.recursos) ? r.recursos.join(', ') : '') })
   }
 
   async function guardarEspacio() {
     if (!guard()) return
     if (!form?.nombre?.trim()) return setMsg({ tipo: 'warn', texto: 'Ingresá el nombre del espacio' })
+    const cap = Math.max(1, parseInt(form.capacidad) || 1)
+    const recursos = String(form.recursos_txt || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, cap)
     const reglas = {
       dur_min_min: Math.round((parseFloat(form.dur_min_h) || 1) * 60),
       dur_max_min: Math.round((parseFloat(form.dur_max_h) || 6) * 60),
-      granularidad_min: parseInt(form.gran_min) || 30,
+      granularidad_min: parseInt(form.gran_min) || 30, recursos,
     }
     const payload = {
       nombre: form.nombre.trim(), activo: !!form.activo, requiere_pago: !!form.requiere_pago,
       tarifa: parseFloat(form.tarifa) || 0, requiere_aprobacion: !!form.requiere_aprobacion,
       registrar_ingreso_caja: !!form.registrar_ingreso_caja, auto_confirmar_pago: !!form.auto_confirmar_pago,
       anticipacion_max_dias: parseInt(form.anticipacion_max_dias) || 60,
-      max_reservas_activas_uf: parseInt(form.max_reservas_activas_uf) || 1, reglas,
+      max_reservas_activas_uf: parseInt(form.max_reservas_activas_uf) || 1, capacidad: cap, reglas,
     }
     if (form.id) {
       const { error } = await supabase.from('con_sum_espacios').update(payload).eq('id', form.id)
@@ -157,13 +159,24 @@ export default function SUM() {
     let finFecha = bForm.fecha
     if (bForm.hf < bForm.hi) { const dn = new Date(bForm.fecha + 'T12:00:00Z'); dn.setUTCDate(dn.getUTCDate() + 1); finFecha = dn.toISOString().slice(0, 10) }
     const fin = `${finFecha}T${bForm.hf}:00-03:00`
-    const { error } = await supabase.from('con_sum_reservas').insert([{
-      id: `RES-${espSel.id}-${Date.now()}`, admin_id: uid, consorcio_id: consorcioId, espacio_id: espSel.id,
+    const cap = espSel.capacidad || 1
+    const nros = (cap > 1 && bForm.recurso && bForm.recurso !== 'todas') ? [parseInt(bForm.recurso)] : Array.from({ length: cap }, (_, i) => i + 1)
+    const rows = nros.map(nro => ({
+      id: `RES-${espSel.id}-${Date.now()}-${nro}`, admin_id: uid, consorcio_id: consorcioId, espacio_id: espSel.id,
       unidad_id: null, tipo: 'bloqueo', fecha: bForm.fecha, inicio, fin, franja_label: `${bForm.hi}–${bForm.hf}`,
-      estado: 'confirmada', creado_por: 'admin', notas: bForm.notas || 'Bloqueo administrativo',
-    }])
+      recurso_nro: nro, estado: 'confirmada', creado_por: 'admin', notas: bForm.notas || 'Bloqueo administrativo',
+    }))
+    const { error } = await supabase.from('con_sum_reservas').insert(rows)
     if (error) return setMsg({ tipo: 'error', texto: error.message.includes('sum_sin_solape') ? 'Ese día/horario ya está ocupado o reservado' : error.message })
     setBForm(null); setMsg({ tipo: 'ok', texto: '✓ Día/horario bloqueado' }); cargarDetalle()
+  }
+
+  const recLabel = (r) => {
+    const cap = espSel?.capacidad || 1
+    if (r?.tipo === 'bloqueo') return '—'
+    if (cap <= 1) return ''
+    const labels = (espSel?.reglas && Array.isArray(espSel.reglas.recursos)) ? espSel.reglas.recursos : []
+    return labels[r.recurso_nro - 1] || `${espSel.nombre} ${r.recurso_nro}`
   }
 
   const reservasFiltradas = reservas.filter(r => {
@@ -238,6 +251,16 @@ export default function SUM() {
               </select>
             </div>
           </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 3fr', gap: 12, marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 12, color: GR, marginBottom: 4 }}>Cantidad (unidades)</div>
+              <input type="number" min="1" value={form.capacidad} onChange={e => setForm(f => ({ ...f, capacidad: e.target.value }))} style={INP} />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: GR, marginBottom: 4 }}>Nombres (coma, opcional — ej. Parrilla 1, Parrilla 2)</div>
+              <input value={form.recursos_txt || ''} placeholder="Se autogeneran si lo dejás vacío" onChange={e => setForm(f => ({ ...f, recursos_txt: e.target.value }))} style={INP} />
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn small color={VD} onClick={guardarEspacio}>Guardar</Btn>
             <BtnSec small onClick={() => setForm(null)}>Cancelar</BtnSec>
@@ -300,7 +323,7 @@ export default function SUM() {
                   <option value="confirmada">Confirmadas</option>
                   <option value="todas">Todas</option>
                 </select>
-                <Btn small color={RJ} onClick={() => setBForm({ fecha: hoy, hi: '10:00', hf: '00:00' })}>🚫 Bloquear</Btn>
+                <Btn small color={RJ} onClick={() => setBForm({ fecha: hoy, hi: '10:00', hf: '00:00', recurso: 'todas' })}>🚫 Bloquear</Btn>
               </div>
             </div>
 
@@ -310,6 +333,12 @@ export default function SUM() {
                 <input type="time" value={bForm.hi} onChange={e => setBForm(f => ({ ...f, hi: e.target.value }))} style={INPS} />
                 <span style={{ color: GR }}>a</span>
                 <input type="time" value={bForm.hf} onChange={e => setBForm(f => ({ ...f, hf: e.target.value }))} style={INPS} />
+                {(espSel.capacidad || 1) > 1 && (
+                  <select value={bForm.recurso || 'todas'} onChange={e => setBForm(f => ({ ...f, recurso: e.target.value }))} style={INPS}>
+                    <option value="todas">Todas</option>
+                    {Array.from({ length: espSel.capacidad || 1 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{recLabel({ recurso_nro: n })}</option>)}
+                  </select>
+                )}
                 <input value={bForm.notas || ''} placeholder="Motivo (opcional)" onChange={e => setBForm(f => ({ ...f, notas: e.target.value }))} style={{ ...INPS, flex: 1, minWidth: 140 }} />
                 <Btn small color={RJ} onClick={guardarBloqueo}>Bloquear</Btn>
                 <BtnSec small onClick={() => setBForm(null)}>Cancelar</BtnSec>
@@ -322,7 +351,7 @@ export default function SUM() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
                       <tr style={{ textAlign: 'left', color: GR, borderBottom: '1px solid #e5e7eb' }}>
-                        <th style={{ padding: 6 }}>Fecha</th><th>Horario</th><th>UF</th><th>Estado</th><th>Pago</th><th>Acciones</th>
+                        <th style={{ padding: 6 }}>Fecha</th><th>Horario</th><th>Unidad</th><th>UF</th><th>Estado</th><th>Pago</th><th>Acciones</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -330,6 +359,7 @@ export default function SUM() {
                         <tr key={r.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                           <td style={{ padding: 6 }}>{fmtD(r.fecha)}</td>
                           <td>{r.franja_label || '—'}</td>
+                          <td>{recLabel(r) || '—'}</td>
                           <td>{r.tipo === 'bloqueo' ? <i style={{ color: RJ }}>bloqueo</i> : (r.unidad_id || '—')}</td>
                           <td><span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, color: '#fff', background: EST_COLOR[r.estado] || GR }}>{EST_LABEL[r.estado] || r.estado}</span></td>
                           <td>{r.pago_requerido ? `${r.pago_estado}${r.pago_monto ? ' · ' + fmt(r.pago_monto) : ''}` : '—'}</td>
