@@ -215,6 +215,7 @@ export default function Portal() {
   const [sumFranja, setSumFranja]       = useState('')
   const [sumDesde, setSumDesde]         = useState('')
   const [sumHasta, setSumHasta]         = useState('')
+  const [sumRecurso, setSumRecurso]     = useState('')
   const [sumMsg, setSumMsg]             = useState(null)
   const [sumEnviando, setSumEnviando]   = useState(false)
   const [sumArchivo, setSumArchivo]     = useState(null)
@@ -235,12 +236,18 @@ export default function Portal() {
     const dow = new Date(ymd + 'T12:00:00Z').getUTCDay()
     return sumDispo.filter(d => d.espacio_id === sumEspSel.id && d.dia_semana === dow)
   }
+  function sumLabelRec(nro) {
+    if (!sumEspSel) return ''
+    const labels = (sumEspSel.reglas && Array.isArray(sumEspSel.reglas.recursos)) ? sumEspSel.reglas.recursos : []
+    return labels[nro - 1] || ((sumEspSel.capacidad || 1) > 1 ? sumEspSel.nombre + ' ' + nro : sumEspSel.nombre)
+  }
   function sumOcupadasDe(ymd) {
     if (!sumEspSel || !ymd) return []
+    const cap = sumEspSel.capacidad || 1
     return sumReservas
       .filter(r => r.espacio_id === sumEspSel.id && r.fecha === ymd)
-      .map(r => (r.hora_inicio_txt || '') + '–' + (r.hora_fin_txt || ''))
-      .filter(x => x !== '–')
+      .map(r => (cap > 1 ? sumLabelRec(r.recurso_nro) + ': ' : '') + (r.hora_inicio_txt || '') + '–' + (r.hora_fin_txt || ''))
+      .filter(x => !x.endsWith('–'))
   }
   function sumDiasDisponibles() {
     if (!sumEspSel) return []
@@ -263,17 +270,18 @@ export default function Portal() {
     try {
       const resp = await fetch('/api/portal', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accion: 'sum_reservar', token, espacio_id: sumEspSel.id, fecha: sumFecha, hora_inicio: sumDesde, hora_fin: sumHasta }),
+        body: JSON.stringify({ accion: 'sum_reservar', token, espacio_id: sumEspSel.id, fecha: sumFecha, hora_inicio: sumDesde, hora_fin: sumHasta, recurso_nro: sumRecurso }),
       })
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok || data.error) {
-        const M = { ocupado: 'Ese horario ya está reservado', limite_reservas: 'Alcanzaste el máximo de reservas activas', fuera_de_ventana: 'El horario está fuera del rango habilitado', duracion_invalida: 'La duración no está permitida', granularidad: 'Elegí horarios en múltiplos permitidos', dia_no_disponible: 'Ese día no está habilitado', fecha_fuera_de_rango: 'Fecha fuera del rango permitido', hora_invalida: 'Horario inválido' }
+        const M = { ocupado: 'Ese horario ya está reservado', limite_reservas: 'Alcanzaste el máximo de reservas activas', fuera_de_ventana: 'El horario está fuera del rango habilitado', duracion_invalida: 'La duración no está permitida', granularidad: 'Elegí horarios en múltiplos permitidos', dia_no_disponible: 'Ese día no está habilitado', fecha_fuera_de_rango: 'Fecha fuera del rango permitido', hora_invalida: 'Horario inválido', recurso_invalido: 'Unidad no válida' }
         return setSumMsg({ t: 'error', m: M[data.error] || 'No se pudo reservar' })
       }
       setSumUltima(data)
-      if (data.pago_requerido) setSumMsg({ t: 'ok', m: 'Reserva tomada. Falta el pago ($' + Number(data.tarifa).toLocaleString('es-AR') + '). Subí el comprobante.' })
-      else setSumMsg({ t: 'ok', m: data.estado === 'solicitada' ? 'Reserva enviada, queda a confirmación de la administración' : 'Reserva confirmada' })
-      setSumFecha(''); setSumDesde(''); setSumHasta(''); cargarSum()
+      const rec = data.recurso_label ? (data.recurso_label + ' — ') : ''
+      if (data.pago_requerido) setSumMsg({ t: 'ok', m: rec + 'Reserva tomada. Falta el pago ($' + Number(data.tarifa).toLocaleString('es-AR') + '). Subí el comprobante.' })
+      else setSumMsg({ t: 'ok', m: rec + (data.estado === 'solicitada' ? 'Reserva enviada, queda a confirmación de la administración' : 'Reserva confirmada') })
+      setSumFecha(''); setSumDesde(''); setSumHasta(''); setSumRecurso(''); cargarSum()
     } catch (e) { setSumMsg({ t: 'error', m: 'Error de conexión' }) }
     setSumEnviando(false)
   }
@@ -1312,7 +1320,7 @@ export default function Portal() {
                   {sumDiasDisponibles().length === 0
                     ? <div style={{ color:GR, fontSize:13 }}>No hay días disponibles por ahora.</div>
                     : sumDiasDisponibles().map(d => (
-                        <button key={d.ymd} onClick={()=>{ setSumFecha(d.ymd); setSumDesde(''); setSumHasta('') }}
+                        <button key={d.ymd} onClick={()=>{ setSumFecha(d.ymd); setSumDesde(''); setSumHasta(''); setSumRecurso('') }}
                           style={{ padding:'8px 10px', borderRadius:9, border:`1.5px solid ${sumFecha===d.ymd?AZ:'#e5e7eb'}`,
                             background: sumFecha===d.ymd?'#eff6ff':'#fff', cursor:'pointer', fontSize:12 }}>
                           {['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][d.dow]} {d.ymd.slice(8,10)}/{d.ymd.slice(5,7)}
@@ -1337,6 +1345,18 @@ export default function Portal() {
                       <input type="time" step="1800" value={sumHasta} onChange={e=>setSumHasta(e.target.value)}
                         style={{ padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13 }} />
                     </div>
+                    {(sumEspSel.capacidad || 1) > 1 && (
+                      <div style={{ marginTop:8 }}>
+                        <span style={{ fontSize:12, color:GR, marginRight:6 }}>Unidad</span>
+                        <select value={sumRecurso} onChange={e=>setSumRecurso(e.target.value)}
+                          style={{ padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13 }}>
+                          <option value="">Cualquiera disponible</option>
+                          {Array.from({ length: sumEspSel.capacidad || 1 }, (_, i) => i + 1).map(n => (
+                            <option key={n} value={n}>{sumLabelRec(n)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
 
