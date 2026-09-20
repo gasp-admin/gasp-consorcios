@@ -213,6 +213,8 @@ export default function Portal() {
   const [sumEspSel, setSumEspSel]       = useState(null)
   const [sumFecha, setSumFecha]         = useState('')
   const [sumFranja, setSumFranja]       = useState('')
+  const [sumDesde, setSumDesde]         = useState('')
+  const [sumHasta, setSumHasta]         = useState('')
   const [sumMsg, setSumMsg]             = useState(null)
   const [sumEnviando, setSumEnviando]   = useState(false)
   const [sumArchivo, setSumArchivo]     = useState(null)
@@ -228,46 +230,50 @@ export default function Portal() {
     } catch (e) { /* si no hay espacios, la pestaña no aparece */ }
   }
 
+  function sumVentanasDe(ymd) {
+    if (!sumEspSel || !ymd) return []
+    const dow = new Date(ymd + 'T12:00:00Z').getUTCDay()
+    return sumDispo.filter(d => d.espacio_id === sumEspSel.id && d.dia_semana === dow)
+  }
+  function sumOcupadasDe(ymd) {
+    if (!sumEspSel || !ymd) return []
+    return sumReservas
+      .filter(r => r.espacio_id === sumEspSel.id && r.fecha === ymd)
+      .map(r => (r.hora_inicio_txt || '') + '–' + (r.hora_fin_txt || ''))
+      .filter(x => x !== '–')
+  }
   function sumDiasDisponibles() {
     if (!sumEspSel) return []
     const maxd = sumEspSel.anticipacion_max_dias || 60
-    const franjasPorDow = {}
-    sumDispo.filter(d => d.espacio_id === sumEspSel.id).forEach(d => {
-      (franjasPorDow[d.dia_semana] = franjasPorDow[d.dia_semana] || []).push(d)
-    })
-    const ocupadas = new Set(
-      sumReservas.filter(r => r.espacio_id === sumEspSel.id)
-        .map(r => r.fecha + '|' + (r.franja_label || ''))
-    )
+    const conVentana = new Set(sumDispo.filter(d => d.espacio_id === sumEspSel.id).map(d => d.dia_semana))
     const out = []
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
     for (let i = 0; i <= maxd; i++) {
       const d = new Date(hoy.getTime() + i * 86400000)
       const ymd = d.toISOString().slice(0, 10)
       const dow = new Date(ymd + 'T12:00:00Z').getUTCDay()
-      const fr = (franjasPorDow[dow] || []).filter(f => !ocupadas.has(ymd + '|' + f.franja_label))
-      if (fr.length) out.push({ ymd, dow, franjas: fr })
+      if (conVentana.has(dow)) out.push({ ymd, dow })
     }
     return out
   }
 
   async function reservarSum() {
-    if (!sumEspSel || !sumFecha || !sumFranja) return setSumMsg({ t: 'warn', m: 'Elegí día y franja' })
+    if (!sumEspSel || !sumFecha || !sumDesde || !sumHasta) return setSumMsg({ t: 'warn', m: 'Elegí día, desde y hasta' })
     setSumEnviando(true); setSumMsg(null)
     try {
       const resp = await fetch('/api/portal', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accion: 'sum_reservar', token, espacio_id: sumEspSel.id, fecha: sumFecha, franja_label: sumFranja }),
+        body: JSON.stringify({ accion: 'sum_reservar', token, espacio_id: sumEspSel.id, fecha: sumFecha, hora_inicio: sumDesde, hora_fin: sumHasta }),
       })
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok || data.error) {
-        const M = { ocupado: 'Ese día y franja ya están reservados', limite_reservas: 'Alcanzaste el máximo de reservas activas', franja_no_disponible: 'Esa franja no está disponible', fecha_fuera_de_rango: 'Fecha fuera del rango permitido' }
+        const M = { ocupado: 'Ese horario ya está reservado', limite_reservas: 'Alcanzaste el máximo de reservas activas', fuera_de_ventana: 'El horario está fuera del rango habilitado', duracion_invalida: 'La duración no está permitida', granularidad: 'Elegí horarios en múltiplos permitidos', dia_no_disponible: 'Ese día no está habilitado', fecha_fuera_de_rango: 'Fecha fuera del rango permitido', hora_invalida: 'Horario inválido' }
         return setSumMsg({ t: 'error', m: M[data.error] || 'No se pudo reservar' })
       }
       setSumUltima(data)
       if (data.pago_requerido) setSumMsg({ t: 'ok', m: 'Reserva tomada. Falta el pago ($' + Number(data.tarifa).toLocaleString('es-AR') + '). Subí el comprobante.' })
       else setSumMsg({ t: 'ok', m: data.estado === 'solicitada' ? 'Reserva enviada, queda a confirmación de la administración' : 'Reserva confirmada' })
-      setSumFecha(''); setSumFranja(''); cargarSum()
+      setSumFecha(''); setSumDesde(''); setSumHasta(''); cargarSum()
     } catch (e) { setSumMsg({ t: 'error', m: 'Error de conexión' }) }
     setSumEnviando(false)
   }
@@ -1306,7 +1312,7 @@ export default function Portal() {
                   {sumDiasDisponibles().length === 0
                     ? <div style={{ color:GR, fontSize:13 }}>No hay días disponibles por ahora.</div>
                     : sumDiasDisponibles().map(d => (
-                        <button key={d.ymd} onClick={()=>{ setSumFecha(d.ymd); setSumFranja('') }}
+                        <button key={d.ymd} onClick={()=>{ setSumFecha(d.ymd); setSumDesde(''); setSumHasta('') }}
                           style={{ padding:'8px 10px', borderRadius:9, border:`1.5px solid ${sumFecha===d.ymd?AZ:'#e5e7eb'}`,
                             background: sumFecha===d.ymd?'#eff6ff':'#fff', cursor:'pointer', fontSize:12 }}>
                           {['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][d.dow]} {d.ymd.slice(8,10)}/{d.ymd.slice(5,7)}
@@ -1314,29 +1320,30 @@ export default function Portal() {
                       ))}
                 </div>
 
-                {sumFecha && (() => {
-                  const dia = sumDiasDisponibles().find(x => x.ymd === sumFecha)
-                  const franjas = dia ? dia.franjas : []
-                  return (
-                    <>
-                      <div style={{ fontSize:13, fontWeight:600, margin:'6px 0' }}>Franja</div>
-                      <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12 }}>
-                        {franjas.map(f => (
-                          <button key={f.id} onClick={()=>setSumFranja(f.franja_label)}
-                            style={{ padding:'8px 10px', borderRadius:9, border:`1.5px solid ${sumFranja===f.franja_label?AZ:'#e5e7eb'}`,
-                              background: sumFranja===f.franja_label?'#eff6ff':'#fff', cursor:'pointer', fontSize:12 }}>
-                            {f.franja_label} {String(f.hora_inicio).slice(0,5)}–{String(f.hora_fin).slice(0,5)}{f.hora_fin <= f.hora_inicio ? ' (+1)' : ''}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )
-                })()}
+                {sumFecha && (
+                  <div style={{ marginBottom:12 }}>
+                    <div style={{ fontSize:12, color:GR, marginBottom:6 }}>
+                      Horario habilitado: {sumVentanasDe(sumFecha).map(w => String(w.hora_inicio).slice(0,5) + '–' + (w.hora_fin <= w.hora_inicio ? '24:00' : String(w.hora_fin).slice(0,5))).join(' · ') || '—'}
+                    </div>
+                    {sumOcupadasDe(sumFecha).length > 0 && (
+                      <div style={{ fontSize:12, color:RJ, marginBottom:8 }}>Ocupado: {sumOcupadasDe(sumFecha).join(' · ')}</div>
+                    )}
+                    <div style={{ fontSize:13, fontWeight:600, margin:'6px 0' }}>Elegí tu horario</div>
+                    <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                      <span style={{ fontSize:12, color:GR }}>Desde</span>
+                      <input type="time" step="1800" value={sumDesde} onChange={e=>setSumDesde(e.target.value)}
+                        style={{ padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13 }} />
+                      <span style={{ fontSize:12, color:GR }}>Hasta</span>
+                      <input type="time" step="1800" value={sumHasta} onChange={e=>setSumHasta(e.target.value)}
+                        style={{ padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13 }} />
+                    </div>
+                  </div>
+                )}
 
-                <button disabled={!sumFecha||!sumFranja||sumEnviando} onClick={reservarSum}
+                <button disabled={!sumFecha||!sumDesde||!sumHasta||sumEnviando} onClick={reservarSum}
                   style={{ width:'100%', padding:'12px', border:'none', borderRadius:10, background:VD, color:'#fff',
-                    fontWeight:700, fontSize:14, cursor:(!sumFecha||!sumFranja||sumEnviando)?'default':'pointer',
-                    opacity:(!sumFecha||!sumFranja||sumEnviando)?0.6:1 }}>
+                    fontWeight:700, fontSize:14, cursor:(!sumFecha||!sumDesde||!sumHasta||sumEnviando)?'default':'pointer',
+                    opacity:(!sumFecha||!sumDesde||!sumHasta||sumEnviando)?0.6:1 }}>
                   {sumEnviando ? 'Procesando…' : 'Reservar'}
                 </button>
               </div>
