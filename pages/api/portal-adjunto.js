@@ -53,6 +53,16 @@ async function resolverUnidad(token) {
   return data || null
 }
 
+async function resolverInvitacion(inv) {
+  const tk = Array.isArray(inv) ? inv[0] : String(inv || '').trim()
+  if (!tk) return null
+  const { data } = await db.from('con_sum_invitaciones').select('unidad_id, expira, vigente').eq('token', tk).eq('vigente', true).maybeSingle()
+  if (!data) return null
+  if (data.expira && String(data.expira) < new Date().toISOString().slice(0, 10)) return null
+  const { data: u } = await db.from('con_unidades').select('id, consorcio_id, admin_id').eq('id', data.unidad_id).single()
+  return u || null
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return res.status(405).json({ error: 'metodo' })
@@ -62,7 +72,7 @@ export default async function handler(req, res) {
     const ext = MIME_OK[mime]
     if (!ext) return res.status(415).json({ error: 'tipo_no_permitido' })
 
-    const uf = await resolverUnidad(req.query?.token)
+    const uf = await resolverUnidad(req.query?.token) || await resolverInvitacion(req.query?.inv)
     if (!uf) return res.status(404).json({ error: 'link_invalido' })
 
     const limite = ext === 'pdf' ? MAX_PDF : MAX_IMG
