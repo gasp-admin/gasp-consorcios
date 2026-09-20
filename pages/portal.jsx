@@ -216,6 +216,8 @@ export default function Portal() {
   const [sumDesde, setSumDesde]         = useState('')
   const [sumHasta, setSumHasta]         = useState('')
   const [sumRecurso, setSumRecurso]     = useState('')
+  const [sumInvs, setSumInvs]           = useState([])
+  const [sumInvNota, setSumInvNota]     = useState('')
   const [sumMsg, setSumMsg]             = useState(null)
   const [sumEnviando, setSumEnviando]   = useState(false)
   const [sumArchivo, setSumArchivo]     = useState(null)
@@ -228,7 +230,30 @@ export default function Portal() {
       const esps = data.espacios || []
       setSumEspacios(esps); setSumDispo(data.dispo || []); setSumReservas(data.reservas || [])
       setSumEspSel(prev => esps.find(e => e.id === prev?.id) || esps[0] || null)
+      if (esps.some(e => e.permite_invitados)) cargarInvs()
     } catch (e) { /* si no hay espacios, la pestaña no aparece */ }
+  }
+  async function cargarInvs() {
+    try {
+      const resp = await fetch('/api/portal?accion=inv_listar&token=' + encodeURIComponent(token))
+      const data = await resp.json().catch(() => ({}))
+      setSumInvs(data.invitaciones || [])
+    } catch (e) { /* noop */ }
+  }
+  function linkInv(tk) { return (typeof window !== 'undefined' ? window.location.origin : '') + '/reservas?inv=' + tk }
+  async function copiarInv(tk) { try { await navigator.clipboard.writeText(linkInv(tk)); setSumMsg({ t: 'ok', m: 'Link copiado' }) } catch (e) { setSumMsg({ t: 'warn', m: linkInv(tk) }) } }
+  async function crearInv() {
+    try {
+      const resp = await fetch('/api/portal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accion: 'inv_crear', token, dias: 90, nota: sumInvNota }) })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.error) return setSumMsg({ t: 'error', m: data.error === 'invitados_no_habilitado' ? 'La administración no habilitó invitados en este consorcio' : 'No se pudo generar el link' })
+      setSumInvNota(''); cargarInvs(); setSumMsg({ t: 'ok', m: 'Link generado. Copialo y compartilo con el inquilino.' })
+    } catch (e) { setSumMsg({ t: 'error', m: 'Error de conexión' }) }
+  }
+  async function revocarInv(id) {
+    if (!confirm('¿Revocar este link? El inquilino ya no podrá reservar.')) return
+    await fetch('/api/portal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accion: 'inv_revocar', token, id }) })
+    cargarInvs()
   }
 
   function sumVentanasDe(ymd) {
@@ -1279,6 +1304,27 @@ export default function Portal() {
         {/* TAB: RESERVAS SUM / AMENITIES */}
         {tab === 'sum' && (
           <div>
+            {sumEspacios.some(e => e.permite_invitados) && (
+              <div style={{ background:'#fff', borderRadius:14, padding:16, boxShadow:'0 2px 8px #0001', marginBottom:12 }}>
+                <div style={{ fontWeight:700, fontSize:14, marginBottom:6 }}>🔑 Link para inquilino</div>
+                <div style={{ fontSize:12, color:GR, marginBottom:8 }}>Genera un acceso que permite <b>solo reservar</b> el espacio común (no ve tu cuenta ni tus expensas). Podés revocarlo cuando quieras.</div>
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:10 }}>
+                  <input value={sumInvNota} onChange={e=>setSumInvNota(e.target.value)} placeholder="Nota (ej. inquilino verano, opcional)"
+                    style={{ flex:1, minWidth:160, padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:7, fontSize:13 }} />
+                  <button onClick={crearInv} style={{ padding:'8px 14px', border:'none', borderRadius:8, background:AZ, color:'#fff', fontWeight:600, cursor:'pointer' }}>Generar link</button>
+                </div>
+                {sumInvs.filter(i=>i.vigente).length === 0
+                  ? <div style={{ fontSize:12, color:GR }}>Sin links activos.</div>
+                  : sumInvs.filter(i=>i.vigente).map(i => (
+                      <div key={i.id} style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', padding:'6px 0', borderTop:'1px solid #f1f5f9' }}>
+                        <span style={{ fontSize:12, color:GR, flex:1, minWidth:140, wordBreak:'break-all' }}>{linkInv(i.token)}</span>
+                        {i.expira && <span style={{ fontSize:11, color:GR }}>vence {i.expira}</span>}
+                        <button onClick={()=>copiarInv(i.token)} style={{ padding:'6px 10px', border:'1px solid #d1d5db', borderRadius:7, background:'#fff', cursor:'pointer', fontSize:12 }}>Copiar</button>
+                        <button onClick={()=>revocarInv(i.id)} style={{ padding:'6px 10px', border:'none', borderRadius:7, background:'#fee2e2', color:RJ, cursor:'pointer', fontSize:12 }}>Revocar</button>
+                      </div>
+                    ))}
+              </div>
+            )}
             {sumEspacios.length > 1 && (
               <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12 }}>
                 {sumEspacios.map(e => (
