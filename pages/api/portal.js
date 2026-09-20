@@ -141,7 +141,7 @@ export default async function handler(req, res) {
         const [rd, rr] = await Promise.all([
           db.from('con_sum_disponibilidad').select('id, espacio_id, dia_semana, franja_label, hora_inicio, hora_fin')
             .in('espacio_id', espIds).eq('activo', true),
-          db.from('con_sum_reservas').select('id, espacio_id, unidad_id, fecha, franja_label, inicio, fin, estado, tipo')
+          db.from('con_sum_reservas').select('id, espacio_id, unidad_id, fecha, franja_label, inicio, fin, estado, tipo, recurso_nro')
             .in('espacio_id', espIds).gte('fecha', desde)
             .in('estado', ['solicitada', 'pendiente_pago', 'confirmada']),
         ])
@@ -194,22 +194,39 @@ export default async function handler(req, res) {
       if (hf <= hi) { const dn = new Date(fecha + 'T12:00:00Z'); dn.setUTCDate(dn.getUTCDate() + 1); finFecha = dn.toISOString().slice(0, 10) }
       const fin = `${finFecha}T${hf}:00-03:00`
       const estado = esp.requiere_aprobacion ? 'solicitada' : (esp.requiere_pago ? 'pendiente_pago' : 'confirmada')
-      const row = {
-        id: `RES-${esp.id}-${Date.now()}`, admin_id: uf.admin_id, consorcio_id: uf.consorcio_id,
-        espacio_id: esp.id, unidad_id: uf.id, tipo: 'reserva', fecha, inicio, fin,
-        franja_label: `${hi}–${hf}`, estado,
-        pago_requerido: !!esp.requiere_pago,
-        pago_estado: esp.requiere_pago ? 'pendiente' : 'no_aplica',
-        pago_monto: esp.requiere_pago ? esp.tarifa : null,
-        creado_por: 'portal',
+      const cap = esp.capacidad || 1
+      const labels = (esp.reglas && Array.isArray(esp.reglas.recursos)) ? esp.reglas.recursos : []
+      const nombreRec = (n) => labels[n - 1] || (cap > 1 ? `${esp.nombre} ${n}` : esp.nombre)
+      // Determinar unidad(es) candidata(s): la elegida, o las libres que no solapan
+      let candidatos
+      if (b.recurso_nro != null && b.recurso_nro !== '') {
+        const n = parseInt(b.recurso_nro)
+        if (!(n >= 1 && n <= cap)) return res.status(400).json({ error: 'recurso_invalido' })
+        candidatos = [n]
+      } else {
+        const { data: ocup } = await db.from('con_sum_reservas').select('recurso_nro')
+          .eq('espacio_id', esp.id).in('estado', ['solicitada', 'pendiente_pago', 'confirmada'])
+          .lt('inicio', fin).gt('fin', inicio)
+        const taken = new Set((ocup || []).map((o) => o.recurso_nro))
+        candidatos = []
+        for (let n = 1; n <= cap; n++) if (!taken.has(n)) candidatos.push(n)
+        if (!candidatos.length) return res.status(409).json({ error: 'ocupado' })
       }
-      const { error } = await db.from('con_sum_reservas').insert([row])
-      if (error) {
-        const m = String(error.message || '')
-        if (m.includes('sum_sin_solape')) return res.status(409).json({ error: 'ocupado' })
-        return res.status(500).json({ error: 'insert', detalle: m })
+      const baseRow = {
+        admin_id: uf.admin_id, consorcio_id: uf.consorcio_id, espacio_id: esp.id, unidad_id: uf.id,
+        tipo: 'reserva', fecha, inicio, fin, franja_label: `${hi}–${hf}`, estado,
+        pago_requerido: !!esp.requiere_pago, pago_estado: esp.requiere_pago ? 'pendiente' : 'no_aplica',
+        pago_monto: esp.requiere_pago ? esp.tarifa : null, creado_por: 'portal',
       }
-      return res.status(200).json({ ok: true, reserva_id: row.id, estado, pago_requerido: row.pago_requerido, tarifa: esp.tarifa })
+      let creada = null
+      for (const nro of candidatos) {
+        const row = { ...baseRow, id: `RES-${esp.id}-${Date.now()}-${nro}`, recurso_nro: nro }
+        const { error } = await db.from('con_sum_reservas').insert([row])
+        if (!error) { creada = { id: row.id, nro }; break }
+        if (!String(error.message || '').includes('sum_sin_solape')) return res.status(500).json({ error: 'insert', detalle: error.message })
+      }
+      if (!creada) return res.status(409).json({ error: 'ocupado' })
+      return res.status(200).json({ ok: true, reserva_id: creada.id, estado, pago_requerido: !!esp.requiere_pago, tarifa: esp.tarifa, recurso_nro: creada.nro, recurso_label: nombreRec(creada.nro) })
     }
 
     // ── sum_adjuntar_pago: asociar el path del comprobante a la reserva (POST) ──
