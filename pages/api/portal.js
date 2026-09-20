@@ -172,7 +172,12 @@ export default async function handler(req, res) {
         .eq('espacio_id', esp.id).eq('unidad_id', uf.id).in('estado', ['solicitada', 'pendiente_pago', 'confirmada'])
       if ((count || 0) >= (esp.max_reservas_activas_uf || 1)) return res.status(400).json({ error: 'limite_reservas' })
       const inicio = `${fecha}T${disp.hora_inicio}-03:00`
-      const fin = `${fecha}T${disp.hora_fin}-03:00`
+      let finFecha = fecha
+      if (disp.hora_fin <= disp.hora_inicio) {   // franja nocturna: termina al día siguiente
+        const dn = new Date(fecha + 'T12:00:00Z'); dn.setUTCDate(dn.getUTCDate() + 1)
+        finFecha = dn.toISOString().slice(0, 10)
+      }
+      const fin = `${finFecha}T${disp.hora_fin}-03:00`
       const estado = esp.requiere_aprobacion ? 'solicitada' : (esp.requiere_pago ? 'pendiente_pago' : 'confirmada')
       const row = {
         id: `RES-${esp.id}-${Date.now()}`, admin_id: uf.admin_id, consorcio_id: uf.consorcio_id,
