@@ -361,7 +361,7 @@ export default function SUM() {
                           <td style={{ padding: 6 }}>{fmtD(r.fecha)}</td>
                           <td>{r.franja_label || '—'}</td>
                           <td>{recLabel(r) || '—'}</td>
-                          <td>{r.tipo === 'bloqueo' ? <i style={{ color: RJ }}>bloqueo</i> : (r.unidad_id || '—')}</td>
+                          <td>{r.tipo === 'bloqueo' ? <i style={{ color: RJ }}>bloqueo</i> : <>{r.unidad_id || '—'}{r.creado_por === 'inquilino' && <span style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 20, fontSize: 10, fontWeight: 600, background: '#eef2ff', color: AZ }}>inquilino</span>}</>}</td>
                           <td><span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, color: '#fff', background: EST_COLOR[r.estado] || GR }}>{EST_LABEL[r.estado] || r.estado}</span></td>
                           <td>{r.pago_requerido ? `${r.pago_estado}${r.pago_monto ? ' · ' + fmt(r.pago_monto) : ''}` : '—'}</td>
                           <td style={{ display: 'flex', gap: 4, flexWrap: 'wrap', padding: '6px 0' }}>
