@@ -130,6 +130,80 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true })
     }
 
+    // ── sum_config: espacios activos + disponibilidad + reservas ocupadas (SUM/Amenities) ──
+    if (accion === 'sum_config') {
+      const { data: esps } = await db.from('con_sum_espacios').select('*')
+        .eq('consorcio_id', uf.consorcio_id).eq('activo', true).order('created_at', { ascending: true })
+      const espIds = (esps || []).map((e) => e.id)
+      let dispo = [], reservas = []
+      if (espIds.length) {
+        const desde = new Date().toISOString().slice(0, 10)
+        const [rd, rr] = await Promise.all([
+          db.from('con_sum_disponibilidad').select('id, espacio_id, dia_semana, franja_label, hora_inicio, hora_fin')
+            .in('espacio_id', espIds).eq('activo', true),
+          db.from('con_sum_reservas').select('id, espacio_id, unidad_id, fecha, franja_label, estado, tipo')
+            .in('espacio_id', espIds).gte('fecha', desde)
+            .in('estado', ['solicitada', 'pendiente_pago', 'confirmada']),
+        ])
+        dispo = rd.data || []; reservas = rr.data || []
+      }
+      return res.status(200).json({ espacios: esps || [], dispo, reservas })
+    }
+
+    // ── sum_reservar: crear una reserva del propietario (POST) ──
+    if (accion === 'sum_reservar' && isPost) {
+      const b = req.body || {}
+      const { data: esp } = await db.from('con_sum_espacios').select('*')
+        .eq('id', b.espacio_id).eq('consorcio_id', uf.consorcio_id).eq('activo', true).maybeSingle()
+      if (!esp) return res.status(400).json({ error: 'espacio_invalido' })
+      const fecha = String(b.fecha || '')
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return res.status(400).json({ error: 'fecha_invalida' })
+      const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+      const fd = new Date(fecha + 'T12:00:00Z')
+      const maxd = esp.anticipacion_max_dias || 60
+      const limite = new Date(hoy.getTime() + maxd * 86400000)
+      if (fd < hoy || fd > new Date(limite.getTime() + 86400000)) return res.status(400).json({ error: 'fecha_fuera_de_rango' })
+      const dow = fd.getUTCDay()
+      const { data: disps } = await db.from('con_sum_disponibilidad').select('*')
+        .eq('espacio_id', esp.id).eq('activo', true).eq('dia_semana', dow).eq('franja_label', b.franja_label).limit(1)
+      const disp = (disps || [])[0]
+      if (!disp) return res.status(400).json({ error: 'franja_no_disponible' })
+      const { count } = await db.from('con_sum_reservas').select('id', { count: 'exact', head: true })
+        .eq('espacio_id', esp.id).eq('unidad_id', uf.id).in('estado', ['solicitada', 'pendiente_pago', 'confirmada'])
+      if ((count || 0) >= (esp.max_reservas_activas_uf || 1)) return res.status(400).json({ error: 'limite_reservas' })
+      const inicio = `${fecha}T${disp.hora_inicio}-03:00`
+      const fin = `${fecha}T${disp.hora_fin}-03:00`
+      const estado = esp.requiere_aprobacion ? 'solicitada' : (esp.requiere_pago ? 'pendiente_pago' : 'confirmada')
+      const row = {
+        id: `RES-${esp.id}-${Date.now()}`, admin_id: uf.admin_id, consorcio_id: uf.consorcio_id,
+        espacio_id: esp.id, unidad_id: uf.id, tipo: 'reserva', fecha, inicio, fin,
+        franja_label: b.franja_label, estado,
+        pago_requerido: !!esp.requiere_pago,
+        pago_estado: esp.requiere_pago ? 'pendiente' : 'no_aplica',
+        pago_monto: esp.requiere_pago ? esp.tarifa : null,
+        creado_por: 'portal',
+      }
+      const { error } = await db.from('con_sum_reservas').insert([row])
+      if (error) {
+        const m = String(error.message || '')
+        if (m.includes('sum_sin_solape')) return res.status(409).json({ error: 'ocupado' })
+        return res.status(500).json({ error: 'insert', detalle: m })
+      }
+      return res.status(200).json({ ok: true, reserva_id: row.id, estado, pago_requerido: row.pago_requerido, tarifa: esp.tarifa })
+    }
+
+    // ── sum_adjuntar_pago: asociar el path del comprobante a la reserva (POST) ──
+    if (accion === 'sum_adjuntar_pago' && isPost) {
+      const b = req.body || {}
+      const { data: r } = await db.from('con_sum_reservas').select('id, unidad_id').eq('id', b.reserva_id).maybeSingle()
+      if (!r || r.unidad_id !== uf.id) return res.status(403).json({ error: 'reserva_ajena' })
+      const { error } = await db.from('con_sum_reservas')
+        .update({ pago_adjunto_path: String(b.path || '').slice(0, 300), pago_estado: 'pendiente' })
+        .eq('id', b.reserva_id)
+      if (error) return res.status(500).json({ error: 'update', detalle: error.message })
+      return res.status(200).json({ ok: true })
+    }
+
     return res.status(400).json({ error: 'accion_desconocida' })
   } catch (e) {
     return res.status(500).json({ error: String(e?.message || e) })
