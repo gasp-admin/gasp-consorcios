@@ -141,11 +141,13 @@ export default async function handler(req, res) {
         const [rd, rr] = await Promise.all([
           db.from('con_sum_disponibilidad').select('id, espacio_id, dia_semana, franja_label, hora_inicio, hora_fin')
             .in('espacio_id', espIds).eq('activo', true),
-          db.from('con_sum_reservas').select('id, espacio_id, unidad_id, fecha, franja_label, estado, tipo')
+          db.from('con_sum_reservas').select('id, espacio_id, unidad_id, fecha, franja_label, inicio, fin, estado, tipo')
             .in('espacio_id', espIds).gte('fecha', desde)
             .in('estado', ['solicitada', 'pendiente_pago', 'confirmada']),
         ])
-        dispo = rd.data || []; reservas = rr.data || []
+        const hhmm = (iso) => { if (!iso) return ''; const d = new Date(iso); return String((d.getUTCHours() + 21) % 24).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0') }
+        dispo = rd.data || []
+        reservas = (rr.data || []).map((r) => ({ ...r, hora_inicio_txt: hhmm(r.inicio), hora_fin_txt: hhmm(r.fin) }))
       }
       return res.status(200).json({ espacios: esps || [], dispo, reservas })
     }
@@ -163,26 +165,39 @@ export default async function handler(req, res) {
       const maxd = esp.anticipacion_max_dias || 60
       const limite = new Date(hoy.getTime() + maxd * 86400000)
       if (fd < hoy || fd > new Date(limite.getTime() + 86400000)) return res.status(400).json({ error: 'fecha_fuera_de_rango' })
+      const hi = String(b.hora_inicio || ''), hf = String(b.hora_fin || '')
+      if (!/^\d{2}:\d{2}$/.test(hi) || !/^\d{2}:\d{2}$/.test(hf)) return res.status(400).json({ error: 'hora_invalida' })
       const dow = fd.getUTCDay()
-      const { data: disps } = await db.from('con_sum_disponibilidad').select('*')
-        .eq('espacio_id', esp.id).eq('activo', true).eq('dia_semana', dow).eq('franja_label', b.franja_label).limit(1)
-      const disp = (disps || [])[0]
-      if (!disp) return res.status(400).json({ error: 'franja_no_disponible' })
+      const { data: wins } = await db.from('con_sum_disponibilidad').select('*')
+        .eq('espacio_id', esp.id).eq('activo', true).eq('dia_semana', dow)
+      if (!wins || !wins.length) return res.status(400).json({ error: 'dia_no_disponible' })
+      const toMin = (t) => { const p = String(t).split(':'); return (parseInt(p[0]) || 0) * 60 + (parseInt(p[1]) || 0) }
+      const reglas = esp.reglas || {}
+      const gran = reglas.granularidad_min || 30
+      const dmin = reglas.dur_min_min || 60
+      const dmax = reglas.dur_max_min || 360
+      if (toMin(hi) % gran !== 0 || toMin(hf) % gran !== 0) return res.status(400).json({ error: 'granularidad' })
+      const rs = toMin(hi); let re = toMin(hf); while (re <= rs) re += 1440
+      const dur = re - rs
+      if (dur < dmin || dur > dmax) return res.status(400).json({ error: 'duracion_invalida' })
+      const cabe = (wins || []).some((w) => {
+        let o = toMin(w.hora_inicio), c = toMin(w.hora_fin); if (c <= o) c += 1440
+        let s = rs; if (s < o) s += 1440
+        return s >= o && (s + dur) <= c
+      })
+      if (!cabe) return res.status(400).json({ error: 'fuera_de_ventana' })
       const { count } = await db.from('con_sum_reservas').select('id', { count: 'exact', head: true })
         .eq('espacio_id', esp.id).eq('unidad_id', uf.id).in('estado', ['solicitada', 'pendiente_pago', 'confirmada'])
       if ((count || 0) >= (esp.max_reservas_activas_uf || 1)) return res.status(400).json({ error: 'limite_reservas' })
-      const inicio = `${fecha}T${disp.hora_inicio}-03:00`
+      const inicio = `${fecha}T${hi}:00-03:00`
       let finFecha = fecha
-      if (disp.hora_fin <= disp.hora_inicio) {   // franja nocturna: termina al día siguiente
-        const dn = new Date(fecha + 'T12:00:00Z'); dn.setUTCDate(dn.getUTCDate() + 1)
-        finFecha = dn.toISOString().slice(0, 10)
-      }
-      const fin = `${finFecha}T${disp.hora_fin}-03:00`
+      if (hf <= hi) { const dn = new Date(fecha + 'T12:00:00Z'); dn.setUTCDate(dn.getUTCDate() + 1); finFecha = dn.toISOString().slice(0, 10) }
+      const fin = `${finFecha}T${hf}:00-03:00`
       const estado = esp.requiere_aprobacion ? 'solicitada' : (esp.requiere_pago ? 'pendiente_pago' : 'confirmada')
       const row = {
         id: `RES-${esp.id}-${Date.now()}`, admin_id: uf.admin_id, consorcio_id: uf.consorcio_id,
         espacio_id: esp.id, unidad_id: uf.id, tipo: 'reserva', fecha, inicio, fin,
-        franja_label: b.franja_label, estado,
+        franja_label: `${hi}–${hf}`, estado,
         pago_requerido: !!esp.requiere_pago,
         pago_estado: esp.requiere_pago ? 'pendiente' : 'no_aplica',
         pago_monto: esp.requiere_pago ? esp.tarifa : null,
