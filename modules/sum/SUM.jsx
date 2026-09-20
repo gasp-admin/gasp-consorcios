@@ -57,7 +57,7 @@ export default function SUM() {
   useEffect(() => { cargarDetalle() }, [cargarDetalle])
 
   function nuevoEspacio() {
-    setForm({ activo: true, requiere_pago: false, requiere_aprobacion: false, registrar_ingreso_caja: false, auto_confirmar_pago: false, tarifa: 0, anticipacion_max_dias: 60, max_reservas_activas_uf: 1, dur_min_h: 1, dur_max_h: 6, gran_min: 30, capacidad: 1, recursos_txt: '' })
+    setForm({ activo: true, requiere_pago: false, requiere_aprobacion: false, registrar_ingreso_caja: false, auto_confirmar_pago: false, tarifa: 0, anticipacion_max_dias: 60, max_reservas_activas_uf: 1, dur_min_h: 1, dur_max_h: 6, gran_min: 30, capacidad: 1, recursos_txt: '', permite_invitados: false })
   }
   function editarEspacio(e) {
     const r = e.reglas || {}
@@ -77,7 +77,7 @@ export default function SUM() {
     const payload = {
       nombre: form.nombre.trim(), activo: !!form.activo, requiere_pago: !!form.requiere_pago,
       tarifa: parseFloat(form.tarifa) || 0, requiere_aprobacion: !!form.requiere_aprobacion,
-      registrar_ingreso_caja: !!form.registrar_ingreso_caja, auto_confirmar_pago: !!form.auto_confirmar_pago,
+      registrar_ingreso_caja: !!form.registrar_ingreso_caja, auto_confirmar_pago: !!form.auto_confirmar_pago, permite_invitados: !!form.permite_invitados,
       anticipacion_max_dias: parseInt(form.anticipacion_max_dias) || 60,
       max_reservas_activas_uf: parseInt(form.max_reservas_activas_uf) || 1, capacidad: cap, reglas,
     }
@@ -224,6 +224,7 @@ export default function SUM() {
             <label><input type="checkbox" checked={!!form.requiere_aprobacion} onChange={e => setForm(f => ({ ...f, requiere_aprobacion: e.target.checked }))} /> Requiere aprobación (si no, autoservicio)</label>
             <label><input type="checkbox" checked={!!form.registrar_ingreso_caja} onChange={e => setForm(f => ({ ...f, registrar_ingreso_caja: e.target.checked }))} /> Registrar ingreso a caja (Uso Amenities)</label>
             <label><input type="checkbox" checked={!!form.auto_confirmar_pago} onChange={e => setForm(f => ({ ...f, auto_confirmar_pago: e.target.checked }))} /> Confiar en comprobante (auto-confirma)</label>
+            <label><input type="checkbox" checked={!!form.permite_invitados} onChange={e => setForm(f => ({ ...f, permite_invitados: e.target.checked }))} /> Permite reservas por invitado (inquilino)</label>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
