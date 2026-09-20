@@ -1,8 +1,7 @@
 // modules/sum/SUM.jsx — Gestión de SUM / Amenities (lado admin).
+// Modelo: ventana operativa por día (apertura–cierre) + el propietario elige rango libre.
 // Camino A: el pago confirmado impacta la caja vía RPC sum_confirmar_pago → con_movimientos_varios.
-// No toca cta cte / cobranzas / Estado Financiero. Tablas propias con_sum_*.
-// NOTA: usa controles nativos (input/select/span) — el Input/Sel de components/ui reenvía
-// el VALOR (no el evento), así que acá se evitan para no romper el onChange.
+// Controles nativos (input/select) — el Input/Sel de components/ui reenvía el VALOR, no el evento.
 
 import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '../../context/AppContext'
@@ -12,16 +11,11 @@ import { fmt, fmtD } from '../../lib/formatters'
 import { Btn, BtnSec, Card, Msg } from '../../components/ui'
 
 const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
-const FRANJAS_PRESET = [
-  { label: 'Día completo', hi: '10:00', hf: '23:59' },
-  { label: 'Mañana',       hi: '09:00', hf: '14:00' },
-  { label: 'Tarde',        hi: '15:00', hf: '20:00' },
-  { label: 'Noche',        hi: '20:00', hf: '02:00' },
-]
 const EST_COLOR = { solicitada: AM, pendiente_pago: AM, confirmada: VD, rechazada: RJ, cancelada: GR, expirada: GR }
 const EST_LABEL = { solicitada: 'Solicitada', pendiente_pago: 'Pend. pago', confirmada: 'Confirmada', rechazada: 'Rechazada', cancelada: 'Cancelada', expirada: 'Expirada' }
 const INP = { padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 7, fontSize: 13, boxSizing: 'border-box', width: '100%' }
 const INPS = { padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }
+const cierreTxt = (hi, hf) => (hf <= hi ? (hf === '00:00:00' || hf === '00:00' ? '24:00' : hf.slice(0, 5) + ' (+1)') : hf.slice(0, 5))
 
 export default function SUM() {
   const app = useApp()
@@ -35,8 +29,8 @@ export default function SUM() {
   const [dispo, setDispo]       = useState([])
   const [reservas, setReservas] = useState([])
   const [form, setForm]         = useState(null)
-  const [dForm, setDForm]       = useState(null)
-  const [bForm, setBForm]       = useState(null)
+  const [wForm, setWForm]       = useState(null)   // form de ventana operativa
+  const [bForm, setBForm]       = useState(null)   // form de bloqueo admin
   const [fEstado, setFEstado]   = useState('activas')
   const [msg, setMsg]           = useState(null)
   const hoy = new Date().toISOString().split('T')[0]
@@ -45,8 +39,7 @@ export default function SUM() {
 
   const cargarEspacios = useCallback(async () => {
     if (!consorcioId) return
-    const { data } = await supabase.from('con_sum_espacios').select('*')
-      .eq('consorcio_id', consorcioId).order('created_at', { ascending: true })
+    const { data } = await supabase.from('con_sum_espacios').select('*').eq('consorcio_id', consorcioId).order('created_at', { ascending: true })
     setEspacios(data || [])
     setEspSel(prev => (data || []).find(e => e.id === prev?.id) || (data || [])[0] || null)
   }, [consorcioId])
@@ -63,15 +56,28 @@ export default function SUM() {
   useEffect(() => { cargarEspacios() }, [cargarEspacios])
   useEffect(() => { cargarDetalle() }, [cargarDetalle])
 
+  function nuevoEspacio() {
+    setForm({ activo: true, requiere_pago: false, requiere_aprobacion: false, registrar_ingreso_caja: false, auto_confirmar_pago: false, tarifa: 0, anticipacion_max_dias: 60, max_reservas_activas_uf: 1, dur_min_h: 1, dur_max_h: 6, gran_min: 30 })
+  }
+  function editarEspacio(e) {
+    const r = e.reglas || {}
+    setForm({ ...e, dur_min_h: (r.dur_min_min || 60) / 60, dur_max_h: (r.dur_max_min || 360) / 60, gran_min: r.granularidad_min || 30 })
+  }
+
   async function guardarEspacio() {
     if (!guard()) return
     if (!form?.nombre?.trim()) return setMsg({ tipo: 'warn', texto: 'Ingresá el nombre del espacio' })
+    const reglas = {
+      dur_min_min: Math.round((parseFloat(form.dur_min_h) || 1) * 60),
+      dur_max_min: Math.round((parseFloat(form.dur_max_h) || 6) * 60),
+      granularidad_min: parseInt(form.gran_min) || 30,
+    }
     const payload = {
       nombre: form.nombre.trim(), activo: !!form.activo, requiere_pago: !!form.requiere_pago,
       tarifa: parseFloat(form.tarifa) || 0, requiere_aprobacion: !!form.requiere_aprobacion,
       registrar_ingreso_caja: !!form.registrar_ingreso_caja, auto_confirmar_pago: !!form.auto_confirmar_pago,
       anticipacion_max_dias: parseInt(form.anticipacion_max_dias) || 60,
-      max_reservas_activas_uf: parseInt(form.max_reservas_activas_uf) || 1,
+      max_reservas_activas_uf: parseInt(form.max_reservas_activas_uf) || 1, reglas,
     }
     if (form.id) {
       const { error } = await supabase.from('con_sum_espacios').update(payload).eq('id', form.id)
@@ -85,23 +91,32 @@ export default function SUM() {
     setForm(null); cargarEspacios()
   }
 
-  async function agregarFranja() {
-    if (!guard()) return
-    if (!dForm || dForm.dia === '' || dForm.dia == null) return setMsg({ tipo: 'warn', texto: 'Elegí el día' })
-    if (dForm.hf === dForm.hi) return setMsg({ tipo: 'warn', texto: 'La hora fin no puede ser igual al inicio' })
-    const { error } = await supabase.from('con_sum_disponibilidad').insert([{
-      id: `DISP-${espSel.id}-${Date.now()}`, admin_id: uid, espacio_id: espSel.id,
-      dia_semana: parseInt(dForm.dia), franja_label: dForm.label || 'Franja', hora_inicio: dForm.hi, hora_fin: dForm.hf, activo: true,
-    }])
-    if (error) return setMsg({ tipo: 'error', texto: error.message })
-    setDForm(null); cargarDetalle()
+  // ── Ventanas operativas (una fila por día) ──
+  function toggleDia(dw) {
+    setWForm(f => {
+      const dias = f.dias.includes(dw) ? f.dias.filter(x => x !== dw) : [...f.dias, dw]
+      return { ...f, dias }
+    })
   }
-  async function borrarFranja(id) {
+  async function agregarVentana() {
     if (!guard()) return
-    if (!confirm('¿Quitar esta franja de disponibilidad?')) return
+    if (!wForm?.dias?.length) return setMsg({ tipo: 'warn', texto: 'Elegí al menos un día' })
+    if (wForm.cierre === wForm.apertura) return setMsg({ tipo: 'warn', texto: 'El cierre no puede ser igual a la apertura' })
+    const rows = wForm.dias.map(dw => ({
+      id: `DISP-${espSel.id}-${Date.now()}-${dw}`, admin_id: uid, espacio_id: espSel.id,
+      dia_semana: parseInt(dw), franja_label: 'Ventana', hora_inicio: wForm.apertura, hora_fin: wForm.cierre, activo: true,
+    }))
+    const { error } = await supabase.from('con_sum_disponibilidad').insert(rows)
+    if (error) return setMsg({ tipo: 'error', texto: error.message })
+    setWForm(null); cargarDetalle()
+  }
+  async function borrarVentana(id) {
+    if (!guard()) return
+    if (!confirm('¿Quitar esta ventana?')) return
     await supabase.from('con_sum_disponibilidad').delete().eq('id', id); cargarDetalle()
   }
 
+  // ── Reservas ──
   async function aprobar(r) {
     if (!guard()) return
     const estado = r.pago_requerido ? 'pendiente_pago' : 'confirmada'
@@ -111,13 +126,13 @@ export default function SUM() {
   }
   async function rechazar(r) {
     if (!guard()) return
-    if (!confirm('¿Rechazar esta reserva? Libera el día/horario.')) return
+    if (!confirm('¿Rechazar esta reserva? Libera el horario.')) return
     await supabase.from('con_sum_reservas').update({ estado: 'rechazada' }).eq('id', r.id)
     setMsg({ tipo: 'ok', texto: 'Reserva rechazada' }); cargarDetalle()
   }
   async function cancelar(r) {
     if (!guard()) return
-    if (!confirm('¿Cancelar esta reserva? Libera el día/horario.')) return
+    if (!confirm('¿Cancelar esta reserva? Libera el horario.')) return
     await supabase.from('con_sum_reservas').update({ estado: 'cancelada' }).eq('id', r.id)
     setMsg({ tipo: 'ok', texto: 'Reserva cancelada. Si tenía ingreso de caja, revisalo en Movimientos varios.' }); cargarDetalle()
   }
@@ -144,7 +159,7 @@ export default function SUM() {
     const fin = `${finFecha}T${bForm.hf}:00-03:00`
     const { error } = await supabase.from('con_sum_reservas').insert([{
       id: `RES-${espSel.id}-${Date.now()}`, admin_id: uid, consorcio_id: consorcioId, espacio_id: espSel.id,
-      unidad_id: null, tipo: 'bloqueo', fecha: bForm.fecha, inicio, fin, franja_label: bForm.label || 'Bloqueo',
+      unidad_id: null, tipo: 'bloqueo', fecha: bForm.fecha, inicio, fin, franja_label: `${bForm.hi}–${bForm.hf}`,
       estado: 'confirmada', creado_por: 'admin', notas: bForm.notas || 'Bloqueo administrativo',
     }])
     if (error) return setMsg({ tipo: 'error', texto: error.message.includes('sum_sin_solape') ? 'Ese día/horario ya está ocupado o reservado' : error.message })
@@ -163,9 +178,7 @@ export default function SUM() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <div style={{ fontWeight: 700, fontSize: 15 }}>🏖️ Reservas SUM / Amenities</div>
-        <Btn small color={AZ} onClick={() => setForm({ activo: true, requiere_pago: false, requiere_aprobacion: false, registrar_ingreso_caja: false, auto_confirmar_pago: false, tarifa: 0, anticipacion_max_dias: 60, max_reservas_activas_uf: 1 })}>
-          + Nuevo espacio
-        </Btn>
+        <Btn small color={AZ} onClick={nuevoEspacio}>+ Nuevo espacio</Btn>
       </div>
       <Msg data={msg} />
 
@@ -199,14 +212,30 @@ export default function SUM() {
             <label><input type="checkbox" checked={!!form.registrar_ingreso_caja} onChange={e => setForm(f => ({ ...f, registrar_ingreso_caja: e.target.checked }))} /> Registrar ingreso a caja (Uso Amenities)</label>
             <label><input type="checkbox" checked={!!form.auto_confirmar_pago} onChange={e => setForm(f => ({ ...f, auto_confirmar_pago: e.target.checked }))} /> Confiar en comprobante (auto-confirma)</label>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <div style={{ fontSize: 12, color: GR, marginBottom: 4 }}>Anticipación máx. (días)</div>
+              <div style={{ fontSize: 12, color: GR, marginBottom: 4 }}>Anticip. máx. (días)</div>
               <input type="number" value={form.anticipacion_max_dias} onChange={e => setForm(f => ({ ...f, anticipacion_max_dias: e.target.value }))} style={INP} />
             </div>
             <div>
-              <div style={{ fontSize: 12, color: GR, marginBottom: 4 }}>Reservas activas máx. por UF</div>
+              <div style={{ fontSize: 12, color: GR, marginBottom: 4 }}>Reservas/UF</div>
               <input type="number" value={form.max_reservas_activas_uf} onChange={e => setForm(f => ({ ...f, max_reservas_activas_uf: e.target.value }))} style={INP} />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: GR, marginBottom: 4 }}>Dur. mín (h)</div>
+              <input type="number" step="0.5" value={form.dur_min_h} onChange={e => setForm(f => ({ ...f, dur_min_h: e.target.value }))} style={INP} />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: GR, marginBottom: 4 }}>Dur. máx (h)</div>
+              <input type="number" step="0.5" value={form.dur_max_h} onChange={e => setForm(f => ({ ...f, dur_max_h: e.target.value }))} style={INP} />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: GR, marginBottom: 4 }}>Granularidad</div>
+              <select value={form.gran_min} onChange={e => setForm(f => ({ ...f, gran_min: e.target.value }))} style={INP}>
+                <option value={15}>15 min</option>
+                <option value={30}>30 min</option>
+                <option value={60}>60 min</option>
+              </select>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -219,37 +248,45 @@ export default function SUM() {
       {espSel && (
         <>
           <Card style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <div style={{ fontWeight: 700, fontSize: 13 }}>🗓️ Disponibilidad — {espSel.nombre}</div>
-              <Btn small color={AZ} onClick={() => setDForm({ dia: '', label: 'Día completo', hi: '10:00', hf: '23:59' })}>+ Franja</Btn>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>🗓️ Ventana operativa por día — {espSel.nombre}</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <BtnSec small onClick={() => editarEspacio(espSel)}>✏ Editar espacio</BtnSec>
+                <Btn small color={AZ} onClick={() => setWForm({ dias: [], apertura: '10:00', cierre: '00:00' })}>+ Ventana</Btn>
+              </div>
             </div>
-            {dForm && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12, background: '#f8fafc', padding: 10, borderRadius: 8 }}>
-                <select value={dForm.dia} onChange={e => setDForm(f => ({ ...f, dia: e.target.value }))} style={INPS}>
-                  <option value="">Día…</option>
-                  {DIAS.map((d, i) => <option key={i} value={i}>{d}</option>)}
-                </select>
-                <select value={dForm.label} onChange={e => { const p = FRANJAS_PRESET.find(x => x.label === e.target.value); setDForm(f => ({ ...f, label: e.target.value, hi: p ? p.hi : f.hi, hf: p ? p.hf : f.hf })) }} style={INPS}>
-                  {FRANJAS_PRESET.map(p => <option key={p.label} value={p.label}>{p.label}</option>)}
-                </select>
-                <input type="time" value={dForm.hi} onChange={e => setDForm(f => ({ ...f, hi: e.target.value }))} style={INPS} />
-                <span style={{ color: GR }}>a</span>
-                <input type="time" value={dForm.hf} onChange={e => setDForm(f => ({ ...f, hf: e.target.value }))} style={INPS} />
-                {dForm.hf && dForm.hi && dForm.hf < dForm.hi && <span style={{ fontSize: 11, color: AM }}>termina al día siguiente</span>}
-                <Btn small color={VD} onClick={agregarFranja}>Agregar</Btn>
-                <BtnSec small onClick={() => setDForm(null)}>Cancelar</BtnSec>
+            {wForm && (
+              <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: GR, marginBottom: 6 }}>Días</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                  {DIAS.map((d, i) => (
+                    <span key={i} onClick={() => toggleDia(i)} style={{ cursor: 'pointer', padding: '4px 10px', borderRadius: 20, fontSize: 12, border: `1.5px solid ${wForm.dias.includes(i) ? AZ : '#e5e7eb'}`, background: wForm.dias.includes(i) ? '#eff6ff' : '#fff' }}>{d}</span>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, color: GR }}>Apertura</span>
+                  <input type="time" value={wForm.apertura} onChange={e => setWForm(f => ({ ...f, apertura: e.target.value }))} style={INPS} />
+                  <span style={{ fontSize: 12, color: GR }}>Cierre</span>
+                  <input type="time" value={wForm.cierre} onChange={e => setWForm(f => ({ ...f, cierre: e.target.value }))} style={INPS} />
+                  <span style={{ fontSize: 11, color: AM }}>00:00 = medianoche (24 hs){wForm.cierre && wForm.apertura && wForm.cierre < wForm.apertura && wForm.cierre !== '00:00' ? ' · cierra al día siguiente' : ''}</span>
+                  <Btn small color={VD} onClick={agregarVentana}>Agregar</Btn>
+                  <BtnSec small onClick={() => setWForm(null)}>Cancelar</BtnSec>
+                </div>
               </div>
             )}
             {dispo.length === 0
-              ? <div style={{ color: GR, fontSize: 13 }}>Sin franjas cargadas. El propietario no verá días disponibles hasta que agregues al menos una.</div>
+              ? <div style={{ color: GR, fontSize: 13 }}>Sin ventanas cargadas. El propietario no verá días disponibles hasta que agregues al menos una.</div>
               : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {dispo.map(d => (
                     <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: '#eff6ff', fontSize: 12 }}>
-                      <b>{DIAS[d.dia_semana]}</b> {d.franja_label} {d.hora_inicio?.slice(0, 5)}–{d.hora_fin?.slice(0, 5)}{d.hora_fin <= d.hora_inicio ? ' (+1 día)' : ''}
-                      <span style={{ cursor: 'pointer', color: RJ }} onClick={() => borrarFranja(d.id)}>✕</span>
+                      <b>{DIAS[d.dia_semana]}</b> {d.hora_inicio?.slice(0, 5)}–{cierreTxt(d.hora_inicio, d.hora_fin)}
+                      <span style={{ cursor: 'pointer', color: RJ }} onClick={() => borrarVentana(d.id)}>✕</span>
                     </div>
                   ))}
                 </div>}
+            <div style={{ fontSize: 11, color: GR, marginTop: 8 }}>
+              Duración {(espSel.reglas?.dur_min_min || 60) / 60}–{(espSel.reglas?.dur_max_min || 360) / 60} h · turnos cada {espSel.reglas?.granularidad_min || 30} min. El propietario elige su rango dentro de la ventana.
+            </div>
           </Card>
 
           <Card>
@@ -263,7 +300,7 @@ export default function SUM() {
                   <option value="confirmada">Confirmadas</option>
                   <option value="todas">Todas</option>
                 </select>
-                <Btn small color={RJ} onClick={() => setBForm({ fecha: hoy, label: 'Bloqueo', hi: '10:00', hf: '23:59' })}>🚫 Bloquear día</Btn>
+                <Btn small color={RJ} onClick={() => setBForm({ fecha: hoy, hi: '10:00', hf: '00:00' })}>🚫 Bloquear</Btn>
               </div>
             </div>
 
@@ -285,7 +322,7 @@ export default function SUM() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
                       <tr style={{ textAlign: 'left', color: GR, borderBottom: '1px solid #e5e7eb' }}>
-                        <th style={{ padding: 6 }}>Fecha</th><th>Franja</th><th>UF</th><th>Estado</th><th>Pago</th><th>Acciones</th>
+                        <th style={{ padding: 6 }}>Fecha</th><th>Horario</th><th>UF</th><th>Estado</th><th>Pago</th><th>Acciones</th>
                       </tr>
                     </thead>
                     <tbody>
