@@ -1325,7 +1325,7 @@ export default function Portal() {
                           <button key={f.id} onClick={()=>setSumFranja(f.franja_label)}
                             style={{ padding:'8px 10px', borderRadius:9, border:`1.5px solid ${sumFranja===f.franja_label?AZ:'#e5e7eb'}`,
                               background: sumFranja===f.franja_label?'#eff6ff':'#fff', cursor:'pointer', fontSize:12 }}>
-                            {f.franja_label} {String(f.hora_inicio).slice(0,5)}–{String(f.hora_fin).slice(0,5)}
+                            {f.franja_label} {String(f.hora_inicio).slice(0,5)}–{String(f.hora_fin).slice(0,5)}{f.hora_fin <= f.hora_inicio ? ' (+1)' : ''}
                           </button>
                         ))}
                       </div>
