@@ -13,6 +13,7 @@
 // NO toca el cliente Supabase del portal (pages/portal.jsx) — eso rompía el build de Vercel.
 
 import { createClient } from '@supabase/supabase-js'
+import { randomBytes } from 'crypto'
 
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -27,6 +28,16 @@ async function resolverUnidad(token) {
   return data || null
 }
 
+async function resolverInvitacion(inv) {
+  const tk = Array.isArray(inv) ? inv[0] : String(inv || '').trim()
+  if (!tk) return null
+  const { data } = await db.from('con_sum_invitaciones').select('*').eq('token', tk).eq('vigente', true).maybeSingle()
+  if (!data) return null
+  if (data.expira && String(data.expira) < new Date().toISOString().slice(0, 10)) return null
+  const { data: u } = await db.from('con_unidades').select('*').eq('id', data.unidad_id).single()
+  return u || null
+}
+
 export default async function handler(req, res) {
   try {
     if (!SUPA_URL || !SRV_KEY) return res.status(500).json({ error: 'config' })
@@ -34,9 +45,15 @@ export default async function handler(req, res) {
     const isPost = req.method === 'POST'
     const accion = (isPost ? req.body?.accion : req.query?.accion) || 'init'
     const token  = isPost ? req.body?.token : req.query?.token
+    const inv    = isPost ? req.body?.inv : req.query?.inv
 
-    const uf = await resolverUnidad(token)
+    let uf, scope = 'full'
+    if (inv) { uf = await resolverInvitacion(inv); scope = 'reservas' }
+    else { uf = await resolverUnidad(token) }
     if (!uf) return res.status(404).json({ error: 'link_invalido' })
+    if (scope === 'reservas' && !['sum_config', 'sum_reservar', 'sum_adjuntar_pago'].includes(accion)) {
+      return res.status(403).json({ error: 'scope' })
+    }
 
     // ── init: carga inicial del portal ──
     if (accion === 'init') {
@@ -132,8 +149,9 @@ export default async function handler(req, res) {
 
     // ── sum_config: espacios activos + disponibilidad + reservas ocupadas (SUM/Amenities) ──
     if (accion === 'sum_config') {
-      const { data: esps } = await db.from('con_sum_espacios').select('*')
+      const { data: espsAll } = await db.from('con_sum_espacios').select('*')
         .eq('consorcio_id', uf.consorcio_id).eq('activo', true).order('created_at', { ascending: true })
+      const esps = scope === 'reservas' ? (espsAll || []).filter((e) => e.permite_invitados) : (espsAll || [])
       const espIds = (esps || []).map((e) => e.id)
       let dispo = [], reservas = []
       if (espIds.length) {
@@ -158,6 +176,7 @@ export default async function handler(req, res) {
       const { data: esp } = await db.from('con_sum_espacios').select('*')
         .eq('id', b.espacio_id).eq('consorcio_id', uf.consorcio_id).eq('activo', true).maybeSingle()
       if (!esp) return res.status(400).json({ error: 'espacio_invalido' })
+      if (scope === 'reservas' && !esp.permite_invitados) return res.status(403).json({ error: 'scope' })
       const fecha = String(b.fecha || '')
       if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return res.status(400).json({ error: 'fecha_invalida' })
       const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
@@ -216,7 +235,7 @@ export default async function handler(req, res) {
         admin_id: uf.admin_id, consorcio_id: uf.consorcio_id, espacio_id: esp.id, unidad_id: uf.id,
         tipo: 'reserva', fecha, inicio, fin, franja_label: `${hi}–${hf}`, estado,
         pago_requerido: !!esp.requiere_pago, pago_estado: esp.requiere_pago ? 'pendiente' : 'no_aplica',
-        pago_monto: esp.requiere_pago ? esp.tarifa : null, creado_por: 'portal',
+        pago_monto: esp.requiere_pago ? esp.tarifa : null, creado_por: scope === 'reservas' ? 'inquilino' : 'portal',
       }
       let creada = null
       for (const nro of candidatos) {
@@ -238,6 +257,32 @@ export default async function handler(req, res) {
         .update({ pago_adjunto_path: String(b.path || '').slice(0, 300), pago_estado: 'pendiente' })
         .eq('id', b.reserva_id)
       if (error) return res.status(500).json({ error: 'update', detalle: error.message })
+      return res.status(200).json({ ok: true })
+    }
+
+    // ── inv_listar / inv_crear / inv_revocar: gestión de links de inquilino (solo propietario, scope full) ──
+    if (accion === 'inv_listar') {
+      const { data } = await db.from('con_sum_invitaciones').select('*').eq('unidad_id', uf.id).order('created_at', { ascending: false })
+      return res.status(200).json({ invitaciones: data || [] })
+    }
+    if (accion === 'inv_crear' && isPost) {
+      const { data: eps } = await db.from('con_sum_espacios').select('id')
+        .eq('consorcio_id', uf.consorcio_id).eq('activo', true).eq('permite_invitados', true).limit(1)
+      if (!eps || !eps.length) return res.status(400).json({ error: 'invitados_no_habilitado' })
+      const b = req.body || {}
+      const dias = parseInt(b.dias) || 90
+      const expira = new Date(Date.now() + dias * 86400000).toISOString().slice(0, 10)
+      const tk = randomBytes(18).toString('base64url')
+      const row = { id: `INV-${uf.id}-${Date.now()}`, admin_id: uf.admin_id, consorcio_id: uf.consorcio_id, unidad_id: uf.id, token: tk, nota: String(b.nota || '').slice(0, 120), vigente: true, expira }
+      const { error } = await db.from('con_sum_invitaciones').insert([row])
+      if (error) return res.status(500).json({ error: 'insert', detalle: error.message })
+      return res.status(200).json({ ok: true, token: tk, expira })
+    }
+    if (accion === 'inv_revocar' && isPost) {
+      const b = req.body || {}
+      const { data: r } = await db.from('con_sum_invitaciones').select('id, unidad_id').eq('id', b.id).maybeSingle()
+      if (!r || r.unidad_id !== uf.id) return res.status(403).json({ error: 'ajena' })
+      await db.from('con_sum_invitaciones').update({ vigente: false }).eq('id', b.id)
       return res.status(200).json({ ok: true })
     }
 
