@@ -206,6 +206,90 @@ export default function Portal() {
   const [msgPago, setMsgPago]             = useState(null)
   const [enviandoPago, setEnviandoPago]   = useState(false)
   const [archivoPago, setArchivoPago]     = useState(null)
+  // ── SUM / Amenities ──
+  const [sumEspacios, setSumEspacios]   = useState([])
+  const [sumDispo, setSumDispo]         = useState([])
+  const [sumReservas, setSumReservas]   = useState([])
+  const [sumEspSel, setSumEspSel]       = useState(null)
+  const [sumFecha, setSumFecha]         = useState('')
+  const [sumFranja, setSumFranja]       = useState('')
+  const [sumMsg, setSumMsg]             = useState(null)
+  const [sumEnviando, setSumEnviando]   = useState(false)
+  const [sumArchivo, setSumArchivo]     = useState(null)
+  const [sumUltima, setSumUltima]       = useState(null)
+
+  async function cargarSum() {
+    try {
+      const resp = await fetch('/api/portal?accion=sum_config&token=' + encodeURIComponent(token))
+      const data = await resp.json().catch(() => ({}))
+      const esps = data.espacios || []
+      setSumEspacios(esps); setSumDispo(data.dispo || []); setSumReservas(data.reservas || [])
+      setSumEspSel(prev => esps.find(e => e.id === prev?.id) || esps[0] || null)
+    } catch (e) { /* si no hay espacios, la pestaña no aparece */ }
+  }
+
+  function sumDiasDisponibles() {
+    if (!sumEspSel) return []
+    const maxd = sumEspSel.anticipacion_max_dias || 60
+    const franjasPorDow = {}
+    sumDispo.filter(d => d.espacio_id === sumEspSel.id).forEach(d => {
+      (franjasPorDow[d.dia_semana] = franjasPorDow[d.dia_semana] || []).push(d)
+    })
+    const ocupadas = new Set(
+      sumReservas.filter(r => r.espacio_id === sumEspSel.id)
+        .map(r => r.fecha + '|' + (r.franja_label || ''))
+    )
+    const out = []
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+    for (let i = 0; i <= maxd; i++) {
+      const d = new Date(hoy.getTime() + i * 86400000)
+      const ymd = d.toISOString().slice(0, 10)
+      const dow = new Date(ymd + 'T12:00:00Z').getUTCDay()
+      const fr = (franjasPorDow[dow] || []).filter(f => !ocupadas.has(ymd + '|' + f.franja_label))
+      if (fr.length) out.push({ ymd, dow, franjas: fr })
+    }
+    return out
+  }
+
+  async function reservarSum() {
+    if (!sumEspSel || !sumFecha || !sumFranja) return setSumMsg({ t: 'warn', m: 'Elegí día y franja' })
+    setSumEnviando(true); setSumMsg(null)
+    try {
+      const resp = await fetch('/api/portal', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'sum_reservar', token, espacio_id: sumEspSel.id, fecha: sumFecha, franja_label: sumFranja }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.error) {
+        const M = { ocupado: 'Ese día y franja ya están reservados', limite_reservas: 'Alcanzaste el máximo de reservas activas', franja_no_disponible: 'Esa franja no está disponible', fecha_fuera_de_rango: 'Fecha fuera del rango permitido' }
+        return setSumMsg({ t: 'error', m: M[data.error] || 'No se pudo reservar' })
+      }
+      setSumUltima(data)
+      if (data.pago_requerido) setSumMsg({ t: 'ok', m: 'Reserva tomada. Falta el pago ($' + Number(data.tarifa).toLocaleString('es-AR') + '). Subí el comprobante.' })
+      else setSumMsg({ t: 'ok', m: data.estado === 'solicitada' ? 'Reserva enviada, queda a confirmación de la administración' : 'Reserva confirmada' })
+      setSumFecha(''); setSumFranja(''); cargarSum()
+    } catch (e) { setSumMsg({ t: 'error', m: 'Error de conexión' }) }
+    setSumEnviando(false)
+  }
+
+  async function subirComprobanteSum() {
+    if (!sumArchivo || !sumUltima?.reserva_id) return
+    setSumEnviando(true)
+    try {
+      const path = await subirAdjunto(sumArchivo, token)
+      const resp = await fetch('/api/portal', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'sum_adjuntar_pago', token, reserva_id: sumUltima.reserva_id, path }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.error) return setSumMsg({ t: 'error', m: 'No se pudo adjuntar el comprobante' })
+      setSumMsg({ t: 'ok', m: 'Comprobante enviado. La administración confirmará el pago.' })
+      setSumArchivo(null); setSumUltima(null); cargarSum()
+    } catch (e) { setSumMsg({ t: 'error', m: 'Error al subir el comprobante' }) }
+    setSumEnviando(false)
+  }
+
+  useEffect(() => { if (unidad?.id && token) cargarSum() }, [unidad?.id]) // eslint-disable-line
 
   useEffect(() => { if (token) cargar(token) }, [token])
   // Cargar la cta cte (EF get-cuenta-corriente) apenas se conoce la unidad: es la
@@ -812,6 +896,7 @@ export default function Portal() {
             { id:'ctacte',    label:'📊 Cta. corriente' },
             { id:'pagos',     label:'💳 Pagos' },
             { id:'informar',  label:'📤 Informar pago' },
+            ...(sumEspacios.length ? [{ id:'sum', label:'🏖️ Reservas' }] : []),
             ...(driveFolderUrl ? [{ id:'documentos', label:'📁 Documentos' }] : []),
             { id:'reclamos',  label:'🎫 Reclamos' },
             { id:'contacto',  label:'📞 Contacto' },
@@ -1177,6 +1262,88 @@ export default function Portal() {
         )}
 
         {/* Tab Reclamos */}
+        {/* TAB: RESERVAS SUM / AMENITIES */}
+        {tab === 'sum' && (
+          <div>
+            {sumEspacios.length > 1 && (
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12 }}>
+                {sumEspacios.map(e => (
+                  <button key={e.id} onClick={()=>{ setSumEspSel(e); setSumFecha(''); setSumFranja('') }}
+                    style={{ padding:'8px 12px', borderRadius:10, border:`1.5px solid ${sumEspSel?.id===e.id?AZ:'#e5e7eb'}`,
+                      background: sumEspSel?.id===e.id?'#eff6ff':'#fff', cursor:'pointer', fontSize:13 }}>
+                    {e.nombre}{e.requiere_pago ? ` · $${Number(e.tarifa).toLocaleString('es-AR')}` : ''}
+                  </button>
+                ))}
+              </div>
+            )}
+            {sumEspSel && (
+              <div style={{ background:'#fff', borderRadius:14, padding:18, boxShadow:'0 2px 8px #0001' }}>
+                <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>🏖️ {sumEspSel.nombre}</div>
+                {sumEspSel.requiere_pago &&
+                  <div style={{ fontSize:13, color:GR, marginBottom:8 }}>Uso con cargo: ${Number(sumEspSel.tarifa).toLocaleString('es-AR')}</div>}
+                {sumMsg && (
+                  <div style={{ margin:'8px 0', padding:'8px 12px', borderRadius:8, fontSize:13,
+                    background: sumMsg.t==='ok'?'#f0fdf4':sumMsg.t==='error'?'#fef2f2':'#fffbeb',
+                    color: sumMsg.t==='ok'?'#166534':sumMsg.t==='error'?'#991b1b':'#92400e' }}>{sumMsg.m}</div>
+                )}
+
+                {sumUltima?.pago_requerido && (
+                  <div style={{ border:'1px dashed #fca5a5', borderRadius:10, padding:12, margin:'8px 0', background:'#fff8f8' }}>
+                    <div style={{ fontSize:13, fontWeight:600, marginBottom:6 }}>Subí el comprobante del pago</div>
+                    <input type="file" accept="image/*,application/pdf" onChange={e=>setSumArchivo(e.target.files?.[0]||null)} />
+                    <div style={{ marginTop:8 }}>
+                      <button disabled={!sumArchivo||sumEnviando} onClick={subirComprobanteSum}
+                        style={{ padding:'8px 14px', border:'none', borderRadius:8, background:AZ, color:'#fff', fontWeight:600,
+                          cursor:(!sumArchivo||sumEnviando)?'default':'pointer', opacity:(!sumArchivo||sumEnviando)?0.6:1 }}>
+                        Enviar comprobante
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ fontSize:13, fontWeight:600, margin:'10px 0 6px' }}>Elegí un día disponible</div>
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap', maxHeight:200, overflowY:'auto', marginBottom:10 }}>
+                  {sumDiasDisponibles().length === 0
+                    ? <div style={{ color:GR, fontSize:13 }}>No hay días disponibles por ahora.</div>
+                    : sumDiasDisponibles().map(d => (
+                        <button key={d.ymd} onClick={()=>{ setSumFecha(d.ymd); setSumFranja('') }}
+                          style={{ padding:'8px 10px', borderRadius:9, border:`1.5px solid ${sumFecha===d.ymd?AZ:'#e5e7eb'}`,
+                            background: sumFecha===d.ymd?'#eff6ff':'#fff', cursor:'pointer', fontSize:12 }}>
+                          {['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][d.dow]} {d.ymd.slice(8,10)}/{d.ymd.slice(5,7)}
+                        </button>
+                      ))}
+                </div>
+
+                {sumFecha && (() => {
+                  const dia = sumDiasDisponibles().find(x => x.ymd === sumFecha)
+                  const franjas = dia ? dia.franjas : []
+                  return (
+                    <>
+                      <div style={{ fontSize:13, fontWeight:600, margin:'6px 0' }}>Franja</div>
+                      <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12 }}>
+                        {franjas.map(f => (
+                          <button key={f.id} onClick={()=>setSumFranja(f.franja_label)}
+                            style={{ padding:'8px 10px', borderRadius:9, border:`1.5px solid ${sumFranja===f.franja_label?AZ:'#e5e7eb'}`,
+                              background: sumFranja===f.franja_label?'#eff6ff':'#fff', cursor:'pointer', fontSize:12 }}>
+                            {f.franja_label} {String(f.hora_inicio).slice(0,5)}–{String(f.hora_fin).slice(0,5)}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )
+                })()}
+
+                <button disabled={!sumFecha||!sumFranja||sumEnviando} onClick={reservarSum}
+                  style={{ width:'100%', padding:'12px', border:'none', borderRadius:10, background:VD, color:'#fff',
+                    fontWeight:700, fontSize:14, cursor:(!sumFecha||!sumFranja||sumEnviando)?'default':'pointer',
+                    opacity:(!sumFecha||!sumFranja||sumEnviando)?0.6:1 }}>
+                  {sumEnviando ? 'Procesando…' : 'Reservar'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === 'reclamos' && (
           <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
             <div style={{ background:'#fff', borderRadius:14, padding:20, boxShadow:'0 2px 12px #0001' }}>
