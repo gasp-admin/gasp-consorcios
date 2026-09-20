@@ -16,7 +16,7 @@ const FRANJAS_PRESET = [
   { label: 'Día completo', hi: '10:00', hf: '23:59' },
   { label: 'Mañana',       hi: '09:00', hf: '14:00' },
   { label: 'Tarde',        hi: '15:00', hf: '20:00' },
-  { label: 'Noche',        hi: '20:00', hf: '23:59' },
+  { label: 'Noche',        hi: '20:00', hf: '02:00' },
 ]
 const EST_COLOR = { solicitada: AM, pendiente_pago: AM, confirmada: VD, rechazada: RJ, cancelada: GR, expirada: GR }
 const EST_LABEL = { solicitada: 'Solicitada', pendiente_pago: 'Pend. pago', confirmada: 'Confirmada', rechazada: 'Rechazada', cancelada: 'Cancelada', expirada: 'Expirada' }
@@ -88,7 +88,7 @@ export default function SUM() {
   async function agregarFranja() {
     if (!guard()) return
     if (!dForm || dForm.dia === '' || dForm.dia == null) return setMsg({ tipo: 'warn', texto: 'Elegí el día' })
-    if (!(dForm.hf > dForm.hi)) return setMsg({ tipo: 'warn', texto: 'La hora fin debe ser posterior al inicio' })
+    if (dForm.hf === dForm.hi) return setMsg({ tipo: 'warn', texto: 'La hora fin no puede ser igual al inicio' })
     const { error } = await supabase.from('con_sum_disponibilidad').insert([{
       id: `DISP-${espSel.id}-${Date.now()}`, admin_id: uid, espacio_id: espSel.id,
       dia_semana: parseInt(dForm.dia), franja_label: dForm.label || 'Franja', hora_inicio: dForm.hi, hora_fin: dForm.hf, activo: true,
@@ -137,9 +137,11 @@ export default function SUM() {
   async function guardarBloqueo() {
     if (!guard()) return
     if (!bForm?.fecha) return setMsg({ tipo: 'warn', texto: 'Elegí la fecha a bloquear' })
-    if (!(bForm.hf > bForm.hi)) return setMsg({ tipo: 'warn', texto: 'La hora fin debe ser posterior al inicio' })
+    if (bForm.hf === bForm.hi) return setMsg({ tipo: 'warn', texto: 'La hora fin no puede ser igual al inicio' })
     const inicio = `${bForm.fecha}T${bForm.hi}:00-03:00`
-    const fin = `${bForm.fecha}T${bForm.hf}:00-03:00`
+    let finFecha = bForm.fecha
+    if (bForm.hf < bForm.hi) { const dn = new Date(bForm.fecha + 'T12:00:00Z'); dn.setUTCDate(dn.getUTCDate() + 1); finFecha = dn.toISOString().slice(0, 10) }
+    const fin = `${finFecha}T${bForm.hf}:00-03:00`
     const { error } = await supabase.from('con_sum_reservas').insert([{
       id: `RES-${espSel.id}-${Date.now()}`, admin_id: uid, consorcio_id: consorcioId, espacio_id: espSel.id,
       unidad_id: null, tipo: 'bloqueo', fecha: bForm.fecha, inicio, fin, franja_label: bForm.label || 'Bloqueo',
@@ -233,6 +235,7 @@ export default function SUM() {
                 <input type="time" value={dForm.hi} onChange={e => setDForm(f => ({ ...f, hi: e.target.value }))} style={INPS} />
                 <span style={{ color: GR }}>a</span>
                 <input type="time" value={dForm.hf} onChange={e => setDForm(f => ({ ...f, hf: e.target.value }))} style={INPS} />
+                {dForm.hf && dForm.hi && dForm.hf < dForm.hi && <span style={{ fontSize: 11, color: AM }}>termina al día siguiente</span>}
                 <Btn small color={VD} onClick={agregarFranja}>Agregar</Btn>
                 <BtnSec small onClick={() => setDForm(null)}>Cancelar</BtnSec>
               </div>
@@ -242,7 +245,7 @@ export default function SUM() {
               : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {dispo.map(d => (
                     <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: '#eff6ff', fontSize: 12 }}>
-                      <b>{DIAS[d.dia_semana]}</b> {d.franja_label} {d.hora_inicio?.slice(0, 5)}–{d.hora_fin?.slice(0, 5)}
+                      <b>{DIAS[d.dia_semana]}</b> {d.franja_label} {d.hora_inicio?.slice(0, 5)}–{d.hora_fin?.slice(0, 5)}{d.hora_fin <= d.hora_inicio ? ' (+1 día)' : ''}
                       <span style={{ cursor: 'pointer', color: RJ }} onClick={() => borrarFranja(d.id)}>✕</span>
                     </div>
                   ))}
