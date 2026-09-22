@@ -21,6 +21,7 @@ export default function EnviarEmails() {
   const [emailLog, setEmailLog]   = useState([])
   const [adjunto, setAdjunto]     = useState(null) // { nombre, tipo, base64 }
   const [mensajeExtra, setMensajeExtra] = useState('')
+  const [leyendaReservas, setLeyendaReservas] = useState('')
   const [iaLoading, setIaLoading] = useState(null)
   const [avisarWa, setAvisarWa]   = useState(false)
   const [telWaPrueba, setTelWaPrueba] = useState('')
@@ -131,6 +132,32 @@ export default function EnviarEmails() {
 
   useEffect(() => { if (consorcioId) { cargarExpensas(); cargarLog() } }, [consorcioId])
 
+  // Detecta si el consorcio tiene reservas habilitadas y arma una leyenda para el cuerpo del email.
+  useEffect(() => {
+    if (!consorcioId) { setLeyendaReservas(''); return }
+    let cancel = false
+    ;(async () => {
+      const { data } = await supabase.from('con_sum_espacios')
+        .select('nombre, requiere_pago, tarifa, permite_invitados')
+        .eq('consorcio_id', consorcioId).eq('activo', true)
+      if (cancel) return
+      const esps = data || []
+      if (!esps.length) { setLeyendaReservas(''); return }
+      const nombres = esps.map(e => e.nombre).join(', ')
+      const conCargo = esps.filter(e => e.requiere_pago)
+      let t = '📅 RESERVA DE ESPACIOS COMUNES\n'
+      t += `Este consorcio cuenta con espacio(s) reservable(s): ${nombres}. Podés reservar desde el Portal de Propietarios, en la pestaña "Reservas", eligiendo día y horario disponibles.`
+      if (conCargo.length) {
+        const detalle = conCargo.map(e => `${e.nombre} $${Number(e.tarifa).toLocaleString('es-AR')}`).join(', ')
+        t += `\nEl uso con cargo se abona según lo informado al reservar (${detalle}).`
+      }
+      if (esps.some(e => e.permite_invitados)) t += `\nSi alquilás tu unidad, desde el Portal podés generar un acceso de reservas para tu inquilino.`
+      setLeyendaReservas(t)
+      setMensajeExtra(prev => (prev && prev.trim()) ? prev : t)
+    })()
+    return () => { cancel = true }
+  }, [consorcioId])
+
   const expActual = expensas.find(e => e.id === expSel)
   const ufsConEmail = unidades.filter(u => {
     const cp = copropietarios.find(c => c.id === u.propietario_id)
@@ -238,6 +265,11 @@ export default function EnviarEmails() {
             <Btn small color="#6d28d9" onClick={() => asistirIA('desarrollar')} disabled={!!iaLoading}>
               {iaLoading==='desarrollar' ? '⏳ Desarrollando...' : '📝 Desarrollar con IA'}
             </Btn>
+            {leyendaReservas && (
+              <BtnSec small onClick={() => setMensajeExtra(prev => (prev && prev.includes('RESERVA DE ESPACIOS COMUNES')) ? prev : ((prev && prev.trim()) ? prev + '\n\n' + leyendaReservas : leyendaReservas))}>
+                📅 Insertar aviso de reservas
+              </BtnSec>
+            )}
             <span style={{ fontSize:11, color:GR }}>{mensajeExtra.length} caracteres · la IA reescribe el texto; revisalo antes de enviar</span>
           </div>
         </div>
