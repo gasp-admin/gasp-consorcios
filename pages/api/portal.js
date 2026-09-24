@@ -70,7 +70,7 @@ export default async function handler(req, res) {
           con_expensas:expensa_id (id, periodo, fuente, fecha_vencimiento, estado, tipo, total_expensa, total_gastos)
         `).eq('unidad_id', uf.id).order('created_at', { ascending: false }).limit(24),
         db.from('con_cobranzas').select(`
-          id, expensa_id, monto, fecha, medio_pago, recibo_numero, observaciones,
+          id, expensa_id, monto, fecha, medio_pago, recibo_numero, nro_recibo, observaciones,
           con_expensas:expensa_id (periodo)
         `).eq('unidad_id', uf.id).in('estado', ['vigente', 'acreditado', 'cobrado']).order('fecha', { ascending: false }).limit(30),
         db.from('con_interfast_uf').select('cpe, cvu, alias').eq('unidad_id', uf.id).maybeSingle(),
