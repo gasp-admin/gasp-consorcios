@@ -22,6 +22,7 @@ export const NAV_ITEMS = [
   { id: 'copropietarios',           label: 'Copropietarios',          icon: '👤', sec: 'Consorcio' },
   { id: 'cta_corriente',            label: 'Cta. corriente UF',      icon: '📋', sec: 'Consorcio' },
   { id: 'reclamos',                 label: 'Reclamos / Tickets',      icon: '🎫', sec: 'Consorcio' },
+  { id: 'juicios',                  label: 'Juicios',                 icon: '⚖️', sec: 'Consorcio' },
   { id: 'sum_reservas',             label: 'Reservas SUM',            icon: '🏖️', sec: 'Consorcio' },
   { id: 'wa_conversaciones',        label: 'Conversaciones WhatsApp', icon: '💬', sec: 'Consorcio' },
   { id: 'cert_libre_deuda',         label: 'Certificado Libre Deuda', icon: '📜', sec: 'Consorcio' },
