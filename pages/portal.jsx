@@ -358,6 +358,7 @@ export default function Portal() {
       // bloquea supabase.co; el servidor de Vercel hace las consultas y devuelve los datos.
       const resp = await fetch('/api/portal?accion=init&token=' + encodeURIComponent(tk))
       const data = await resp.json().catch(() => ({}))
+      if (data?.error === 'portal_no_habilitado') { setError('El portal de propietarios todavía no está habilitado para su consorcio. Ante cualquier consulta, comuníquese con la administración.'); setLoading(false); return }
       if (!resp.ok || data.error || !data.uf) { setError('Link no válido o expirado.'); setLoading(false); return }
       const { uf, cp, con, adm, cuentas, dets, cobs, interfast } = data
       setUnidad(uf)
