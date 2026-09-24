@@ -6,6 +6,7 @@ import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
 import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/config'
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
+import { escribirLiquidacionNativa, construirHTMLLiquidacionNativa } from '../../lib/pdfLiquidacionNativa'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios, generarDeudaCIG } from '../../api/edgeFunctions'
@@ -66,7 +67,9 @@ export default function Expensas() {
   }
   async function guardarExpensa() {
     if (!form.periodo) return setMsg({ tipo:'warn', texto:'El período es obligatorio' })
-    const id=form.id||nextId(expensas,'EXP')
+// IDs únicos (2026-09-25): antes nextId() generaba 'EXP001'/'UF001'/'CP001'/'PRV001' contando solo la lista visible;
+// junto con upsert(onConflict:'id') pisó la liquidación de Agosto de Dorado 1056 con la de Septiembre de Triplex Náyades.
+    const id=form.id||`EXP-${consorcioId}-${Date.now()}`
     const { error }=await supabase.from('con_expensas').upsert({ ...form, id, admin_id:uid, consorcio_id:consorcioId }, { onConflict:'id' })
     if (error) return setMsg({ tipo:'error', texto:error.message })
     setForm(null); setMsg({ tipo:'ok', texto:'✓ Expensa guardada' }); cargar()
@@ -75,7 +78,7 @@ export default function Expensas() {
     if (!formGasto.concepto||!formGasto.monto) return setMsg({ tipo:'warn', texto:'Concepto y monto obligatorios' })
     const g={...formGasto, admin_id:uid, consorcio_id:consorcioId, expensa_id:selected.id}
     if (formGasto.id) await supabase.from('con_gastos').update(g).eq('id', formGasto.id)
-    else await supabase.from('con_gastos').insert([{...g, id:nextId(gastos,'GAS')}])
+    else await supabase.from('con_gastos').insert([{...g, id:`GAS-${consorcioId}-${Date.now()}`}])
     setFormGasto(null); cargarDetalle(selected.id); setMsg({ tipo:'ok', texto:'✓ Gasto registrado' })
   }
   async function generarPDF(expensa) {
@@ -83,6 +86,18 @@ export default function Expensas() {
     if ((expensa?.fuente || '') === 'pdf_importado') {
       if (expensa?.drive_pdf_url) { window.open(expensa.drive_pdf_url, '_blank', 'noopener'); return }
       return setMsg({ tipo:'warn', texto:'Liquidación importada: el PDF válido es el del sistema de origen. GASP no genera un PDF propio para este período.' })
+    }
+    // U3: nativos cerrados desde U2 → el MISMO PDF del cierre (plantilla Ley 14.701, datos guardados)
+    if ((expensa?.fuente || 'gasp') === 'gasp') {
+      const w = window.open('', '_blank', 'width=1100,height=800,scrollbars=yes,resizable=yes')
+      const { data: pd } = await supabase.from('con_expensas').select('pdf_datos').eq('id', expensa.id).single()
+      if (pd?.pdf_datos) {
+        if (!w) return setMsg({ tipo:'warn', texto:'El navegador bloqueó la ventana emergente. Habilitá los popups para este sitio.' })
+        escribirLiquidacionNativa(w, construirHTMLLiquidacionNativa({ ...pd.pdf_datos, esPreliquidacion: false }))
+        return
+      }
+      try { w?.close() } catch (_) {}
+      // Sin datos guardados (cerrado antes de U2): se mantiene el PDF anterior (MIS EXPENSAS)
     }
     const { data:conData } = await supabase.from('con_consorcios').select('*').eq('id', consorcioId).single()
     const { data:expFresca } = await supabase.from('con_expensas').select('*').eq('id', expensa.id).single()
