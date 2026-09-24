@@ -29,7 +29,9 @@ export default function Proveedores() {
   async function guardar() {
     if (!form.razon_social) return setMsg({ tipo:'warn', texto:'Razón social obligatoria' })
     const esNuevo = !form.id
-    const id = form.id || nextId(lista,'PRV')
+// IDs únicos (2026-09-25): antes nextId() generaba 'EXP001'/'UF001'/'CP001'/'PRV001' contando solo la lista visible;
+// junto con upsert(onConflict:'id') pisó la liquidación de Agosto de Dorado 1056 con la de Septiembre de Triplex Náyades (§51).
+    const id = form.id || `PRV-${Date.now()}`
     // Nuevo proveedor → global (null). Edición → conserva el consorcio_id que tenía.
     const consorcio_id_guardar = esNuevo ? null : (form.consorcio_id ?? null)
     const { error }=await supabase.from('con_proveedores').upsert(
