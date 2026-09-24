@@ -26,6 +26,7 @@ const CAMPOS = [
   'nombre', 'cuit', 'direccion', 'localidad', 'provincia', 'telefono', 'email_consorcio',
   'banco', 'cbu', 'alias_cbu', 'nro_cuenta',
   'aseguradora', 'poliza_nro', 'poliza_compania', 'poliza_vto_desde', 'poliza_vto_hasta', 'poliza_suma', 'poliza_vencimiento',
+  'poliza_url', 'poliza_coberturas', 'poliza_detalle', 'poliza_analizada_at',
   'matricula_rpi', 'escritura_nro', 'escritura_fecha', 'escritura_escribano',
   'vto1_dia', 'vto2_dia',
   'interes_mora', 'interes_mora_2',
@@ -49,6 +50,9 @@ export default function FichaConsorcio() {
   const [msg, setMsg]           = useState(null)
   const [analizandoReg, setAnalizandoReg] = useState(false)
   const [msgReg, setMsgReg]     = useState(null)
+  const [analizandoPol, setAnalizandoPol] = useState(false)
+  const [msgPol, setMsgPol]     = useState(null)
+  const [cambiosPol, setCambiosPol] = useState([])
   const [codigoNuevo, setCodigoNuevo] = useState('')
 
   useEffect(() => {
@@ -146,6 +150,68 @@ export default function FichaConsorcio() {
     } catch(e) {
       setMsgReg({ tipo: 'err', txt: '❌ Error al analizar: ' + e.message })
     } finally { setAnalizandoReg(false) }
+  }
+
+  // ── Póliza: análisis con IA (EF extraer-poliza-pdf). Completa el formulario; se persiste recién al Guardar.
+  // Actualiza de forma indirecta la Agenda (lee poliza_vto_hasta) y el PDF de liquidación (art. 11 inc. j).
+  async function analizarPoliza() {
+    if (!form.poliza_url?.trim()) { setMsgPol({ tipo: 'err', txt: '⚠️ Primero cargá el link de la póliza en Google Drive.' }); return }
+    setAnalizandoPol(true); setMsgPol(null); setCambiosPol([])
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession()
+      const resp = await fetch(`${SUPA_URL}/functions/v1/extraer-poliza-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
+        body: JSON.stringify({ poliza_url: form.poliza_url.trim() }),
+      })
+      const json = await resp.json().catch(() => ({}))
+      if (!json.ok) throw new Error(json.error || 'No se pudo analizar la póliza')
+      const d = json.datos || {}
+      const val = v => (v === null || v === undefined || v === '' || v === 'null') ? null : v
+      const nuevos = {
+        aseguradora:      val(d.aseguradora),
+        poliza_compania:  val(d.compania_razon_social),
+        poliza_nro:       val(d.poliza_nro) != null ? String(d.poliza_nro).trim() : null,
+        poliza_vto_desde: val(d.vigencia_desde),
+        poliza_vto_hasta: val(d.vigencia_hasta),
+        poliza_suma:      val(d.suma_asegurada_principal),
+      }
+      const ETQ = { aseguradora: 'Aseguradora', poliza_compania: 'Compañía (razón social)', poliza_nro: 'N° de póliza',
+        poliza_vto_desde: 'Vigencia desde', poliza_vto_hasta: 'Vencimiento', poliza_suma: 'Suma asegurada' }
+      const cambios = []
+      Object.entries(nuevos).forEach(([k, v]) => {
+        if (v === null) return
+        const antes = form[k] === '' || form[k] == null ? '' : String(form[k])
+        if (String(v) !== antes) cambios.push({ campo: ETQ[k], antes: antes || '—', despues: String(v) })
+      })
+      const detalle = { asegurado: val(d.asegurado), ubicacion_riesgo: val(d.ubicacion_riesgo), productor: val(d.productor),
+        ramo: val(d.ramo), moneda: val(d.moneda), premio_total: val(d.premio_total), forma_pago: val(d.forma_pago),
+        cuotas: Array.isArray(d.cuotas) ? d.cuotas : [], confianza: d.confianza || 'media', notas: d.notas || '', modo: json.modo }
+      setForm(f => {
+        const n = { ...f }
+        Object.entries(nuevos).forEach(([k, v]) => { if (v !== null) n[k] = v })
+        if (Array.isArray(d.coberturas) && d.coberturas.length) n.poliza_coberturas = d.coberturas
+        n.poliza_detalle = detalle
+        n.poliza_analizada_at = new Date().toISOString()
+        return n
+      })
+      setCambiosPol(cambios)
+      // Controles de coherencia (no bloquean; avisan)
+      const avisos = []
+      const nums = String(form.direccion || '').match(/\d{3,}/g) || []
+      if (detalle.ubicacion_riesgo && nums.length && !nums.some(x => String(detalle.ubicacion_riesgo).includes(x)))
+        avisos.push(`la ubicación del riesgo ("${detalle.ubicacion_riesgo}") no coincide con el domicilio del consorcio: verificá que la póliza corresponda a este edificio`)
+      if (nuevos.poliza_vto_hasta && nuevos.poliza_vto_hasta < new Date().toISOString().slice(0, 10))
+        avisos.push('la vigencia informada ya está vencida: ¿es la póliza renovada?')
+      const icon = d.confianza === 'alta' ? '✅' : d.confianza === 'baja' ? '❗' : '⚠️'
+      setMsgPol({
+        tipo: avisos.length || d.confianza === 'baja' ? 'warn' : 'ok',
+        txt: `${icon} Póliza leída (confianza ${d.confianza || 'media'}${json.modo === 'documento' ? ', PDF escaneado' : ''}). ${cambios.length ? cambios.length + ' campo(s) actualizados en el formulario' : 'Sin cambios respecto de lo cargado'}. Revisá y presioná Guardar.`
+          + (avisos.length ? ' ⚠️ Atención: ' + avisos.join('; ') + '.' : '') + (d.notas ? ' — ' + d.notas : ''),
+      })
+    } catch (e) {
+      setMsgPol({ tipo: 'err', txt: '❌ Error al analizar: ' + e.message })
+    } finally { setAnalizandoPol(false) }
   }
 
   if (!esNuevo && !consorcioActivo) return <Card><p style={{ color: GR }}>Seleccione un consorcio primero.</p></Card>
@@ -247,7 +313,7 @@ export default function FichaConsorcio() {
             <input style={FLD} value={form.aseguradora || ''} onChange={e => upd('aseguradora', e.target.value)} />
           </div>
           <div>
-            <label style={LBL}>Compañía / Productor</label>
+            <label style={LBL}>Compañía (razón social)</label>
             <input style={FLD} value={form.poliza_compania || ''} onChange={e => upd('poliza_compania', e.target.value)} />
           </div>
           <div>
@@ -265,6 +331,80 @@ export default function FichaConsorcio() {
           <div>
             <label style={LBL}>Suma asegurada ($)</label>
             <input style={FLD} type="number" value={form.poliza_suma || ''} onChange={e => upd('poliza_suma', e.target.value)} />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={LBL}>URL Póliza vigente (Google Drive)</label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <input style={{ ...FLD, flex: 1 }} value={form.poliza_url || ''} onChange={e => upd('poliza_url', e.target.value)} placeholder="https://drive.google.com/file/d/..." />
+              <button
+                onClick={analizarPoliza}
+                disabled={analizandoPol || !form.poliza_url?.trim()}
+                title="Leer el PDF de la póliza con IA y completar los datos del seguro"
+                style={{
+                  whiteSpace: 'nowrap', padding: '7px 14px', fontSize: 12, fontWeight: 700,
+                  background: analizandoPol ? '#9CA3AF' : AZ, color: '#fff', border: 'none',
+                  borderRadius: 6, cursor: (analizandoPol || !form.poliza_url?.trim()) ? 'not-allowed' : 'pointer',
+                  opacity: (!form.poliza_url?.trim()) ? 0.5 : 1,
+                }}>
+                {analizandoPol ? '⏳ Analizando...' : '🔎 Analizar con IA'}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: GR, marginTop: 4 }}>
+              El archivo debe estar compartido como "Cualquier persona con el enlace". Al guardar se actualizan la Agenda de vencimientos y el bloque de seguro del PDF de liquidación.
+              {form.poliza_analizada_at ? ` Última lectura: ${new Date(form.poliza_analizada_at).toLocaleString('es-AR')}.` : ''}
+            </div>
+            {form.poliza_url?.trim() && (
+              <a href={form.poliza_url} target="_blank" rel="noopener noreferrer"
+                style={{ fontSize: 11, color: AZ, textDecoration: 'none', marginTop: 4, display: 'inline-block' }}>
+                📄 Ver póliza en Drive →
+              </a>
+            )}
+            {msgPol && (
+              <div style={{
+                marginTop: 8, padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                background: msgPol.tipo === 'ok' ? '#f0fdf4' : msgPol.tipo === 'warn' ? '#fffbea' : '#fff1f1',
+                color: msgPol.tipo === 'ok' ? VD : msgPol.tipo === 'warn' ? '#C07D10' : RJ,
+              }}>
+                {msgPol.txt}
+              </div>
+            )}
+            {cambiosPol.length > 0 && (
+              <table style={{ width: '100%', marginTop: 8, fontSize: 12, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ background: '#f1f5fb' }}>
+                  <th style={{ textAlign: 'left', padding: '5px 8px' }}>Campo</th>
+                  <th style={{ textAlign: 'left', padding: '5px 8px' }}>Antes</th>
+                  <th style={{ textAlign: 'left', padding: '5px 8px' }}>Leído de la póliza</th>
+                </tr></thead>
+                <tbody>{cambiosPol.map((c, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #eef2f7' }}>
+                    <td style={{ padding: '5px 8px', color: GR }}>{c.campo}</td>
+                    <td style={{ padding: '5px 8px', textDecoration: 'line-through', color: '#9CA3AF' }}>{c.antes}</td>
+                    <td style={{ padding: '5px 8px', fontWeight: 700 }}>{c.despues}</td>
+                  </tr>))}
+                </tbody>
+              </table>
+            )}
+            {Array.isArray(form.poliza_coberturas) && form.poliza_coberturas.length > 0 && (
+              <div style={{ marginTop: 10, fontSize: 12 }}>
+                <div style={{ fontWeight: 700, color: AZ, marginBottom: 4 }}>Coberturas</div>
+                {form.poliza_coberturas.map((c, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', padding: '3px 0' }}>
+                    <span>{c.cobertura}</span>
+                    <span style={{ fontWeight: 600 }}>{c.suma_asegurada != null ? '$ ' + Number(c.suma_asegurada).toLocaleString('es-AR', { minimumFractionDigits: 2 }) : '—'}</span>
+                  </div>))}
+              </div>
+            )}
+            {form.poliza_detalle && typeof form.poliza_detalle === 'object' && (
+              <div style={{ marginTop: 8, fontSize: 11.5, color: '#374151', lineHeight: 1.6 }}>
+                {form.poliza_detalle.asegurado && <div><b>Asegurado:</b> {form.poliza_detalle.asegurado}</div>}
+                {form.poliza_detalle.ubicacion_riesgo && <div><b>Ubicación del riesgo:</b> {form.poliza_detalle.ubicacion_riesgo}</div>}
+                {form.poliza_detalle.productor && <div><b>Productor:</b> {form.poliza_detalle.productor}</div>}
+                {form.poliza_detalle.forma_pago && <div><b>Forma de pago:</b> {form.poliza_detalle.forma_pago}</div>}
+                {Array.isArray(form.poliza_detalle.cuotas) && form.poliza_detalle.cuotas.length > 0 && (
+                  <div><b>Cuotas:</b> {form.poliza_detalle.cuotas.map(c => `N° ${c.nro ?? '?'}${c.vencimiento ? ' vto ' + c.vencimiento.split('-').reverse().join('/') : ''}${c.importe != null ? ' $' + Number(c.importe).toLocaleString('es-AR', { minimumFractionDigits: 2 }) : ''}`).join(' · ')}</div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
