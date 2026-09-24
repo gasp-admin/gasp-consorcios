@@ -79,6 +79,11 @@ export default function Expensas() {
     setFormGasto(null); cargarDetalle(selected.id); setMsg({ tipo:'ok', texto:'✓ Gasto registrado' })
   }
   async function generarPDF(expensa) {
+    // Históricos (liquidación importada): el PDF válido es el del sistema de origen; GASP no genera uno propio.
+    if ((expensa?.fuente || '') === 'pdf_importado') {
+      if (expensa?.drive_pdf_url) { window.open(expensa.drive_pdf_url, '_blank', 'noopener'); return }
+      return setMsg({ tipo:'warn', texto:'Liquidación importada: el PDF válido es el del sistema de origen. GASP no genera un PDF propio para este período.' })
+    }
     const { data:conData } = await supabase.from('con_consorcios').select('*').eq('id', consorcioId).single()
     const { data:expFresca } = await supabase.from('con_expensas').select('*').eq('id', expensa.id).single()
     // Traer detalle y gastos frescos de ESTE período: permite generar el PDF directo desde la lista, sin abrir el detalle
