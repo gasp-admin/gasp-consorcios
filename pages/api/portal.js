@@ -55,6 +55,11 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'scope' })
     }
 
+    // G (2026-09-24): el Portal es SOLO para consorcios nativos (con_consorcios.portal_habilitado).
+    // Los históricos acceden recién cuando se migran. Se corta antes de exponer cualquier dato.
+    const { data: habil } = await db.from('con_consorcios').select('portal_habilitado').eq('id', uf.consorcio_id).single()
+    if (!habil?.portal_habilitado) return res.status(403).json({ error: 'portal_no_habilitado' })
+
     // ── init: carga inicial del portal ──
     if (accion === 'init') {
       const [
