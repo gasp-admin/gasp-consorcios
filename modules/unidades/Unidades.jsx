@@ -39,7 +39,9 @@ export default function Unidades() {
   async function guardar() {
     if (!puede('editar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite editar datos.' })
     if (!form.numero) return setMsg({ tipo:'warn', texto:'El número de UF es obligatorio' })
-    const id = form.id || nextId(unidades, 'UF')
+// IDs únicos (2026-09-25): antes nextId() generaba 'EXP001'/'UF001'/'CP001'/'PRV001' contando solo la lista visible;
+// junto con upsert(onConflict:'id') pisó la liquidación de Agosto de Dorado 1056 con la de Septiembre de Triplex Náyades (§51).
+    const id = form.id || `UF-${consorcioId}-${Date.now()}`
     const { error } = await supabase.from('con_unidades').upsert(
       { ...form, id, admin_id:session.user.id, consorcio_id:consorcioId }, { onConflict:'id' })
     if (error) return setMsg({ tipo:'error', texto:'Error: '+error.message })
