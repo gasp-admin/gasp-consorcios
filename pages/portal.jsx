@@ -1198,7 +1198,7 @@ export default function Portal() {
                       <div style={{ fontSize:11, color:GR, marginTop:2 }}>
                         {fmtD(c.fecha)}
                         {c.medio_pago && <span style={{ marginLeft:8, textTransform:'capitalize' }}>· {c.medio_pago}</span>}
-                        {c.recibo_numero && <span style={{ marginLeft:6 }}>· Rec. {c.recibo_numero}</span>}
+                        {(c.nro_recibo || c.recibo_numero) && <span style={{ marginLeft:6 }}>· Rec. {c.nro_recibo || c.recibo_numero}</span>}
                       </div>
                       {c.observaciones && <div style={{ fontSize:11, color:GR }}>{c.observaciones}</div>}
                     </div>
