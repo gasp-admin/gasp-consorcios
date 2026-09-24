@@ -8,6 +8,7 @@ import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 import { LOGO_ADM_B64 } from '../../lib/logo'
+import { generarReciboHTML, numeroRecibo, saldoDesdeCtaCte, abrirVentanaRecibo, escribirVentanaRecibo } from '../../lib/recibo'
 
 export default function ReciboPago() {
   const { session, cargando, esSuperAdmin, consorcios, setConsorcios, consorcioActivo, setConsorcioActivo, unidades, setUnidades, copropietarios, setCopropietarios, expensas, setExpensas, proveedores, setProveedores, adminPerfil, setAdminPerfil, formCon, setFormCon, msgCon, cargarConsorcio, cargarConsorcios, guardarConsorcio, pagina, setPagina, menuAbierto, setMenuAbierto, isMobile, navItems, secciones, navActivo } = useApp()
@@ -28,127 +29,45 @@ export default function ReciboPago() {
     setCobranzas(data || [])
   }
 
-  function generarReciboHTML(cob) {
-    const uf   = unidades.find(u => u.id === cob.unidad_id)
-    const cp   = copropietarios.find(c => c.id === uf?.propietario_id)
-    const exp  = expensas.find(e => e.id === cob.expensa_id)
-    const con  = consorcioActivo || {}
-    const adm  = {}
-
-    const fecha = cob.fecha ? new Date(cob.fecha+'T00:00:00').toLocaleDateString('es-AR') : '—'
-    const monto = '$' + Number(cob.monto).toLocaleString('es-AR', { minimumFractionDigits:2 })
-    const periodo = exp?.periodo ? (() => {
-      const [y,m] = exp.periodo.split('-')
-      const mes = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
-      return `${mes[parseInt(m)-1]} ${y}`
-    })() : '—'
-    const nroRecibo = cob.nro_recibo || cob.recibo_numero || cob.id.slice(-8).toUpperCase()
-
-    return `<!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8">
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; }
-  .recibo { width: 180mm; margin: 8mm auto; padding: 8mm; border: 2px solid #1A3FA0; border-radius: 6px; }
-  .header { background: #1A3FA0; color: white; padding: 10px 14px; border-radius: 4px 4px 0 0; margin: -8mm -8mm 12px -8mm; }
-  .header h1 { font-size: 16px; font-weight: 700; }
-  .header p { font-size: 11px; opacity: 0.85; margin-top: 2px; }
-  .nro { float: right; text-align: right; }
-  .nro span { font-size: 22px; font-weight: 800; display: block; }
-  .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #e5e7eb; }
-  .row:last-child { border-bottom: none; }
-  .label { color: #6B7280; font-size: 11px; }
-  .value { font-weight: 600; }
-  .monto-box { background: #f0fdf4; border: 2px solid #86efac; border-radius: 8px; padding: 14px; text-align: center; margin: 16px 0; }
-  .monto-box .monto { font-size: 28px; font-weight: 800; color: #1B6B35; }
-  .monto-box .label { color: #166534; font-size: 12px; margin-top: 4px; }
-  .firma { margin-top: 24px; border-top: 1px solid #374151; padding-top: 8px; text-align: center; font-size: 11px; color: #374151; }
-  .badge { display: inline-block; background: #dcfce7; color: #166534; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
-  @media print { body { -webkit-print-color-adjust: exact; } }
-</style></head><body>
-<div class="recibo">
-  <div class="header">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start">
-      <div style="display:flex;align-items:center;gap:12px">
-        <div style="background:#fff;border-radius:6px;padding:5px;display:flex;align-items:center"><img src="${LOGO_ADM_B64}" alt="Logo" style="width:46px;height:auto;object-fit:contain"/></div>
-        <div>
-          <h1>RECIBO DE PAGO DE EXPENSAS</h1>
-          <p>Ley Provincial 14.701 — Provincia de Buenos Aires</p>
-        </div>
-      </div>
-      <div class="nro">
-        <span>N° ${nroRecibo}</span>
-        <div style="font-size:11px;opacity:0.8">Comprobante</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="row">
-    <span class="label">Consorcio</span>
-    <span class="value">${con.nombre || '—'}</span>
-  </div>
-  <div class="row">
-    <span class="label">Unidad Funcional</span>
-    <span class="value">UF ${uf?.numero || '?'} — ${uf?.tipo || ''}</span>
-  </div>
-  <div class="row">
-    <span class="label">Copropietario</span>
-    <span class="value">${cp?.apellido_nombre || '—'}</span>
-  </div>
-  <div class="row">
-    <span class="label">Período</span>
-    <span class="value">${periodo}</span>
-  </div>
-  <div class="row">
-    <span class="label">Fecha de pago</span>
-    <span class="value">${fecha}</span>
-  </div>
-  <div class="row">
-    <span class="label">Medio de pago</span>
-    <span class="value">${(cob.medio_pago || 'efectivo').replace(/_/g,' ')}</span>
-  </div>
-  ${cob.canal_cobro ? `<div class="row"><span class="label">Canal</span><span class="value">${cob.canal_cobro}</span></div>` : ''}
-
-  <div class="monto-box">
-    <div class="monto">${monto}</div>
-    <div class="label">Importe recibido — <span class="badge">✓ Pago registrado</span></div>
-    <div style="margin-top:10px;display:flex;align-items:center;justify-content:center;gap:12px">
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=70x70&data=GASP-REC-${nroRecibo}-${con.nombre||''}-${periodo}" alt="QR" style="width:70px;height:70px" />
-      <div style="text-align:left;font-size:9px;color:#374151"><div style="font-weight:600;margin-bottom:2px">Código de verificación</div><div>${nroRecibo}</div></div>
-    </div>
-  </div>
-
-  <div class="row">
-    <span class="label">Registrado por</span>
-    <span class="value">Administración de Consorcios Pinamar</span>
-  </div>
-
-  <div class="firma">
-    <strong>Javier García Pérez</strong> — Administrador de Consorcios — RPAC Mat. N° 83<br>
-    Pinamar, Provincia de Buenos Aires<br>
-    <span style="font-size:10px;color:#9ca3af">Comprobante emitido por GASP Consorcios — ${new Date().toLocaleString('es-AR')}</span>
-  </div>
-</div>
-</body></html>`
+  // Recibo art. 12 Ley 14.701 — generador único compartido con el Portal (lib/recibo.js).
+  // El estado de deuda (inc. h) sale de get-cuenta-corriente (misma fuente que la pantalla y el Portal).
+  async function datosRecibo(cob) {
+    const uf  = unidades.find(u => u.id === cob.unidad_id) || {}
+    const cp  = copropietarios.find(c => c.id === uf.propietario_id) || {}
+    const exp = expensas.find(e => e.id === cob.expensa_id) || {}
+    let saldo = null, cuentaBanco = null, interfast = null
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession()
+      saldo = saldoDesdeCtaCte(await getCuentaCorriente(cob.unidad_id, s?.access_token))
+    } catch (e) { saldo = null }
+    try {
+      const [{ data: cb }, { data: ifu }, { data: cfg }] = await Promise.all([
+        supabase.from('con_cuentas_banco').select('*').eq('consorcio_id', consorcioId).eq('activa', true).limit(1),
+        supabase.from('con_interfast_uf').select('cpe, cvu, alias').eq('unidad_id', cob.unidad_id).maybeSingle(),
+        supabase.from('con_config_cobranza').select('interfast_activo').eq('consorcio_id', consorcioId).maybeSingle(),
+      ])
+      cuentaBanco = cb?.[0] || null
+      interfast   = cfg?.interfast_activo ? (ifu || null) : null
+    } catch (e) { /* formas de pago: se usan los datos del consorcio */ }
+    return { cob, consorcio: consorcioActivo || {}, unidad: uf, copropietario: cp, expensa: exp,
+      adm: adminPerfil || {}, cuentaBanco, interfast, saldo }
   }
 
-  function imprimirRecibo(cob) {
-    const html = generarReciboHTML(cob)
-    const win = window.open('', '_blank', 'width=800,height=600')
-    win.document.write(html)
-    win.document.close()
-    win.focus()
-    setTimeout(() => win.print(), 500)
+  async function imprimirRecibo(cob) {
+    const win = abrirVentanaRecibo()
+    if (!win) return setMsg({ tipo: 'warn', texto: 'Habilite las ventanas emergentes para generar el recibo.' })
+    const d = await datosRecibo(cob)
+    escribirVentanaRecibo(win, generarReciboHTML({ ...d, autoPrint: true }))
   }
 
-  function descargarRecibo(cob) {
-    const html = generarReciboHTML(cob)
+  async function descargarRecibo(cob) {
+    const d = await datosRecibo(cob)
+    const html = generarReciboHTML({ ...d, autoPrint: false })
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href = url
-    const nro = cob.nro_recibo || cob.id.slice(-8).toUpperCase()
-    a.download = `Recibo_${nro}_UF${unidades.find(u=>u.id===cob.unidad_id)?.numero||'?'}.html`
+    a.download = `Recibo_${numeroRecibo(cob)}_UF${d.unidad?.numero || '?'}.html`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -176,7 +95,7 @@ export default function ReciboPago() {
       <Card style={{ marginBottom:16, background:'#eff6ff', border:'1px solid #bfdbfe' }}>
         <div style={{ fontSize:12, color:'#1e40af' }}>
           ℹ️ Los recibos se generan como página HTML lista para imprimir o guardar como PDF desde el navegador.
-          Incluyen: N° de recibo, consorcio, UF, copropietario, período, fecha de pago, monto y firma del administrador.
+          Contenido del art. 12 Ley 14.701: consorcio y domicilio, UF, propietario, período, vencimientos e intereses, formas de pago, datos, CUIT, inscripción y firma del administrador, y estado de deuda a la fecha (desde la cuenta corriente).
           Cumplen con las exigencias del RPAC Provincia de Buenos Aires (Ley 14.701).
         </div>
       </Card>
