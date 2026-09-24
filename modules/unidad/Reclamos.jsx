@@ -10,6 +10,7 @@ import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
+import ProtocoloIncidente from './ProtocoloIncidente'
 
 export default function Reclamos() {
   const { session, unidades, copropietarios, consorcioActivo, consorcios } = useApp()
@@ -166,6 +167,10 @@ export default function Reclamos() {
       <Card style={{ marginBottom:14 }}>
         <div style={{ fontSize:13, lineHeight:1.8, whiteSpace:'pre-wrap' }}>{detalle.descripcion || 'Sin descripción.'}</div>
       </Card>
+      <ProtocoloIncidente reclamo={detalle} onUpdate={campos => {
+        setDetalle(x => x ? { ...x, ...campos } : x)
+        setReclamos(rs => rs.map(r => r.id === detalle.id ? { ...r, ...campos } : r))
+      }} />
       {Array.isArray(detalle.adjuntos) && detalle.adjuntos.length > 0 && (
         <Card style={{ marginBottom:14 }}>
           <div style={{ fontWeight:600, color:AZ, marginBottom:8 }}>📎 Comprobantes adjuntos</div>
@@ -328,6 +333,7 @@ export default function Reclamos() {
                     <td style={{ padding:'8px 12px', color:'#374151', fontSize:12, fontWeight:700, whiteSpace:'nowrap' }}>
                       {r.nro_reclamo ? '#' + r.nro_reclamo : '—'}
                       {r.es_emergencia && <span style={{display:'block',background:'#fee2e2',color:'#dc2626',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,marginTop:2}}>🚨 EMERGENCIA</span>}
+                      {r.protocolo_codigo && <span title="Protocolo aplicado" style={{display:'block',background:r.nivel_riesgo==='rojo'?'#fee2e2':r.nivel_riesgo==='verde'?'#dcfce7':'#fff8e1',color:'#374151',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:700,marginTop:2}}>📋 {r.protocolo_codigo}</span>}
                     </td>
                     <td style={{ padding:'8px 12px', color:GR, fontSize:11, whiteSpace:'nowrap' }}>{fmt(r.created_at)}</td>
                     <td style={{ padding:'8px 12px' }}>
