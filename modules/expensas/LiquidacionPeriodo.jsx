@@ -5,7 +5,7 @@ import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/con
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
-import { construirHTMLLiquidacionNativa, escribirLiquidacionNativa, resolverCodigosColumna } from '../../lib/pdfLiquidacionNativa'
+import { construirHTMLLiquidacionNativa, escribirLiquidacionNativa, resolverCodigosColumna, prepararDatosPDF } from '../../lib/pdfLiquidacionNativa'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
@@ -815,7 +815,18 @@ export default function LiquidacionPeriodo() {
   // ── PASO 4: Confirmar y cerrar ─────────────────────────────────────────────
   async function confirmarYCerrar() {
     if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
+    // U2: aviso previo si faltan datos que la Ley 14.701 exige en la liquidación (no bloquea)
+    const faltantes = []
+    if (!gastos.some(g => g.categoria === 'honorarios_admin')) faltantes.push('• Honorarios de administración (art. 11 inc. e)')
+    if (!(consorcioActivo?.poliza_nro || consorcioActivo?.poliza_compania || consorcioActivo?.aseguradora)) faltantes.push('• Datos de la póliza del consorcio (art. 11 inc. j)')
+    if (faltantes.length && !confirm(`Faltan datos que la Ley 14.701 exige en la liquidación:\n\n${faltantes.join('\n')}\n\n¿Cerrar el período igual?`)) return
     if (!confirm(`¿Confirmar y cerrar el período ${expSel?.periodo}?\n\nSe generarán ${distribucion.length} comprobantes individuales y el período quedará cerrado.`)) return
+
+    // U2: datos exactos del PDF (los mismos de la Vista previa), tomados antes de recargar el estado.
+    const snapBase = datosPDFNativo()
+    // Abrir la ventana del PDF en el gesto del usuario (evita el bloqueo de pop-ups)
+    const pdfWin = window.open('', '_blank', 'width=1100,height=800,scrollbars=yes,resizable=yes')
+    if (pdfWin) pdfWin.document.write('<p style="font-family:Arial;padding:24px;color:#555">Cerrando el período y generando la liquidación…</p>')
 
     setProcesando(true)
     setMsg(null)
@@ -961,47 +972,31 @@ export default function LiquidacionPeriodo() {
         await supabase.rpc('asignar_numero_liquidacion', { p_consorcio_id: consorcioId, p_expensa_id: expSel.id })
       } catch(e) { /* no crítico */ }
 
-      setMsg({ tipo:'ok', texto:`✓ Período ${expSel.periodo} cerrado — ${distribucion.length} unidades — Total $${totalACobrar.toLocaleString('es-AR')}` })
+      // U2: guardar los datos exactos del PDF nativo. Períodos y Portal regeneran este MISMO PDF.
+      const pdfDatos = prepararDatosPDF({ ...snapBase, expSel: { ...(snapBase.expSel || {}), estado: 'cerrada' }, esPreliquidacion: false })
+      const { error: eSnap } = await supabase.from('con_expensas')
+        .update({ pdf_datos: pdfDatos, pdf_datos_at: new Date().toISOString(), pdf_plantilla: 'nativa-ley14701-v1' })
+        .eq('id', expSel.id)
+
+      setMsg(eSnap
+        ? { tipo:'warn', texto:`✓ Período ${expSel.periodo} cerrado, pero no se pudo guardar el PDF para Períodos/Portal: ${eSnap.message}` }
+        : { tipo:'ok', texto:`✓ Período ${expSel.periodo} cerrado — ${distribucion.length} unidades — Total $${totalACobrar.toLocaleString('es-AR')}` })
       setPaso(4)
+
+      // PDF de la liquidación: plantilla nativa Ley 14.701 (U2), con los datos guardados
+      try {
+        if (pdfWin) escribirLiquidacionNativa(pdfWin, construirHTMLLiquidacionNativa(pdfDatos))
+      } catch (pdfErr) {
+        console.warn('PDF generación error:', pdfErr)
+        try { pdfWin?.close() } catch (_) {}
+      }
+
       await cargar()
 
-      // Generar PDF de liquidación automáticamente al cerrar el período
-      // Usar timeout para que el DOM se actualice primero
-      setTimeout(async () => {
-        try {
-          // Traer la expensa recién cerrada CON los campos de estado financiero persistidos,
-          // para que el PDF (y el que se envía al propietario) tome saldo y cobranzas reales.
-          const { data: expFresca } = await supabase.from('con_expensas').select('*').eq('id', expSel.id).single()
-          const { data: compData } = await supabase.from('con_comprobantes_proveedor').select('saldo_pendiente').eq('expensa_id', expSel.id)
-          const expActualizado = expFresca || { ...expSel,
-            total_gastos: totalGastos,
-            total_expensa: totalACobrar,
-            estado: 'cerrada',
-          }
-          generarPDFLiquidacion({
-            consorcioActivo,
-            expensa: expActualizado,
-            gastos,
-            comprobantes: compData || [],
-            detalles: distribucion.map(d => ({
-              unidad_id: d.unidad_id,
-              monto: (parseFloat(d.expensa_base)||0) + (parseFloat(d.redondeo)||0),  // expensa del período
-              saldo_anterior: d.saldo_anterior || 0,   // expensa del mes anterior (col "saldo anterior")
-              pagos_periodo: d.pagos_anterior || 0,     // pagos del mes anterior (col "pagos")
-              interes_mora: d.interes_mora || 0,        // interés del mes anterior (col "interés")
-              deuda: d.deuda,                           // deuda con signo (compensa el interés en el PDF)
-              redondeo: d.redondeo || 0,
-            })),
-            unidades,
-            copropietarios,
-            adminPerfil: adminPerfil || {},
-          })
-        } catch(pdfErr) {
-          console.warn('PDF generación error:', pdfErr)
-        }
-      }, 800)
+      // (U2) El PDF MIS EXPENSAS del cierre fue reemplazado por la plantilla nativa (arriba).
 
     } catch(e) {
+      try { pdfWin?.close() } catch (_) {}
       setMsg({ tipo:'error', texto: 'Error: ' + e.message })
     }
     setProcesando(false)
