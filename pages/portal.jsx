@@ -9,6 +9,7 @@ import { createClient } from '@supabase/supabase-js'
 import Head from 'next/head'
 import { useRouter } from 'next/router'
 import { generarPDFLiquidacion } from '../lib/exportPdf'
+import { abrirLiquidacionGuardada } from '../lib/pdfLiquidacionNativa'
 import { generarReciboHTML, saldoDesdeCtaCte, abrirVentanaRecibo, escribirVentanaRecibo } from '../lib/recibo'
 
 const supabase = createClient(
@@ -404,6 +405,11 @@ export default function Portal() {
 
   async function abrirPDFCompleto() {
     if (!expensaActual || !consorcio) return
+    // U3: liquidación nativa cerrada desde U2 → el MISMO PDF que generó la administración al cierre
+    if (expensaActual.pdf_datos) {
+      if (!abrirLiquidacionGuardada(expensaActual.pdf_datos)) alert('Habilite las ventanas emergentes para ver la liquidación.')
+      return
+    }
     setGenerandoPDF(true)
     try {
       generarPDFLiquidacion({
