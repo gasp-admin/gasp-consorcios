@@ -1,4 +1,4 @@
-import { useState, Fragment } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
 import { SUPA_URL, AZ, GR, BG, VD } from '../../lib/config'
@@ -150,6 +150,29 @@ export default function ConciliarPagos() {
 
   const esMulti = banco === 'roela_transf'
   const puedeCobrar = puede ? puede('cobrar') : true
+
+  // Los lotes se guardan en la base; el selector vivía solo en memoria y se perdía al refrescar.
+  // Al abrir el módulo, recuperamos los lotes con trabajo pendiente (importados o parciales) para
+  // poder conciliarlos/confirmarlos sin volver a subir el archivo.
+  async function cargarLotesPendientes() {
+    try {
+      const uid = session?.user?.id
+      if (!uid) return
+      const desde = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10)
+      const { data: ls } = await supabase.from('con_cobranza_lote')
+        .select('id, consorcio_id, total_importe, total_registros, fecha_archivo')
+        .eq('admin_id', uid).in('estado', ['importado', 'parcial'])
+        .gte('fecha_archivo', desde)
+        .order('fecha_archivo', { ascending: false })
+      if (!ls?.length) return
+      const ids = [...new Set(ls.map((x) => x.consorcio_id))]
+      const { data: cons } = await supabase.from('con_consorcios').select('id, nombre').in('id', ids)
+      const byId = {}; for (const c of (cons || [])) byId[c.id] = c.nombre
+      setConsorciosById((prev) => ({ ...prev, ...byId }))
+      setLotes(ls.map((x) => ({ id: x.id, consorcioId: x.consorcio_id, nombre: byId[x.consorcio_id] || x.consorcio_id, n: x.total_registros, total: Number(x.total_importe) || 0 })))
+    } catch (_) { /* silencioso: el selector queda vacío si falla */ }
+  }
+  useEffect(() => { if (session?.user?.id) cargarLotesPendientes() }, [session?.user?.id]) // eslint-disable-line
 
   async function onArchivo(e) {
     const file = e.target.files?.[0]
@@ -584,7 +607,7 @@ export default function ConciliarPagos() {
 
       {lotes.length > 0 && (
         <div style={{ marginTop: 22, background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:14 }}>
-          <h3 style={{ margin:'0 0 10px', color:AZ, fontSize:15 }}>Lotes creados \u2014 elegí uno para conciliar</h3>
+          <h3 style={{ margin:'0 0 10px', color:AZ, fontSize:15 }}>Lotes pendientes \u2014 elegí uno para conciliar/confirmar</h3>
           <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
             {lotes.map((lt) => (
               <button key={lt.id} onClick={() => abrirLote(lt)}
