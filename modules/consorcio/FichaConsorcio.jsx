@@ -42,6 +42,14 @@ function emptyForm(c) {
   return f
 }
 
+// Mensaje claro cuando la Edge Function se corta sin devolver JSON (ej. 546 = límite de CPU/memoria, 504 = tiempo).
+function errorHttp(status, que) {
+  if (status === 546) return `No se pudo analizar ${que}: la función superó el límite de recursos (HTTP 546). Avisá a soporte.`
+  if (status === 504 || status === 408) return `No se pudo analizar ${que}: se agotó el tiempo de espera (HTTP ${status}). Reintentá desde una PC con buena conexión.`
+  if (status === 401 || status === 403) return `No se pudo analizar ${que}: sesión vencida o sin permiso (HTTP ${status}). Volvé a iniciar sesión.`
+  return `No se pudo analizar ${que} (HTTP ${status}).`
+}
+
 export default function FichaConsorcio() {
   const { consorcioActivo, setConsorcioActivo, setConsorcios, consorcios, session, pagina, setPagina, puede } = useApp()
   const esNuevo = pagina === 'nuevo_consorcio'
@@ -132,8 +140,8 @@ export default function FichaConsorcio() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({ reglamento_url: form.reglamento_url }),
       })
-      const json = await resp.json()
-      if (!json.ok) throw new Error(json.error || 'No se pudo analizar el reglamento')
+      const json = await resp.json().catch(() => ({}))
+      if (!json.ok) throw new Error(json.error || errorHttp(resp.status, 'el reglamento'))
       const d = json.datos || {}
       setForm(f => ({
         ...f,
@@ -165,7 +173,7 @@ export default function FichaConsorcio() {
         body: JSON.stringify({ poliza_url: form.poliza_url.trim() }),
       })
       const json = await resp.json().catch(() => ({}))
-      if (!json.ok) throw new Error(json.error || 'No se pudo analizar la póliza')
+      if (!json.ok) throw new Error(json.error || errorHttp(resp.status, 'la póliza'))
       const d = json.datos || {}
       const val = v => (v === null || v === undefined || v === '' || v === 'null') ? null : v
       const nuevos = {
