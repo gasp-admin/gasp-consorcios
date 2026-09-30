@@ -5,7 +5,7 @@ import { SUPA_URL, AZ, AZ2, VD, RJ, AM, GR, BG, SUPERADMIN } from '../../lib/con
 import { fmt, fmtD, fmtN, periodoLabel, periodoActual, nextId, colGasto } from '../../lib/formatters'
 import { exportarExcel } from '../../lib/exportExcel'
 import { exportarPDF, generarPDFLiquidacion } from '../../lib/exportPdf'
-import { construirHTMLLiquidacionNativa, escribirLiquidacionNativa, resolverCodigosColumna } from '../../lib/pdfLiquidacionNativa'
+import { construirHTMLLiquidacionNativa, escribirLiquidacionNativa, resolverCodigosColumna, prepararDatosPDF } from '../../lib/pdfLiquidacionNativa'
 import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP, crearDemoConsorcios } from '../../api/edgeFunctions'
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
@@ -571,20 +571,25 @@ export default function LiquidacionPeriodo() {
         const desdeCred = `${expSel.periodo}-01`
         const nextM = new Date(cy, cm, 1)
         const hastaCred = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}-01`
-        const { data: ncPeriodo } = await supabase.from('con_movimientos_unidad')
-          .select('unidad_id, monto').eq('consorcio_id', consorcioId).eq('tipo', 'credito')
+        // Ajustes de cta cte del período (expensa_id NULL): NC (crédito), ND (débito), movimientos
+        // varios y entre cuentas. Se netean por UF: crédito reduce la deuda, débito la aumenta. Se
+        // excluyen los movimientos GENERADOS (apertura MOV-APERT/MOV-APERTURA, cobranzas MOV-COB,
+        // recargos MOV-RECV2) para no doble-contar.
+        const { data: ajPeriodo } = await supabase.from('con_movimientos_unidad')
+          .select('unidad_id, tipo, monto').eq('consorcio_id', consorcioId).in('tipo', ['credito', 'debito'])
           .is('expensa_id', null)
           .gte('fecha', desdeCred).lt('fecha', hastaCred).neq('estado', 'anulado')
-          .not('id', 'like', 'MOV-APERT-%').not('id', 'like', 'MOV-COB-%')
-        for (const nc of (ncPeriodo || [])) {
-          const monto = parseFloat(nc.monto) || 0
+          .not('id', 'like', 'MOV-APERT%').not('id', 'like', 'MOV-COB-%').not('id', 'like', 'MOV-RECV2-%')
+        for (const mv of (ajPeriodo || [])) {
+          const monto = parseFloat(mv.monto) || 0
           if (!monto) continue
-          const prev = saldosAnt[nc.unidad_id]
+          const neto = mv.tipo === 'credito' ? monto : -monto   // crédito reduce deuda; débito la aumenta
+          const prev = saldosAnt[mv.unidad_id]
           if (prev) {
-            prev.creditoAjuste = (prev.creditoAjuste || 0) + monto
+            prev.creditoAjuste = (prev.creditoAjuste || 0) + neto
             if (prev.corteMes === undefined && prev.nativo === undefined) prev.nativo = true
           } else {
-            saldosAnt[nc.unidad_id] = { saldo: 0, pagos: 0, interes: 0, creditoAjuste: monto, nativo: true }
+            saldosAnt[mv.unidad_id] = { saldo: 0, pagos: 0, interes: 0, creditoAjuste: neto, nativo: true }
           }
         }
       }
@@ -700,8 +705,9 @@ export default function LiquidacionPeriodo() {
         saldo_arrastre = ajusteSaldoAnt + interes_mora
       }
 
-      // Crédito de ajuste del período (NC/reintegro, expensa_id NULL): reduce la deuda como saldo a
-      // favor y se arrastra al mes siguiente. Va FUERA de PAGOS (que queda solo con cobranzas reales).
+      // Ajuste neto del período (NC crédito − ND débito − varios/entre cuentas, expensa_id NULL):
+      // crédito reduce la deuda (saldo a favor), débito la aumenta; se arrastra al mes siguiente. Va
+      // FUERA de PAGOS (que queda solo con cobranzas reales, reconciliando con el Estado Financiero).
       if (creditoAjuste) {
         deuda = Math.round((deuda - creditoAjuste) * 100) / 100
         ajusteSaldoAnt = deuda
@@ -815,7 +821,18 @@ export default function LiquidacionPeriodo() {
   // ── PASO 4: Confirmar y cerrar ─────────────────────────────────────────────
   async function confirmarYCerrar() {
     if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
+    // U2: aviso previo si faltan datos que la Ley 14.701 exige en la liquidación (no bloquea)
+    const faltantes = []
+    if (!gastos.some(g => g.categoria === 'honorarios_admin')) faltantes.push('• Honorarios de administración (art. 11 inc. e)')
+    if (!(consorcioActivo?.poliza_nro || consorcioActivo?.poliza_compania || consorcioActivo?.aseguradora)) faltantes.push('• Datos de la póliza del consorcio (art. 11 inc. j)')
+    if (faltantes.length && !confirm(`Faltan datos que la Ley 14.701 exige en la liquidación:\n\n${faltantes.join('\n')}\n\n¿Cerrar el período igual?`)) return
     if (!confirm(`¿Confirmar y cerrar el período ${expSel?.periodo}?\n\nSe generarán ${distribucion.length} comprobantes individuales y el período quedará cerrado.`)) return
+
+    // U2: datos exactos del PDF (los mismos de la Vista previa), tomados antes de recargar el estado.
+    const snapBase = datosPDFNativo()
+    // Abrir la ventana del PDF en el gesto del usuario (evita el bloqueo de pop-ups)
+    const pdfWin = window.open('', '_blank', 'width=1100,height=800,scrollbars=yes,resizable=yes')
+    if (pdfWin) pdfWin.document.write('<p style="font-family:Arial;padding:24px;color:#555">Cerrando el período y generando la liquidación…</p>')
 
     setProcesando(true)
     setMsg(null)
@@ -961,47 +978,31 @@ export default function LiquidacionPeriodo() {
         await supabase.rpc('asignar_numero_liquidacion', { p_consorcio_id: consorcioId, p_expensa_id: expSel.id })
       } catch(e) { /* no crítico */ }
 
-      setMsg({ tipo:'ok', texto:`✓ Período ${expSel.periodo} cerrado — ${distribucion.length} unidades — Total $${totalACobrar.toLocaleString('es-AR')}` })
+      // U2: guardar los datos exactos del PDF nativo. Períodos y Portal regeneran este MISMO PDF.
+      const pdfDatos = prepararDatosPDF({ ...snapBase, expSel: { ...(snapBase.expSel || {}), estado: 'cerrada' }, esPreliquidacion: false })
+      const { error: eSnap } = await supabase.from('con_expensas')
+        .update({ pdf_datos: pdfDatos, pdf_datos_at: new Date().toISOString(), pdf_plantilla: 'nativa-ley14701-v1' })
+        .eq('id', expSel.id)
+
+      setMsg(eSnap
+        ? { tipo:'warn', texto:`✓ Período ${expSel.periodo} cerrado, pero no se pudo guardar el PDF para Períodos/Portal: ${eSnap.message}` }
+        : { tipo:'ok', texto:`✓ Período ${expSel.periodo} cerrado — ${distribucion.length} unidades — Total $${totalACobrar.toLocaleString('es-AR')}` })
       setPaso(4)
+
+      // PDF de la liquidación: plantilla nativa Ley 14.701 (U2), con los datos guardados
+      try {
+        if (pdfWin) escribirLiquidacionNativa(pdfWin, construirHTMLLiquidacionNativa(pdfDatos))
+      } catch (pdfErr) {
+        console.warn('PDF generación error:', pdfErr)
+        try { pdfWin?.close() } catch (_) {}
+      }
+
       await cargar()
 
-      // Generar PDF de liquidación automáticamente al cerrar el período
-      // Usar timeout para que el DOM se actualice primero
-      setTimeout(async () => {
-        try {
-          // Traer la expensa recién cerrada CON los campos de estado financiero persistidos,
-          // para que el PDF (y el que se envía al propietario) tome saldo y cobranzas reales.
-          const { data: expFresca } = await supabase.from('con_expensas').select('*').eq('id', expSel.id).single()
-          const { data: compData } = await supabase.from('con_comprobantes_proveedor').select('saldo_pendiente').eq('expensa_id', expSel.id)
-          const expActualizado = expFresca || { ...expSel,
-            total_gastos: totalGastos,
-            total_expensa: totalACobrar,
-            estado: 'cerrada',
-          }
-          generarPDFLiquidacion({
-            consorcioActivo,
-            expensa: expActualizado,
-            gastos,
-            comprobantes: compData || [],
-            detalles: distribucion.map(d => ({
-              unidad_id: d.unidad_id,
-              monto: (parseFloat(d.expensa_base)||0) + (parseFloat(d.redondeo)||0),  // expensa del período
-              saldo_anterior: d.saldo_anterior || 0,   // expensa del mes anterior (col "saldo anterior")
-              pagos_periodo: d.pagos_anterior || 0,     // pagos del mes anterior (col "pagos")
-              interes_mora: d.interes_mora || 0,        // interés del mes anterior (col "interés")
-              deuda: d.deuda,                           // deuda con signo (compensa el interés en el PDF)
-              redondeo: d.redondeo || 0,
-            })),
-            unidades,
-            copropietarios,
-            adminPerfil: adminPerfil || {},
-          })
-        } catch(pdfErr) {
-          console.warn('PDF generación error:', pdfErr)
-        }
-      }, 800)
+      // (U2) El PDF MIS EXPENSAS del cierre fue reemplazado por la plantilla nativa (arriba).
 
     } catch(e) {
+      try { pdfWin?.close() } catch (_) {}
       setMsg({ tipo:'error', texto: 'Error: ' + e.message })
     }
     setProcesando(false)
