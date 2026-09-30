@@ -43,7 +43,9 @@ export default function MovimientosUnidad() {
       admin_id: uid,
       consorcio_id: consorcioId,
       unidad_id: form.unidad_id,
-      expensa_id: form.expensa_id || null,
+      // Ajuste de cta cte: SIEMPRE expensa_id null. El prorrateo de la liquidación lo netea por
+      // FECHA (mes del período), y así sobrevive los cierres (que borran movimientos por expensa_id).
+      expensa_id: null,
       tipo: form.tipo,
       concepto: form.concepto.trim(),
       categoria: form.categoria || 'varios',
@@ -140,7 +142,7 @@ export default function MovimientosUnidad() {
                   borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
             </div>
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:14 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
             <div>
               <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>N° comprobante</div>
               <input value={form.numero_comprobante||''} placeholder="Opcional"
@@ -155,15 +157,9 @@ export default function MovimientosUnidad() {
                 style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
                   borderRadius:7, fontSize:13, boxSizing:'border-box' }} />
             </div>
-            <div>
-              <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Período asociado</div>
-              <select value={form.expensa_id||''} onChange={e => setForm(f => ({...f, expensa_id:e.target.value}))}
-                style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db',
-                  borderRadius:7, fontSize:13, background:'#fff' }}>
-                <option value="">Sin período</option>
-                {expensas.map(e => <option key={e.id} value={e.id}>{e.periodo}</option>)}
-              </select>
-            </div>
+          </div>
+          <div style={{ fontSize:11, color:GR, marginBottom:14, fontStyle:'italic' }}>
+            El ajuste impacta la cuenta corriente de la UF y la liquidación del mes de su <strong>fecha</strong>.
           </div>
           <div style={{ marginBottom:14 }}>
             <div style={{ fontSize:12, color:GR, marginBottom:4, fontWeight:500 }}>Notas internas</div>
