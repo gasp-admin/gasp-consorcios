@@ -52,7 +52,63 @@ export default function Asambleas() {
   const consorcioNombre = (cid) => {
     if (!cid) return ''
     if (consorcioActivo?.id === cid) return consorcioActivo?.nombre || ''
-    return cid.replace('CON','Consorcio ')
+    const c = (consorcios||[]).find(x => x.id === cid)
+    return c?.nombre || cid.replace('CON','Consorcio ')
+  }
+
+  // ── Asamblea de otro consorcio: unidades/copropietarios del contexto NO le corresponden ──
+  const asmAjena = !!(detalle && detalle.consorcio_id && detalle.consorcio_id !== consorcioId)
+
+  // ── MATCHER DE UF PRESENTES ───────────────────────────────────────────────
+  // Coincidencia EXACTA normalizada (minúsculas, sin espacios/signos, sin ceros a izquierda)
+  // contra numero_interno → numero → descripcion, en ese orden de prioridad.
+  // Si no hay exacta, busca la etiqueta como palabra completa dentro del texto
+  // (ej. "- TI 16D Juan Pérez (presente)"). Nunca suma una UF por substring parcial.
+  // Devuelve reconocidas (sin duplicados), no reconocidas y ambiguas.
+  const ufKey   = (s) => String(s==null?'':s).toLowerCase().replace(/\d+/g, d => String(parseInt(d,10))).replace(/[^a-z0-9]/g,'')
+  const ufLabel = (u) => u.numero_interno || u.numero || u.id
+  const ufRegex = (lbl) => {
+    const toks = String(lbl).toLowerCase().replace(/\d+/g, d => String(parseInt(d,10))).match(/[a-z]+|\d+/g)
+    if (!toks || !toks.length) return null
+    return new RegExp('(^|[^a-z0-9])'+toks.map(t => /^\d+$/.test(t) ? '0*'+t : t).join('[^a-z0-9]*')+'(?![a-z0-9])')
+  }
+  const matchPresentes = (texto, unis) => {
+    const entradas = String(texto||'').split(',').map(p=>p.trim()).filter(Boolean)
+    const campos = ['numero_interno','numero','descripcion']
+    const idx = campos.map(f => {
+      const m = new Map()
+      unis.forEach(u => { const k = ufKey(u[f]); if (!k) return; if (!m.has(k)) m.set(k, new Set()); m.get(k).add(u) })
+      return m
+    })
+    const ok = new Map(), noRec = [], ambig = []
+    entradas.forEach(e => {
+      const k = ufKey(e)
+      let cands = null, via = null
+      for (let i = 0; i < idx.length; i++) { if (k && idx[i].has(k)) { cands = [...idx[i].get(k)]; via = campos[i]; break } }
+      if (!cands) {
+        const t = e.toLowerCase().replace(/['"]/g,' ').replace(/\d+/g, d => String(parseInt(d,10)))
+        for (const f of campos) {
+          const hits = []
+          unis.forEach(u => {
+            const v = u[f]; if (!v) return
+            if (f === 'numero' && u.numero_interno) return   // el n° interno de orden no se busca dentro de texto libre
+            const kv = ufKey(v); if (kv.length < 2 && f !== 'numero_interno' && f !== 'numero') return
+            const rx = ufRegex(v); if (rx && rx.test(t)) hits.push({ u, len: kv.length })
+          })
+          if (hits.length) {
+            const max = Math.max(...hits.map(h=>h.len))
+            cands = [...new Set(hits.filter(h=>h.len===max).map(h=>h.u))]
+            via = f
+            break
+          }
+        }
+      }
+      if (!cands || !cands.length) noRec.push(e)
+      else if (cands.length > 1) ambig.push({ entrada:e, opciones:cands.map(ufLabel) })
+      else if (!ok.has(cands[0].id)) ok.set(cands[0].id, { u:cands[0], entrada:e, via })
+    })
+    const reconocidas = [...ok.values()]
+    return { entradas, reconocidas, noRec, ambig, duplicadas: entradas.length - reconocidas.length - noRec.length - ambig.length }
   }
 
   // ── HELPERS ───────────────────────────────────────────────────────────────
@@ -76,7 +132,8 @@ export default function Asambleas() {
   // ── GENERARTEXTO (antes de abrirDetalle — evita TDZ) ─────────────────────
   const generarTexto = (a) => {
     if (!a) return ''
-    const cn   = consorcioActivo ? (consorcioActivo.nombre || '...') : '...'
+    const consA = (a.consorcio_id && (consorcios||[]).find(c => c.id === a.consorcio_id)) || consorcioActivo
+    const cn   = consA ? (consA.nombre || '...') : '...'
     const tipo = a.tipo === 'ordinaria' ? 'ORDINARIA' : 'EXTRAORDINARIA'
     const tipoL = a.tipo === 'ordinaria' ? 'Ordinaria' : 'Extraordinaria'
     const fC   = a.fecha ? new Date(a.fecha+'T12:00:00').toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '...'
@@ -174,6 +231,7 @@ export default function Asambleas() {
   }
 
   const enviarConv = async () => {
+    if (asmAjena) return setMsg({ tipo:'error', texto:'Esta asamblea pertenece a '+consorcioNombre(detalle.consorcio_id)+'. Seleccioná ese consorcio en el menú principal antes de enviar.' })
     const cps = copropietarios.filter(c => c.consorcio_id === consorcioId && c.email)
     if (!cps.length) return setMsg({ tipo:'warn', texto:'No hay copropietarios con email en este consorcio' })
     if (!confirm('¿Enviar convocatoria a '+cps.length+' propietarios?')) return
@@ -199,10 +257,12 @@ export default function Asambleas() {
   }
 
   const guardarTranscripcion = async () => {
+    if (asmAjena) return setMsg({ tipo:'error', texto:'Esta asamblea pertenece a '+consorcioNombre(detalle.consorcio_id)+'. Seleccioná ese consorcio en el menú principal antes de guardar la asistencia.' })
     const pres = presentes.split(',').map(p=>p.trim()).filter(Boolean)
+    const mp   = matchPresentes(presentes, unidades)
     await supabase.from('con_asambleas').update({
       transcripcion:transcEdit, unidades_presentes:pres,
-      total_presentes:pres.length, hora_fin:horaFin,
+      total_presentes:mp.reconocidas.length, hora_fin:horaFin,
       estado:'realizada', updated_at:new Date().toISOString()
     }).eq('id', detalle.id)
     setDetalle(d => ({...d, transcripcion:transcEdit, unidades_presentes:pres, hora_fin:horaFin, estado:'realizada'}))
@@ -210,6 +270,7 @@ export default function Asambleas() {
   }
 
   const generarActa = async () => {
+    if (asmAjena) return setMsg({ tipo:'error', texto:'Esta asamblea pertenece a '+consorcioNombre(detalle.consorcio_id)+'. Seleccioná ese consorcio en el menú principal antes de generar el acta.' })
     if (!transcEdit.trim()) return setMsg({ tipo:'warn', texto:'Pegá la transcripción antes' })
     setGenerando(true); setMsg(null)
     const { data:{ session:sess } } = await supabase.auth.getSession()
@@ -447,6 +508,12 @@ No incluyas texto fuera del JSON.`
         <BtnSec onClick={()=>{setForm({...detalle,orden_del_dia:detalle.orden_del_dia||[]});setVista('form')}}>✏ Editar</BtnSec>
       </div>
       <Msg data={msg}/>
+      {asmAjena&&(
+        <div style={{marginBottom:12,padding:'10px 14px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,fontSize:12.5,color:RJ}}>
+          ⚠ Esta asamblea está registrada en <strong>{consorcioNombre(detalle.consorcio_id)}</strong> ({detalle.consorcio_id}) y el consorcio activo es <strong>{consorcioActivo?.nombre||consorcioId}</strong>.
+          Asistencia, acta y envío quedan bloqueados: seleccioná el consorcio correcto en el menú principal.
+        </div>
+      )}
       <div style={{display:'flex',gap:0,marginBottom:16,borderBottom:'2px solid #e5e7eb',overflowX:'auto'}}>
         {[['convocatoria','📋 Conv.'],['asistencia','👥 Asist.'],['transcripcion','🎙 Transcr.'],
           ['acta','📄 Acta'],['actas_pdf','📎 PDF'],['mandato','🔖 Mandato']].map(([id,l])=>(
@@ -500,42 +567,34 @@ No incluyas texto fuera del JSON.`
                 style={{width:'100%',padding:'10px',border:'1px solid #d1d5db',borderRadius:7,fontSize:12.5,fontFamily:'inherit',resize:'vertical'}}/>
             </div>
             <div style={{background:'#f8fafc',borderRadius:8,padding:'14px',fontSize:13}}>
-              <div style={{marginBottom:6}}>Total UFs: <strong>{unidades.length}</strong></div>
-              <div style={{marginBottom:6}}>Presentes: <strong>{presentes.split(',').filter(p=>p.trim()).length}</strong></div>
-              <div style={{marginBottom:6}}>% por unidades: <strong style={{color:presentes.split(',').filter(p=>p.trim()).length/Math.max(unidades.length,1)>=0.5?VD:RJ}}>{(presentes.split(',').filter(p=>p.trim()).length/Math.max(unidades.length,1)*100).toFixed(1)}%</strong></div>
-              {(() => {
-                // Calcular % por coeficiente de las UFs presentes
-                const presLista = presentes.split(',').map(p=>p.trim()).filter(Boolean)
+              {asmAjena ? (
+                <div style={{marginBottom:12,color:RJ,fontSize:12.5}}>Cálculo no disponible: las unidades cargadas son de {consorcioActivo?.nombre||consorcioId}, no de {consorcioNombre(detalle.consorcio_id)}.</div>
+              ) : (() => {
+                const mp        = matchPresentes(presentes, unidades)
+                const nRec      = mp.reconocidas.length
+                const pctUni    = nRec/Math.max(unidades.length,1)*100
                 const coefTotal = unidades.reduce((a,u)=>a+(parseFloat(u.porcentaje_fiscal)||0),0)||100
-                const coefPresentes = unidades
-                  .filter(u => presLista.some(p => {
-                    // El ítem puede ser solo el número ("PB A") o texto con nombre
-                    // ("- PB A" Rodolfo Mascheroni (presente)"). Buscar si el
-                    // número o numero_interno aparece en cualquier parte del texto.
-                    const t     = p.toLowerCase().replace(/['"]/g,' ')  // quitar comillas
-                    const tNoSp = t.replace(/\s/g,'')
-                    const num   = String(u.numero||'').toLowerCase().trim()
-                    const nNoSp = num.replace(/\s/g,'')
-                    const numInt= (u.numero_interno||'').toLowerCase().trim()
-                    const desc  = (u.descripcion||'').toLowerCase().trim()
-                    return (
-                      (num.length >= 2 && t.includes(num))    ||   // 'pb a' dentro del texto
-                      (nNoSp.length >= 2 && tNoSp.includes(nNoSp)) || // 'pba' sin espacios
-                      (numInt.length >= 2 && t.includes(numInt))   ||   // numero_interno dentro
-                      (desc.length > 3 && t.includes(desc))
-                    )
-                  }))
-                  .reduce((a,u)=>a+(parseFloat(u.porcentaje_fiscal)||0),0)
-                const pctCoef = (coefPresentes/coefTotal*100)
-                return (
-                  <div style={{marginBottom:12}}>
+                const coefPres  = mp.reconocidas.reduce((a,r)=>a+(parseFloat(r.u.porcentaje_fiscal)||0),0)
+                const pctCoef   = coefPres/coefTotal*100
+                const sinCoef   = mp.reconocidas.filter(r=>!(parseFloat(r.u.porcentaje_fiscal)>0)).map(r=>ufLabel(r.u))
+                return (<>
+                  <div style={{marginBottom:6}}>Total UFs: <strong>{unidades.length}</strong></div>
+                  <div style={{marginBottom:6}}>Presentes reconocidas: <strong>{nRec}</strong>
+                    <span style={{fontSize:11,color:GR,marginLeft:6}}>({mp.entradas.length} ingresadas)</span></div>
+                  <div style={{marginBottom:6}}>% por unidades: <strong style={{color:pctUni>=50?VD:RJ}}>{pctUni.toFixed(1)}%</strong></div>
+                  <div style={{marginBottom:8}}>
                     % por coeficiente: <strong style={{color:pctCoef>=50?VD:RJ}}>{pctCoef.toFixed(2)}%</strong>
-                    <span style={{fontSize:11,color:GR,marginLeft:6}}>({coefPresentes.toFixed(2)} / {coefTotal.toFixed(2)})</span>
-                    {pctCoef>=50&&presentes.split(',').filter(p=>p.trim()).length/Math.max(unidades.length,1)>=0.5&&(
+                    <span style={{fontSize:11,color:GR,marginLeft:6}}>({coefPres.toFixed(4)} / {coefTotal.toFixed(4)})</span>
+                    {pctCoef>=50&&pctUni>=50&&(
                       <span style={{marginLeft:8,background:VD,color:'#fff',borderRadius:5,padding:'2px 7px',fontSize:11,fontWeight:700}}>✓ Quórum doble mayoría</span>
                     )}
                   </div>
-                )
+                  {mp.noRec.length>0&&<div style={{marginBottom:6,fontSize:12,color:RJ}}>✗ No reconocidas ({mp.noRec.length}): {mp.noRec.join(' · ')}</div>}
+                  {mp.ambig.length>0&&<div style={{marginBottom:6,fontSize:12,color:AM}}>? Ambiguas ({mp.ambig.length}): {mp.ambig.map(a=>a.entrada+' → '+a.opciones.join(' / ')).join(' · ')}</div>}
+                  {mp.duplicadas>0&&<div style={{marginBottom:6,fontSize:12,color:AM}}>↺ Repetidas: {mp.duplicadas} (contadas una sola vez)</div>}
+                  {sinCoef.length>0&&<div style={{marginBottom:6,fontSize:12,color:AM}}>⚠ UF sin coeficiente cargado: {sinCoef.join(' · ')}</div>}
+                  {nRec>0&&<div style={{marginBottom:12,fontSize:11,color:GR}}>✓ {mp.reconocidas.map(r=>ufLabel(r.u)+(r.via==='numero'&&r.u.numero_interno?' [por n° '+r.u.numero+']':'')).join(' · ')}</div>}
+                </>)
               })()}
               <div style={{fontSize:12,color:GR,marginBottom:4}}>Hora fin</div>
               <input type="time" value={horaFin} onChange={e=>setHoraFin(e.target.value)} style={{padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:7,fontSize:13}}/>
