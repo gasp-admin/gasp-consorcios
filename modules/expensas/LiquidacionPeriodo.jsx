@@ -439,7 +439,7 @@ export default function LiquidacionPeriodo() {
     // Cargar saldos anteriores de la última expensa cerrada
     let saldosAnt = {}
     const { data: expAnterior } = await supabase.from('con_expensas')
-      .select('id, saldo_caja_final, total_cobrado, fuente, periodo').eq('consorcio_id', consorcioId)
+      .select('id, saldo_caja_final, total_cobrado, fuente, periodo, fecha_vencimiento, dias_gracia').eq('consorcio_id', consorcioId)
       .neq('id', expSel?.id || '').eq('estado','cerrada')
       .order('periodo', { ascending: false }).limit(1)
 
@@ -463,8 +463,9 @@ export default function LiquidacionPeriodo() {
         .select('unidad_id, total_uf, pagos').eq('expensa_id', expAnterior[0].id)
 
       // También buscar cobranzas registradas en la expensa anterior (por UF)
+      // (oct-2026) solo cobranzas VIVAS: una cobranza anulada no es pago (antes se contaba igual).
       const { data: cobranzasAnt } = await supabase.from('con_cobranzas')
-        .select('unidad_id, monto').eq('expensa_id', expAnterior[0].id)
+        .select('unidad_id, monto').eq('expensa_id', expAnterior[0].id).in('estado', ['acreditado','cobrado'])
       const cobranzasPorUF = {}
       for (const co of (cobranzasAnt||[])) {
         cobranzasPorUF[co.unidad_id] = (cobranzasPorUF[co.unidad_id]||0) + (parseFloat(co.monto)||0)
@@ -485,7 +486,7 @@ export default function LiquidacionPeriodo() {
       if (expAntPreCorte) {
         const [{ data: aperts }, { data: pagosPost }, { data: recPost }, { data: ncPost }] = await Promise.all([
           supabase.from('con_movimientos_unidad').select('unidad_id, tipo, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%'),
-          supabase.from('con_cobranzas').select('unidad_id, monto').eq('consorcio_id', consorcioId).gte('fecha', corteNat),
+          supabase.from('con_cobranzas').select('unidad_id, monto').eq('consorcio_id', consorcioId).gte('fecha', corteNat).in('estado', ['acreditado','cobrado']),
           supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat).neq('estado', 'anulado'),
           // Créditos de ajuste post-corte (NC, cancelación de intereses, pagos no registrados):
           // vigentes, tipo crédito, que NO son apertura ni pago (MOV-COB / con_cobranzas). La cta cte
@@ -517,11 +518,51 @@ export default function LiquidacionPeriodo() {
         //   interes = interés/recargo del mes anterior (d.interes_mora)              → col "interés"
         //   pagos   = pagos del mes anterior                                         → col "pagos"
         // La deuda (saldo − pagos, con signo) y el interés se compensan en el total (ver prorrateo).
+        //
+        // (oct-2026) INTERÉS v2 — regla del administrador:
+        //   (a) recargo 2º vto: se cobra AL PAGO (MOV-RECV2, Cobranzas) y se liquida en el mes siguiente;
+        //   (b) interés punitorio mensual (con_consorcios.interes_mora) sobre el CAPITAL VENCIDO impago:
+        //       deuda de períodos anteriores siempre; la expensa del período anterior sólo si al liquidar
+        //       ya venció (fecha_vencimiento + dias_gracia).
+        //   Antes: interes = d.interes_mora del mes anterior → se re-exponía el MISMO interés todos los meses
+        //   (compensado con saldo_anterior negativo) y la cta cte lo volvía a debitar; además nunca se
+        //   calculaba mora nueva y los recargos 2º vto cobrados quedaban como saldo a favor.
+        //   Ahora: saldo = TODO lo adeudado del período anterior (saldo_anterior + expensa + interés) y el
+        //   interés del período = SOLO lo nuevo (recargos 2º vto cobrados + mora sobre capital vencido).
+        //   La mora se calcula en el prorrateo (allí se conoce el crédito de ajuste del período).
+        const { data: recAnt } = await supabase.from('con_movimientos_unidad')
+          .select('unidad_id, monto').eq('expensa_id', expAnterior[0].id)
+          .like('id', 'MOV-RECV2-%').neq('estado', 'anulado')
+        const recargoPorUF = {}
+        for (const r of (recAnt || [])) recargoPorUF[r.unidad_id] = (recargoPorUF[r.unidad_id] || 0) + (parseFloat(r.monto) || 0)
+        const vtoAnt = expAnterior[0].fecha_vencimiento || null
+        const graciaAnt = parseInt(expAnterior[0].dias_gracia || 0, 10) || 0
+        let vencidoAnt = false
+        if (vtoAnt) {
+          const lim = new Date(String(vtoAnt).slice(0, 10) + 'T12:00:00')
+          lim.setDate(lim.getDate() + graciaAnt)
+          const hoyAR = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' })
+          vencidoAnt = hoyAR > lim.toLocaleDateString('en-CA')
+        }
+        // Pagos ya registrados contra la liquidación EN CURSO (aún no cerrada): no cambian la deuda
+        // arrastrada (se cuentan en el período siguiente), pero sí reducen la base de la mora.
+        const pagosEnCursoUF = {}
+        if (expSel?.id && expSel?.estado !== 'cerrada') {
+          const { data: cobCurso } = await supabase.from('con_cobranzas')
+            .select('unidad_id, monto').eq('expensa_id', expSel.id).in('estado', ['acreditado','cobrado'])
+          for (const c of (cobCurso || [])) pagosEnCursoUF[c.unidad_id] = (pagosEnCursoUF[c.unidad_id] || 0) + (parseFloat(c.monto) || 0)
+        }
         for (const d of detsAnt) {
           const pagosUF = cobranzasPorUF[d.unidad_id] || (parseFloat(d.pagos_periodo)||0)
-          const expensaAnt = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0)
+          const capitalAnt = (parseFloat(d.saldo_anterior)||0) + (parseFloat(d.monto)||0)
+          const interesAnt = parseFloat(d.interes_mora)||0
+          const recargo    = Math.round((recargoPorUF[d.unidad_id] || 0) * 100) / 100
           saldosAnt[d.unidad_id] = {
-            saldo: expensaAnt, interes: parseFloat(d.interes_mora)||0, pagos: pagosUF, nativo: true
+            saldo: Math.round((capitalAnt + interesAnt) * 100) / 100,   // total adeudado del período anterior
+            pagos: pagosUF, nativo: true, intV2: true,
+            capitalAnt, interesAnt, recargo, vencido: vencidoAnt, pagosEnCurso: pagosEnCursoUF[d.unidad_id] || 0,
+            montoAnt: parseFloat(d.monto) || 0,                        // expensa del período anterior
+            interes: recargo,                                           // + mora (se suma en el prorrateo)
           }
           totalCobradoAnt += pagosUF
         }
@@ -689,6 +730,21 @@ export default function LiquidacionPeriodo() {
         //   saldo_arrastre = deuda + interés = lo que realmente queda debiendo (se persiste al cerrar).
         interes_mora = antUF.interes || 0
         deuda = saldo_anterior - pagos_anterior
+        if (antUF.intV2) {
+          // (oct-2026) Interés v2. Imputación de pagos (art. 903 CCyC): primero a intereses/recargos
+          // pendientes, luego a capital. El crédito de ajuste del período (NC) cuenta como pago.
+          const pend      = (antUF.interesAnt || 0) + (antUF.recargo || 0)
+          const pagadoTot = (pagos_anterior || 0) + (creditoAjuste || 0) + (antUF.pagosEnCurso || 0)
+          const aInteres  = Math.min(Math.max(pagadoTot, 0), pend)
+          const capital   = Math.round(((antUF.capitalAnt || 0) - (pagadoTot - aInteres)) * 100) / 100
+          // Capital VENCIDO: la deuda de períodos anteriores ya venció siempre; la expensa del período
+          // anterior sólo si ya pasó su vencimiento (+ gracia). Los pagos se imputaron a lo más antiguo,
+          // así que lo que queda impago se atribuye primero a esa expensa (la más reciente).
+          const noVencido = antUF.vencido ? 0 : Math.min(Math.max(capital, 0), antUF.montoAnt || 0)
+          const baseMora  = Math.round((capital - noVencido) * 100) / 100
+          const moraNueva = baseMora > 0.005 ? Math.round(baseMora * tasaMora * 100) / 100 : 0
+          interes_mora = Math.round(((antUF.recargo || 0) + moraNueva) * 100) / 100
+        }
         ajusteSaldoAnt = deuda
         saldo_arrastre = deuda + interes_mora
       } else {
@@ -880,7 +936,7 @@ export default function LiquidacionPeriodo() {
           .select('unidad_id, total_uf').eq('expensa_id', expAnterior[0].id)
         // Cobranzas individuales de la expensa anterior
         const { data: cobranzasAnt2 } = await supabase.from('con_cobranzas')
-          .select('unidad_id, monto').eq('expensa_id', expAnterior[0].id)
+          .select('unidad_id, monto').eq('expensa_id', expAnterior[0].id).in('estado', ['acreditado','cobrado'])
         const cobPorUF2 = {}
         for (const co of (cobranzasAnt2||[])) {
           cobPorUF2[co.unidad_id] = (cobPorUF2[co.unidad_id]||0) + (parseFloat(co.monto)||0)
@@ -892,7 +948,7 @@ export default function LiquidacionPeriodo() {
         if (expAntPreCorte2) {
           const [{ data: aperts2 }, { data: pagosPost2 }, { data: recPost2 }, { data: ncPost2 }] = await Promise.all([
             supabase.from('con_movimientos_unidad').select('unidad_id, tipo, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%'),
-            supabase.from('con_cobranzas').select('unidad_id, monto').eq('consorcio_id', consorcioId).gte('fecha', corteNat2),
+            supabase.from('con_cobranzas').select('unidad_id, monto').eq('consorcio_id', consorcioId).gte('fecha', corteNat2).in('estado', ['acreditado','cobrado']),
             supabase.from('con_movimientos_unidad').select('unidad_id, monto').eq('consorcio_id', consorcioId).like('id', 'MOV-RECV2-%').gte('fecha', corteNat2).neq('estado', 'anulado'),
             // Créditos de ajuste post-corte (NC, cancelación intereses, pagos no registrados): vigentes,
             // crédito, no apertura ni pago. La cta cte los netea; se acreditan como pago (reducen el arrastre).
@@ -961,6 +1017,9 @@ export default function LiquidacionPeriodo() {
         saldo_anterior: (d.saldo_arrastre !== undefined ? Math.round((((d.saldo_arrastre)||0) - ((d.interes_mora)||0)) * 100) / 100 : (d.saldo_anterior || saldosAnt[d.unidad_id] || 0)),
         pagos_periodo: 0,
         interes_mora: (parseFloat(d.interes_mora) || 0),
+        // (oct-2026) marca de semántica: interes_mora = SOLO interés/recargo NUEVO del período (no arrastre).
+        // get-cuenta-corriente v19 lo debita completo; sin marca aplica el criterio legacy (v18).
+        notas: 'int-v2',
         estado: ((d.saldo_arrastre !== undefined ? d.saldo_arrastre : (d.saldo_anterior || saldosAnt[d.unidad_id] || 0)) > 0.005) ? 'morosa' : 'pendiente',
       }))
 
