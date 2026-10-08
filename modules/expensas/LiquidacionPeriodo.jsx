@@ -740,7 +740,10 @@ export default function LiquidacionPeriodo() {
           // Capital VENCIDO: la deuda de períodos anteriores ya venció siempre; la expensa del período
           // anterior sólo si ya pasó su vencimiento (+ gracia). Los pagos se imputaron a lo más antiguo,
           // así que lo que queda impago se atribuye primero a esa expensa (la más reciente).
-          const noVencido = antUF.vencido ? 0 : Math.min(Math.max(capital, 0), antUF.montoAnt || 0)
+          // Liquidación anterior SIN expensa (alta de consorcio con saldos de la gestión anterior, ej. Ayres
+          // de Mar sep-2026): todo su saldo es exigible recién a SU vencimiento → no genera mora antes.
+          const exigibleAnt = (antUF.montoAnt || 0) > 0 ? antUF.montoAnt : Math.max(capital, 0)
+          const noVencido = antUF.vencido ? 0 : Math.min(Math.max(capital, 0), exigibleAnt)
           const baseMora  = Math.round((capital - noVencido) * 100) / 100
           const moraNueva = baseMora > 0.005 ? Math.round(baseMora * tasaMora * 100) / 100 : 0
           interes_mora = Math.round(((antUF.recargo || 0) + moraNueva) * 100) / 100
