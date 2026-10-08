@@ -17,6 +17,7 @@ export default function Cobranzas() {
   const [detalles, setDetalles]         = useState([])
   const [cobranzas, setCobranzas]       = useState([])
   const [aperturas, setAperturas]       = useState([])
+  const [lufExp, setLufExp]             = useState([])   // (oct-2026) expensa del mes por UF (meses pre-corte)
   const [consorcio, setConsorcio]       = useState(null)
   const [form, setForm]                 = useState(null)
   const [tabMora, setTabMora]           = useState(false)
@@ -46,15 +47,17 @@ export default function Cobranzas() {
 
   async function seleccionarExpensa(exp) {
     setExpSel(exp); setPreviewMora([]); setTabMora(false)
-    const [d, c, ap] = await Promise.all([
+    const [d, c, ap, lx] = await Promise.all([
       supabase.from('con_expensas_detalle').select('*').eq('expensa_id', exp.id).order('created_at'),
       supabase.from('con_cobranzas').select('*').eq('expensa_id', exp.id).order('fecha', { ascending: false }),
       // Aperturas del corte nativo (fuente de verdad del saldo, = cta cte). El detalle histórico
       // puede estar corrupto en consorcios migrados; las aperturas no.
       supabase.from('con_movimientos_unidad').select('unidad_id, tipo, monto')
-        .eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%')
+        .eq('consorcio_id', consorcioId).like('id', 'MOV-APERT-%'),
+      // (oct-2026) Expensa del mes por UF en meses importados (pre-corte): base del recargo 2º vto.
+      supabase.from('con_liquidacion_uf').select('unidad_id, expensa_calculada').eq('expensa_id', exp.id)
     ])
-    setDetalles(d.data || []); setCobranzas(c.data || []); setAperturas(ap.data || [])
+    setDetalles(d.data || []); setCobranzas(c.data || []); setAperturas(ap.data || []); setLufExp(lx.data || [])
   }
 
   async function registrarPago() {
@@ -92,7 +95,9 @@ export default function Cobranzas() {
       const deuda1   = info.saldo                                          // pendiente antes de este pago
       // Base del recargo = lo que efectivamente quedó impago al vencer, con tope en la expensa.
       // Si la UF ya estaba al día o a favor (deuda1 <= 0), no hay base: el pago es un adelanto.
-      const baseRec  = Math.max(0, Math.min(info.monto, deuda1))
+      // (oct-2026) La base es SIEMPRE la expensa del mes (info.baseRecargo), nunca el total con deuda
+      // anterior e intereses (caso Const. 1910 4°C: 3% s/ total UF 352.860 en vez de s/ expensa 205.909).
+      const baseRec  = Math.max(0, Math.min(info.baseRecargo ?? info.monto, deuda1))
       const recargo2 = Math.round(baseRec * im2 / 100 * 100) / 100          // recargo sobre lo impago (tope: expensa / total_uf pre-corte)
       // El recargo del 2º venc SOLO aplica si el pago se hizo DESPUÉS del 1er vencimiento Y había
       // deuda pendiente. Si pagó en término, o si la UF ya no debía nada (adelanto / saldo a favor),
@@ -269,7 +274,10 @@ export default function Cobranzas() {
   useEffect(() => { if (consorcioId) cargarExpensas() }, [consorcioId])
 
   const MEDIOS = ['transferencia','efectivo','debito','cheque','otro']
-  const totalCobrado   = cobranzas.reduce((a, c) => a + parseFloat(c.monto||0), 0)
+  // (oct-2026) solo cobranzas VIVAS: las anuladas/rechazadas se listan pero no son pago.
+  const esCobViva = (c) => !['anulado', 'anulada', 'rechazado'].includes(String(c?.estado || '').toLowerCase())
+  const cobranzasVivas = cobranzas.filter(esCobViva)
+  const totalCobrado   = cobranzasVivas.reduce((a, c) => a + parseFloat(c.monto||0), 0)
   const corteNativo = consorcio?.fecha_corte_nativo || null
   // ¿La expensa mostrada es un mes ANTERIOR al corte nativo? En ese caso su detalle.monto ya es
   // el saldo NETO al cierre (= apertura = cta cte): NO se suma saldo_anterior (evita doble conteo)
@@ -285,14 +293,19 @@ export default function Cobranzas() {
       const montoBase = ap
         ? (ap.tipo === 'credito' ? -(parseFloat(ap.monto)||0) : (parseFloat(ap.monto)||0))
         : monto
-      const pagado = cobranzas.filter(c => c.unidad_id === d.unidad_id && String(c.fecha||'') >= corteNativo)
+      const pagado = cobranzasVivas.filter(c => c.unidad_id === d.unidad_id && String(c.fecha||'') >= corteNativo)
         .reduce((a, c) => a + (parseFloat(c.monto)||0), 0)
-      return { salAnt: 0, monto: montoBase, mora, pagado, saldo: Math.max(0, Math.round((montoBase - pagado)*100)/100) }
+      // Base del recargo 2º vto = expensa del mes (luf.expensa_calculada), no la apertura (que incluye
+      // deuda anterior e intereses). Sin luf: se mantiene el criterio anterior (apertura).
+      const lx = lufExp.find(l => l.unidad_id === d.unidad_id)
+      const expMes = parseFloat(lx?.expensa_calculada) || 0
+      const baseRecargo = expMes > 0 ? Math.min(expMes, Math.max(0, montoBase)) : montoBase
+      return { salAnt: 0, monto: montoBase, mora, pagado, baseRecargo, saldo: Math.max(0, Math.round((montoBase - pagado)*100)/100) }
     }
     const salAnt = parseFloat(d.saldo_anterior) || 0
-    const pagado = cobranzas.filter(c => c.unidad_id === d.unidad_id).reduce((a, c) => a + (parseFloat(c.monto)||0), 0)
+    const pagado = cobranzasVivas.filter(c => c.unidad_id === d.unidad_id).reduce((a, c) => a + (parseFloat(c.monto)||0), 0)
                    || (parseFloat(d.pagos_periodo) || 0)
-    return { salAnt, monto, mora, pagado, saldo: Math.max(0, Math.round((salAnt + monto + mora - pagado)*100)/100) }
+    return { salAnt, monto, mora, pagado, baseRecargo: monto, saldo: Math.max(0, Math.round((salAnt + monto + mora - pagado)*100)/100) }
   }
   const totalPendiente = detalles.reduce((a, d) => a + calcUF(d).saldo, 0)
   const totalMora = detalles.reduce((a, d) => a + (parseFloat(d.interes_mora)||0), 0)
