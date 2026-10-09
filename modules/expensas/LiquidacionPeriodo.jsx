@@ -398,6 +398,24 @@ export default function LiquidacionPeriodo() {
     setImportesPorColumna(nuevoEstado)
   }
 
+  // (oct-2026) Mora por UF: { [unidad_id]: { sinInteres, tasa } } leído de con_unidades.
+  async function cargarConfigMoraUF() {
+    const { data } = await supabase.from('con_unidades')
+      .select('id, convenio_pago, tasa_mora_diferencial').eq('consorcio_id', consorcioId)
+    const m = {}
+    for (const r of (data || [])) {
+      const td = r.tasa_mora_diferencial
+      m[r.id] = { sinInteres: !!r.convenio_pago, tasa: (td === null || td === undefined || td === '') ? null : parseFloat(td) }
+    }
+    return m
+  }
+  // Tasa mensual (fracción) a aplicar a la UF: 0 si está exenta; diferencial si la tiene; global si no.
+  function tasaMoraUF(cfg) {
+    if (cfg?.sinInteres) return 0
+    if (cfg && cfg.tasa !== null && !isNaN(cfg.tasa)) return cfg.tasa / 100
+    return parseFloat(consorcioActivo?.interes_mora || 0) / 100
+  }
+
   async function calcularDistribucion() {
     if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
     // Resetear valores financieros al inicio del cálculo
@@ -665,6 +683,11 @@ export default function LiquidacionPeriodo() {
     //   - La expensa de cada UF = suma de (monto_col * coef_UF / coef_total_col) por columna
     // Para consorcios sin columnas configuradas: usa porcentaje_fiscal global (comportamiento anterior)
 
+    // (oct-2026) Configuración de mora POR UF (pantalla Cobranzas → "Interés por mora"), leída fresca de la
+    // base (el contexto puede estar desactualizado): convenio_pago = SIN interés punitorio sobre saldo
+    // deudor; tasa_mora_diferencial = reemplaza la tasa global del consorcio. No afecta el recargo 2º vto.
+    const moraUF = await cargarConfigMoraUF()
+
     const items = unidades.map((u, idx) => {
       const ufNum = idx + 1
       const cp    = copropietarios.find(c => c.id === u.propietario_id)
@@ -711,7 +734,7 @@ export default function LiquidacionPeriodo() {
       const saldo_anterior = antUF.saldo
       const pagos_anterior = antUF.pagos
       const creditoAjuste = antUF.creditoAjuste || 0
-      const tasaMora = parseFloat(consorcioActivo?.interes_mora || 0) / 100
+      const tasaMora = tasaMoraUF(moraUF[u.id])
 
       let deuda, ajusteSaldoAnt, interes_mora, saldo_arrastre
       if (antUF.corteMes) {
@@ -816,6 +839,7 @@ export default function LiquidacionPeriodo() {
         monto_vto2,
         vto1, vto2,
         saldo_anterior,
+        sin_interes: !!moraUF[u.id]?.sinInteres,   // (oct-2026) UF exenta de interés por mora
         pagos_anterior,
         deuda,
         interes_mora,
@@ -961,8 +985,9 @@ export default function LiquidacionPeriodo() {
           for (const p of (pagosPost2 || [])) pagoU2[p.unidad_id] = (pagoU2[p.unidad_id] || 0) + (parseFloat(p.monto) || 0)
           for (const nc of (ncPost2 || [])) pagoU2[nc.unidad_id] = (pagoU2[nc.unidad_id] || 0) + (parseFloat(nc.monto) || 0)
           for (const rc of (recPost2 || [])) recU2[rc.unidad_id] = (recU2[rc.unidad_id] || 0) + (parseFloat(rc.monto) || 0)
-          const tasaMora2 = parseFloat(consorcioActivo?.interes_mora || 0) / 100
+          const moraUF2 = await cargarConfigMoraUF()
           for (const a of (aperts2 || [])) {
+            const tasaMora2 = tasaMoraUF(moraUF2[a.unidad_id])
             const saldoAp = a.tipo === 'credito' ? -(parseFloat(a.monto) || 0) : (parseFloat(a.monto) || 0)
             // deuda = apertura + recargos legítimos − pagos post-corte (con signo, conserva a favor)
             const deudaN = Math.round((saldoAp + (recU2[a.unidad_id] || 0) - (pagoU2[a.unidad_id] || 0)) * 100) / 100
@@ -1780,6 +1805,7 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                             fontWeight: d.interes_mora>0?700:400,
                             color: d.interes_mora>0?AM:GR, fontSize:10 }}>
                             {d.interes_mora>0 ? fmt(d.interes_mora) : '—'}
+                            {d.sin_interes && <div title="UF exenta de interés por mora (Cobranzas → Interés por mora)" style={{ fontSize:8, color:'#7c3aed', fontWeight:700 }}>SIN INT.</div>}
                           </td>
                           <td style={{ padding:'5px 8px', textAlign:'right', color:GR, fontSize:10 }}>{d.pct}%</td>
                           <td style={{ padding:'5px 8px', fontSize:10, color:GR, whiteSpace:'nowrap' }}>{fmtD(d.vto1)}</td>
