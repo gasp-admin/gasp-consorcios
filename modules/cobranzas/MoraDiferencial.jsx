@@ -12,7 +12,7 @@ import { getCuentaCorriente, siroProxy, enviarLiquidacion, gestionarClienteGASP,
 import { Btn, BtnSec, Card, Input, Sel, Badge, Msg, BarraListado } from '../../components/ui'
 
 export default function MoraDiferencial() {
-  const { session, unidades, copropietarios, consorcioActivo} = useApp()
+  const { session, unidades, setUnidades, copropietarios, consorcioActivo, puede } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
@@ -22,14 +22,27 @@ export default function MoraDiferencial() {
   const [guardando, setGuardando] = useState(false)
 
   async function guardar(ufId) {
+    if (puede && !puede('editar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite editar datos.' })
     setGuardando(true)
-    const { error } = await supabase.from('con_unidades').update({
-      tasa_mora_diferencial: form.tasa ? parseFloat(form.tasa) : null,
-      convenio_pago: form.convenio_pago || false,
+    // (oct-2026) El generador de liquidación lee estos campos: convenio_pago=true → la UF NO genera interés
+    // punitorio sobre saldo deudor; tasa_mora_diferencial → reemplaza la tasa global. '' / vacío = global.
+    const tasaTxt = String(form.tasa ?? '').trim().replace(',', '.')
+    const cambios = {
+      tasa_mora_diferencial: tasaTxt === '' ? null : parseFloat(tasaTxt),
+      convenio_pago: !!form.convenio_pago,
       convenio_detalle: form.convenio_detalle || null,
-    }).eq('id', ufId)
+    }
+    if (cambios.tasa_mora_diferencial !== null && (isNaN(cambios.tasa_mora_diferencial) || cambios.tasa_mora_diferencial < 0)) {
+      setGuardando(false); return setMsg({ tipo:'warn', texto:'Tasa inválida: dejala vacía para usar la tasa del consorcio.' })
+    }
+    const { error } = await supabase.from('con_unidades').update(cambios).eq('id', ufId)
     if (error) setMsg({ tipo:'error', texto: error.message })
-    else { setMsg({ tipo:'ok', texto:'✓ Configuración guardada' }); setEditId(null); setForm({}) }
+    else {
+      // Refrescar el contexto: antes la lista no se actualizaba hasta recargar el consorcio.
+      if (setUnidades) setUnidades(prev => (prev || []).map(u => u.id === ufId ? { ...u, ...cambios } : u))
+      setMsg({ tipo:'ok', texto:'✓ Configuración guardada — se aplica desde la próxima liquidación que se calcule' })
+      setEditId(null); setForm({})
+    }
     setGuardando(false)
   }
 
@@ -39,15 +52,18 @@ export default function MoraDiferencial() {
     <div>
       <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>⚖️ Interés diferencial por unidad</div>
       <div style={{ fontSize:12, color:GR, marginBottom:16 }}>
-        Configure tasa de mora personalizada o convenio de pago para unidades específicas
+        Desactive el interés por mora o fije una tasa propia para unidades específicas
       </div>
       <Msg data={msg} />
 
       <Card style={{ marginBottom:16, background:'#eff6ff', border:'1px solid #bfdbfe' }}>
         <div style={{ fontSize:12, color:'#1e40af', lineHeight:1.8 }}>
-          <strong>Funcionamiento:</strong> Si una UF tiene tasa diferencial, el cálculo de mora
-          usa esa tasa en lugar de la tasa global del consorcio. Si tiene convenio de pago activo,
-          se suspende el cálculo de mora automático para esa unidad.
+          <strong>Funcionamiento:</strong> por defecto todas las UF generan interés por mora sobre el saldo
+          deudor vencido con la tasa del consorcio ({consorcioActivo?.interes_mora || 0}% mensual).
+          <br/>• <strong>Sin interés</strong> activado: la UF deja de generar interés punitorio desde la próxima
+          liquidación que se calcule, hasta que se desactive. No borra el interés ya liquidado ni el recargo
+          del 2º vencimiento (ése se cobra al registrar un pago fuera de término).
+          <br/>• <strong>Tasa diferencial</strong>: reemplaza la tasa del consorcio para esa UF (vacío = tasa del consorcio).
         </div>
       </Card>
 
@@ -71,7 +87,7 @@ export default function MoraDiferencial() {
                       <Badge text={`Mora: ${u.tasa_mora_diferencial}%`} color={AM} bg='#fef9c3'
                         style={{ marginLeft:8 }} />}
                     {u.convenio_pago &&
-                      <Badge text="Convenio activo" color='#7c3aed' bg='#ede9fe'
+                      <Badge text="Sin interés" color='#7c3aed' bg='#ede9fe'
                         style={{ marginLeft:8 }} />}
                   </div>
                   <Btn small onClick={()=>{
@@ -92,7 +108,7 @@ export default function MoraDiferencial() {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead>
               <tr style={{ background:'#f3f4f6' }}>
-                {['UF','Propietario','Tasa mora','Convenio','Detalle convenio',''].map((h,i)=>(
+                {['UF','Propietario','Tasa mora','Sin interés','Motivo / detalle',''].map((h,i)=>(
                   <th key={i} style={{ padding:'8px 10px', textAlign:'left', fontSize:11,
                     fontWeight:700, color:GR, borderBottom:'1px solid #e5e7eb' }}>{h}</th>
                 ))}
@@ -119,11 +135,11 @@ export default function MoraDiferencial() {
                           <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12 }}>
                             <input type="checkbox" checked={form.convenio_pago||false}
                               onChange={e=>setForm(f=>({...f,convenio_pago:e.target.checked}))} />
-                            Activo
+                            No generar
                           </label>
                         </td>
                         <td style={{ padding:'6px 10px' }}>
-                          <input placeholder="Descripción del convenio"
+                          <input placeholder="Motivo (convenio, juicio, decisión de asamblea…)"
                             value={form.convenio_detalle||''} onChange={e=>setForm(f=>({...f,convenio_detalle:e.target.value}))}
                             style={{ width:'100%', padding:'5px 8px', border:'1px solid #93c5fd',
                               borderRadius:6, fontSize:12, boxSizing:'border-box' }} />
@@ -146,8 +162,8 @@ export default function MoraDiferencial() {
                         </td>
                         <td style={{ padding:'8px 10px' }}>
                           {u.convenio_pago
-                            ? <Badge text="Sí" color='#7c3aed' bg='#ede9fe' />
-                            : <span style={{ color:GR, fontSize:12 }}>No</span>}
+                            ? <Badge text="Sin interés" color='#7c3aed' bg='#ede9fe' />
+                            : <span style={{ color:GR, fontSize:12 }}>Genera</span>}
                         </td>
                         <td style={{ padding:'8px 10px', fontSize:11, color:GR }}>
                           {u.convenio_detalle||'—'}
