@@ -56,6 +56,7 @@ export const NAV_ITEMS = [
   { id: 'estado_financiero',        label: 'Estado financiero',       icon: '🏦', sec: 'Reportes' },
   { id: 'balance_anual',            label: 'Balance Anual',           icon: '📊', sec: 'Reportes' },
   { id: 'asambleas',                label: 'Asambleas',               icon: '🏛',  sec: 'Comunicaciones' },
+  { id: 'votaciones',               label: 'Votaciones',              icon: '🗳️', sec: 'Comunicaciones' },
   { id: 'emails',                   label: 'Enviar liquidación',      icon: '✉️', sec: 'Comunicaciones' },
   { id: 'notificacion',             label: 'Enviar notificación',     icon: '📣', sec: 'Comunicaciones' },
   { id: 'consultar_enviados',       label: 'Consultar enviados',      icon: '📂', sec: 'Comunicaciones' },
