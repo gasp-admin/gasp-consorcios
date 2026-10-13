@@ -32,11 +32,82 @@ const CAMPOS_COEF = ['porcentaje_fiscal', 'pct_gtos_grales', 'pct_fdo_obras', 'p
 const EST_COLOR = { borrador: GR, abierta: VD, cerrada: AZ, anulada: RJ }
 const RESULTADO = {
   en_curso: 'En curso', aprobada: 'Aprobada', no_aprobada: 'No aprobada',
-  aprobada_expresa: 'Aprobada (mayoría expresa)', aprobada_tacita: 'Aprobada (sin oposición suficiente)',
+  aprobada_expresa: 'Aprobada (mayoría expresa)', aprobada_tacita: 'Aprobada (silencios a favor, sin oposición suficiente)',
   rechazada_por_oposicion: 'Rechazada por oposición', opcion_ganadora: 'Opción ganadora',
   sin_mayoria: 'Sin mayoría', sin_definicion: 'Sin definición (empate)', sin_votos: 'Sin votos', sin_padron: 'Sin padrón',
 }
-const ORIGEN = { portal: 'Portal', admin: 'Carga admin', asamblea: 'Asamblea' }
+const ORIGEN = { portal: 'Portal', admin: 'Mail / nota', asamblea: 'Asamblea' }
+
+// §60.8 — identificación de UF presentes desde con_asambleas.unidades_presentes (regla §56:
+// match EXACTO normalizado, nunca substring; prioridad numero_interno → numero → descripcion).
+const normUF = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^0+(?=\d)/, '')
+function matchPresentesUF(etiquetas, unidades) {
+  const ids = new Set(), noRec = [], ambig = []
+  for (const raw of etiquetas || []) {
+    const n = normUF(raw)
+    if (!n) continue
+    let c = (unidades || []).filter((u) => u.numero_interno && normUF(u.numero_interno) === n)
+    if (!c.length) c = (unidades || []).filter((u) => !u.numero_interno && normUF(u.numero) === n)
+    if (!c.length) c = (unidades || []).filter((u) => normUF(u.numero) === n || normUF(u.descripcion) === n)
+    if (c.length === 1) ids.add(c[0].id)
+    else if (c.length > 1) ambig.push(String(raw))
+    else noRec.push(String(raw))
+  }
+  return { ids: [...ids], noRec, ambig }
+}
+const fD = (iso) => {
+  if (!iso) return '—'
+  try { return new Date(iso).toLocaleDateString('es-AR', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric' }) } catch { return String(iso) }
+}
+const fDf = (ymd) => (ymd ? String(ymd).split('-').reverse().join('/') : '—')
+const APROB = ['aprobada', 'aprobada_expresa', 'aprobada_tacita', 'opcion_ganadora']
+const nUF = (n) => `${n} UF`
+const pcts = (x) => `${x.pct_uf}% de las unidades y ${x.pct_coef}% de los porcentuales`
+
+// §60.9 — Detalle del resultado art. 2060 (silencios a favor, oposición acumulada)
+function detalle2060(v, e) {
+  const a = e?.art2060
+  if (!a) return `Resultado: ${RESULTADO[e?.resultado] || e?.resultado || '—'}.`
+  const P = a.presentes, A = a.ausentes, F = a.favor, O = a.oposicion
+  const t = []
+  t.push(`votaron a favor ${nUF(P.si.uf)} presentes${A.si.uf ? ` y ${nUF(A.si.uf)} ausentes en forma expresa` : ''}`)
+  if (a.silencio_positivo) t.push(`${nUF(A.silencio.uf)} ausentes no formularon oposición dentro del plazo (silencio computado a favor, art. 263 CCyC)`)
+  else t.push(`${nUF(A.silencio.uf)} ausentes no contestaron; por tratarse de supresión o limitación de derechos (art. 2061 CCyC) el silencio no se computa a favor`)
+  if (A.no.uf || P.no.uf) {
+    t.push(`se recibieron ${A.no.uf} oposiciones de ausentes${P.no.uf ? `, que sumadas a los ${P.no.uf} votos negativos de los presentes totalizan ${nUF(O.uf)}` : ''} (${pcts(O)}), ${O.mayoria_suficiente ? 'alcanzando' : 'sin alcanzar'} la mayoría suficiente para revertir la propuesta`)
+  } else t.push('no se recibieron oposiciones')
+  if (A.abstencion.uf || P.abstencion.uf) t.push(`${nUF(A.abstencion.uf + P.abstencion.uf)} se abstuvieron`)
+  t.push(`en consecuencia la propuesta reúne ${nUF(F.uf)} (${pcts(F)})`)
+  return t.join('; ') + '.'
+}
+function textoNotaCierre(items, asm, adminPerfil) {
+  // items: [{ v, e }] con e = escrutinio final (resultado_final)
+  const ap = items.filter((x) => APROB.includes(x.e?.resultado))
+  const de = items.filter((x) => !APROB.includes(x.e?.resultado))
+  const v0 = items[0]?.v
+  const asmTxt = asm ? `la Asamblea ${asm.tipo === 'ordinaria' ? 'Ordinaria' : 'Extraordinaria'} del ${fDf(asm.fecha)}` : 'la asamblea'
+  const plazo = v0 ? ` (notificación del ${fD(v0.apertura)}; plazo de quince días corridos vencido el ${fD(v0.cierre)})` : ''
+  const lineas = items.map((x, i) => `${items.length > 1 ? (i + 1) + ') ' : ''}«${x.v.titulo}»${x.v.descripcion ? ' — ' + String(x.v.descripcion).trim().replace(/\s+/g, ' ') : ''}: ${detalle2060(x.v, x.e)} ${APROB.includes(x.e?.resultado) ? 'QUEDA APROBADA.' : 'QUEDA DESAPROBADA.'}`)
+  let fin
+  if (!de.length) fin = `por lo tanto quedan aprobados los puntos propuestos.`
+  else if (!ap.length) fin = `por lo tanto quedan desaprobados los puntos propuestos.`
+  else fin = `por lo tanto quedan aprobados los puntos: ${ap.map((x) => '«' + x.v.titulo + '»').join(', ')}; y desaprobados: ${de.map((x) => '«' + x.v.titulo + '»').join(', ')}.`
+  const firma = [adminPerfil?.nombre, 'Administrador', adminPerfil?.matricula_rpac ? 'RPAC N° ' + adminPerfil.matricula_rpac : null].filter(Boolean).join(' — ')
+  return `Dejo constancia que se comunicó fehacientemente a los propietarios ausentes, mediante los correos electrónicos registrados en el Libro de Propietarios, respecto de lo tratado en ${asmTxt}${plazo}.\n\n`
+    + `Informo que:\n${lineas.join('\n')}\n\n`
+    + `De acuerdo a lo establecido por las leyes vigentes (arts. 2060, 263 y 2061 del Código Civil y Comercial de la Nación), ${fin}\n\n${firma}`
+}
+
+// Art. 6 CCyC: en plazos de días se excluye el día de la notificación y el plazo vence a la
+// medianoche del último día → cierre = (fecha de notificación + 15 días) a las 23:59.
+function cierre2060(aperturaLocal) {
+  const ymd = String(aperturaLocal || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ''
+  const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 15)
+  return d.toISOString().slice(0, 10) + 'T23:59'
+}
+
+const fechaAsmLocal = (asm) => (asm?.fecha ? `${asm.fecha}T${(asm.hora || '12:00').slice(0, 5)}` : '')
 
 // datetime-local (hora AR) <-> ISO
 const pad2 = (n) => String(n).padStart(2, '0')
@@ -62,7 +133,7 @@ const formVacio = () => {
     apertura: '', cierre: isoALocal(cierre.toISOString()), permite_cambio: true, requiere_otp: false,
     resultados_visibles: 'al_cierre', asamblea_id: '', adjuntos: [],
     opciones: [{ etiqueta: 'SÍ', clave: 'si', detalle: '' }, { etiqueta: 'NO', clave: 'no', detalle: '' }],
-    multiple: false, presentes: [],
+    multiple: false, presentes: [], modalidad: 'online', silencio_positivo: true,
   }
 }
 
@@ -84,7 +155,12 @@ export default function Votaciones() {
   const [msg, setMsg]             = useState(null)
   const [ocupado, setOcupado]     = useState(false)
   const [subiendo, setSubiendo]   = useState(false)
-  const [manual, setManual]       = useState({ unidad_id: '', opcion_id: '', origen: 'admin', nota: '' })
+  const [planilla, setPlanilla]   = useState([])     // §60.8 carga masiva de votos
+  const [fechaDef, setFechaDef]   = useState('')     // fecha/hora de recepción por defecto
+  const [presAviso, setPresAviso] = useState(null)   // UF presentes no reconocidas/ambiguas
+  const [presentesSel, setPresentesSel] = useState([])
+  const [notaTxt, setNotaTxt]     = useState('')     // §60.9 nota de cierre de la votación
+  const [notaAsm, setNotaAsm]     = useState(null)   // §60.9 nota combinada de la asamblea { asm, texto, items }
 
   const puedeOperar = puede('comunicar') || puede('editar')
 
@@ -92,7 +168,7 @@ export default function Votaciones() {
     if (!consorcioId) return
     const [{ data }, { data: asm }] = await Promise.all([
       supabase.from('con_votaciones').select('*').eq('consorcio_id', consorcioId).order('created_at', { ascending: false }),
-      supabase.from('con_asambleas').select('id, fecha, tipo').eq('consorcio_id', consorcioId).order('fecha', { ascending: false }).limit(30),
+      supabase.from('con_asambleas').select('id, consorcio_id, fecha, hora, tipo, estado, orden_del_dia, unidades_presentes').eq('consorcio_id', consorcioId).order('fecha', { ascending: false }).limit(30),
     ])
     setLista(data || []); setAsambleas(asm || [])
   }, [consorcioId])
@@ -107,11 +183,43 @@ export default function Votaciones() {
       supabase.from('con_votacion_eventos').select('*').eq('votacion_id', v.id).order('created_at', { ascending: false }).limit(200),
     ])
     setOpcs(o || []); setEventos(ev || [])
+    setPlanilla([]); setPresAviso(null); setNotaAsm(null); setNotaTxt(v.nota_cierre || '')
+    const asm = v.asamblea_id ? (asambleas || []).find((a) => a.id === v.asamblea_id) : null
+
+    // Borrador art. 2060 vinculado a una asamblea: precargar las UF presentes desde el registro de asistencia
+    if (v.estado === 'borrador' && v.tipo === 'ausentes_2060' && asm && (asm.unidades_presentes || []).length) {
+      const m = matchPresentesUF(asm.unidades_presentes, unidades)
+      setPresentesSel(m.ids)
+      setPresAviso({ total: asm.unidades_presentes.length, ok: m.ids.length, noRec: m.noRec, ambig: m.ambig, fecha: asm.fecha })
+    }
+
     if (v.estado !== 'borrador') {
       const { data, error } = await supabase.rpc('vot_escrutinio', { p_votacion_id: v.id })
       if (error) setMsg({ tipo: 'error', texto: errTxt(error) }); else setEsc(data)
     }
-  }, [consorcioId])
+
+    // Planilla de carga: padrón congelado + votos vigentes
+    if (v.estado === 'abierta') {
+      const [{ data: pad }, { data: vts }] = await Promise.all([
+        supabase.from('con_votacion_padron').select('unidad_id, etiqueta, propietario_nombre, coeficiente, presente_asamblea').eq('votacion_id', v.id),
+        supabase.from('con_votacion_votos').select('unidad_id, opcion_id, origen, emitido_at, nota').eq('votacion_id', v.id),
+      ])
+      const porUF = new Map((vts || []).map((x) => [x.unidad_id, x]))
+      const asmLocal = fechaAsmLocal(asm)
+      setPlanilla((pad || [])
+        .slice().sort((a, b) => String(a.etiqueta).localeCompare(String(b.etiqueta), 'es', { numeric: true }))
+        .map((p) => {
+          const x = porUF.get(p.unidad_id)
+          const orig = x ? { opcion_id: x.opcion_id, emitido: isoALocal(x.emitido_at), nota: x.nota || '' } : { opcion_id: '', emitido: '', nota: '' }
+          return {
+            unidad_id: p.unidad_id, etiqueta: p.etiqueta, propietario: p.propietario_nombre || '', coef: p.coeficiente,
+            presente: !!p.presente_asamblea, origen_actual: x?.origen || null,
+            opcion_id: orig.opcion_id, emitido: orig.emitido || (p.presente_asamblea && v.tipo === 'ausentes_2060' ? asmLocal : ''),
+            nota: orig.nota, orig,
+          }
+        }))
+    }
+  }, [consorcioId, asambleas, unidades])
 
   const refrescarDetalle = async () => {
     if (!detalle) return
@@ -128,7 +236,7 @@ export default function Votaciones() {
       else if (tipo === 'ausentes_2060') {
         n.mayoria = 'absoluta'; n.multiple = false
         const base = f.apertura ? new Date(localAIso(f.apertura)) : new Date()
-        n.cierre = isoALocal(new Date(base.getTime() + 15 * 86400000).toISOString())
+        n.cierre = cierre2060(f.apertura || isoALocal(base.toISOString()))
       } else if (f.mayoria === 'unanimidad') n.mayoria = 'absoluta'
       if (tipo !== 'consulta' || !n.multiple) n.opciones = [{ etiqueta: 'SÍ', clave: 'si', detalle: '' }, { etiqueta: 'NO', clave: 'no', detalle: '' }]
       return n
@@ -145,6 +253,37 @@ export default function Votaciones() {
   }
   const setOpc = (i, k, val) => setForm((f) => ({ ...f, opciones: f.opciones.map((o, j) => (j === i ? { ...o, [k]: val } : o)) }))
 
+  // Inicio: en art. 2060 el cierre acompaña (inicio + 15 días)
+  function setApertura(val) {
+    setForm((f) => {
+      const n = { ...f, apertura: val }
+      if (f.tipo === 'ausentes_2060' && val) n.cierre = cierre2060(val)
+      return n
+    })
+  }
+  function setModalidad(registro) {
+    setForm((f) => ({
+      ...f, modalidad: registro ? 'registro' : 'online',
+      requiere_otp: registro ? false : f.requiere_otp,
+      resultados_visibles: registro ? 'nunca' : (f.resultados_visibles === 'nunca' ? 'al_cierre' : f.resultados_visibles),
+    }))
+  }
+  // Vincular asamblea (+ opcionalmente tomar un punto del orden del día como título)
+  function setAsamblea(id) {
+    setForm((f) => ({ ...f, asamblea_id: id }))
+  }
+  function tomarPunto(i) {
+    const asm = asambleas.find((a) => a.id === form.asamblea_id)
+    const p = (asm?.orden_del_dia || [])[i]
+    if (!p) return
+    const fd = asm.fecha ? String(asm.fecha).split('-').reverse().join('/') : ''
+    setForm((f) => ({
+      ...f,
+      titulo: f.titulo || `Asamblea ${asm.tipo === 'ordinaria' ? 'Ordinaria' : 'Extraordinaria'} ${fd} — Punto ${i + 1}`,
+      descripcion: f.descripcion || String(p).trim(),
+    }))
+  }
+
   async function editarBorrador(v) {
     const { data: o } = await supabase.from('con_votacion_opciones').select('*').eq('votacion_id', v.id).order('orden')
     const sinAbs = (o || []).filter((x) => x.clave !== 'abstencion')
@@ -153,7 +292,8 @@ export default function Votaciones() {
       apertura: isoALocal(v.apertura), cierre: isoALocal(v.cierre), permite_cambio: v.permite_cambio, requiere_otp: v.requiere_otp,
       resultados_visibles: v.resultados_visibles, asamblea_id: v.asamblea_id || '', adjuntos: v.adjuntos || [],
       opciones: sinAbs.map((x) => ({ etiqueta: x.etiqueta, clave: x.clave, detalle: x.detalle || '' })),
-      multiple: sinAbs.some((x) => x.clave === 'opcion'), presentes: [],
+      multiple: sinAbs.some((x) => x.clave === 'opcion'), presentes: [], modalidad: v.modalidad || 'online',
+      silencio_positivo: v.silencio_positivo !== false,
     })
     setVista('form'); setMsg(null)
   }
@@ -177,11 +317,15 @@ export default function Votaciones() {
   function validarForm() {
     if (!form.titulo.trim()) return 'Falta el título'
     if (!form.cierre) return 'Falta la fecha de cierre'
+    const registro = form.modalidad === 'registro'
+    if (registro && !form.apertura) return form.tipo === 'ausentes_2060' ? 'Indique la fecha de notificación a los ausentes' : 'Indique la fecha de inicio'
     const ap = form.apertura ? new Date(localAIso(form.apertura)) : new Date()
     const ci = new Date(localAIso(form.cierre))
     if (ci <= ap) return 'El cierre debe ser posterior a la apertura'
-    if (ci <= new Date()) return 'El cierre debe ser futuro'
-    if (form.tipo === 'ausentes_2060' && (ci - ap) < 15 * 86400000 - 60000) return 'Art. 2060: el plazo debe ser de al menos 15 días desde la apertura'
+    if (!registro && ci <= new Date()) return 'El cierre debe ser futuro'
+    if (registro && ap > new Date()) return 'En un registro manual la fecha de inicio no puede ser futura'
+    if (form.tipo === 'ausentes_2060' && (ci - ap) < 15 * 86400000 - 60000) return 'Art. 2060: el plazo debe ser de al menos 15 días desde la ' + (registro ? 'notificación' : 'apertura')
+    if (registro && form.tipo === 'ausentes_2060' && !form.asamblea_id) return 'Vincule la asamblea de origen (de ella se toman las UF presentes)'
     const ets = form.opciones.map((o) => o.etiqueta.trim())
     if (ets.some((x) => !x)) return 'Hay opciones sin texto'
     if (new Set(ets.map((x) => x.toLowerCase())).size !== ets.length) return 'Hay opciones repetidas'
@@ -200,7 +344,9 @@ export default function Votaciones() {
         id, admin_id: adminId, consorcio_id: consorcioId, tipo: form.tipo, titulo: form.titulo.trim(),
         descripcion: form.descripcion.trim() || null, adjuntos: form.adjuntos, mayoria: form.mayoria, campo_coef: form.campo_coef,
         apertura: localAIso(form.apertura), cierre: localAIso(form.cierre), permite_cambio: !!form.permite_cambio,
-        requiere_otp: !!form.requiere_otp, resultados_visibles: form.resultados_visibles,
+        requiere_otp: form.modalidad === 'registro' ? false : !!form.requiere_otp, resultados_visibles: form.resultados_visibles,
+        modalidad: form.modalidad === 'registro' ? 'registro' : 'online',
+        silencio_positivo: form.tipo === 'ausentes_2060' ? form.silencio_positivo !== false : true,
         asamblea_id: form.asamblea_id || null, created_by: app.usuarioId || adminId,
       }
       if (form.id) {
@@ -230,18 +376,20 @@ export default function Votaciones() {
   }
 
   // ── Acciones sobre la votación ──────────────────────────────────────────
-  const [presentesSel, setPresentesSel] = useState([])
 
   async function abrir() {
     if (!puedeOperar) return
     if (detalle.tipo === 'ausentes_2060' && !presentesSel.length) return setMsg({ tipo: 'warn', texto: 'Marque las UF presentes en la asamblea' })
     const n = (unidades || []).length
-    if (!window.confirm(`Se congelará el padrón (${n} UF, coeficiente "${detalle.campo_coef}") y la votación quedará ABIERTA. Las condiciones ya no podrán modificarse. ¿Continuar?`)) return
+    const extra = detalle.modalidad === 'registro' ? ' Es un REGISTRO MANUAL: no se notifica a los propietarios ni se habilita el voto por el portal.' : ''
+    if (!window.confirm(`Se congelará el padrón (${n} UF, coeficiente "${detalle.campo_coef}"${detalle.tipo === 'ausentes_2060' ? `, ${presentesSel.length} presentes` : ''}) y la votación quedará ABIERTA. Las condiciones ya no podrán modificarse.${extra} ¿Continuar?`)) return
     setOcupado(true)
     const { error } = await supabase.rpc('vot_abrir', { p_votacion_id: detalle.id, p_presentes: detalle.tipo === 'ausentes_2060' ? presentesSel : null })
     setOcupado(false)
     if (error) return setMsg({ tipo: 'error', texto: errTxt(error) })
-    setMsg({ tipo: 'ok', texto: '✓ Votación abierta. Ahora puede enviar la notificación a los propietarios.' })
+    setMsg({ tipo: 'ok', texto: detalle.modalidad === 'registro'
+      ? '✓ Registro abierto. Cargue los votos en la planilla.'
+      : '✓ Votación abierta. Ahora puede enviar la notificación a los propietarios.' })
     setPresentesSel([]); refrescarDetalle()
   }
 
@@ -265,19 +413,89 @@ export default function Votaciones() {
     setOcupado(false); refrescarDetalle()
   }
 
-  async function cargarVotoManual() {
-    if (!manual.unidad_id || !manual.opcion_id) return setMsg({ tipo: 'warn', texto: 'Elija UF y opción' })
-    if (manual.origen === 'admin' && !manual.nota.trim()) return setMsg({ tipo: 'warn', texto: 'Indique el respaldo del voto (ej.: nota firmada recibida el dd/mm)' })
-    setOcupado(true)
-    const { error } = await supabase.rpc('vot_emitir', {
-      p_votacion_id: detalle.id, p_unidad_id: manual.unidad_id, p_opcion_id: manual.opcion_id,
-      p_origen: manual.origen, p_ip: null, p_user_agent: 'GASP admin', p_email_verificado: false, p_nota: manual.nota.trim() || null,
-    })
+  // ── §60.8 Planilla de carga masiva ──────────────────────────────────────
+  const origenFila = (r) => (detalle?.tipo === 'ausentes_2060' && r.presente ? 'asamblea' : 'admin')
+  const filaSucia = (r) => r.opcion_id && (r.opcion_id !== r.orig.opcion_id || (r.emitido || '') !== (r.orig.emitido || '') || (r.nota || '') !== (r.orig.nota || ''))
+  function setFila(uid, k, val) {
+    setPlanilla((rows) => rows.map((r) => {
+      if (r.unidad_id !== uid) return r
+      const n = { ...r, [k]: val }
+      if (k === 'opcion_id' && val && !n.emitido && origenFila(r) === 'admin' && fechaDef) n.emitido = fechaDef
+      return n
+    }))
+  }
+
+  async function guardarPlanilla() {
+    const sucias = planilla.filter(filaSucia)
+    if (!sucias.length) return setMsg({ tipo: 'info', texto: 'No hay cambios para guardar' })
+    const faltan = sucias.filter((r) => origenFila(r) === 'admin' && (!r.emitido || !String(r.nota || '').trim()))
+    if (faltan.length) return setMsg({ tipo: 'warn', texto: 'Complete fecha de recepción y respaldo en: ' + faltan.map((r) => r.etiqueta).join(', ') })
+    setOcupado(true); setMsg(null)
+    const items = sucias.map((r) => ({
+      unidad_id: r.unidad_id, opcion_id: r.opcion_id, origen: origenFila(r),
+      emitido_at: r.emitido ? localAIso(r.emitido) : null, nota: String(r.nota || '').trim() || null,
+    }))
+    const { data, error } = await supabase.rpc('vot_registrar_lote', { p_votacion_id: detalle.id, p_items: items })
     setOcupado(false)
     if (error) return setMsg({ tipo: 'error', texto: errTxt(error) })
-    setMsg({ tipo: 'ok', texto: '✓ Voto registrado' })
-    setManual({ unidad_id: '', opcion_id: '', origen: manual.origen, nota: '' }); refrescarDetalle()
+    const errs = data?.errores || []
+    setMsg({
+      tipo: errs.length ? 'warn' : 'ok',
+      texto: `✓ Registrados: ${data?.registrados || 0}` + (data?.sin_cambios ? ` · Sin cambios: ${data.sin_cambios}` : '')
+        + (errs.length ? ` · Con error (${errs.length}): ` + errs.map((e) => `${e.etiqueta || e.unidad_id}: ${e.error}`).join(' | ') : ''),
+    })
+    await refrescarDetalle()
+    if (errs.length) {   // conservar en pantalla lo que no se pudo guardar
+      const bad = new Map(sucias.filter((r) => errs.some((e) => e.unidad_id === r.unidad_id)).map((r) => [r.unidad_id, r]))
+      setPlanilla((rows) => rows.map((r) => (bad.has(r.unidad_id) ? { ...r, opcion_id: bad.get(r.unidad_id).opcion_id, emitido: bad.get(r.unidad_id).emitido, nota: bad.get(r.unidad_id).nota } : r)))
+    }
   }
+
+  // ── §60.9 Notas de cierre ───────────────────────────────────────────────
+  function notaGenerada() {
+    if (!detalle || !esc_) return ''
+    const asm = detalle.asamblea_id ? asambleas.find((a) => a.id === detalle.asamblea_id) : null
+    return textoNotaCierre([{ v: detalle, e: esc_ }], asm, adminPerfil)
+  }
+  async function guardarNota() {
+    const { error } = await supabase.from('con_votaciones').update({ nota_cierre: notaTxt }).eq('id', detalle.id)
+    if (error) return setMsg({ tipo: 'error', texto: errTxt(error) })
+    setDetalle((d) => ({ ...d, nota_cierre: notaTxt }))
+    setMsg({ tipo: 'ok', texto: '✓ Nota de cierre guardada' })
+  }
+  async function generarNotaAsamblea() {
+    const asm = asambleas.find((a) => a.id === detalle.asamblea_id)
+    const { data } = await supabase.from('con_votaciones').select('*')
+      .eq('asamblea_id', detalle.asamblea_id).eq('consorcio_id', consorcioId).neq('estado', 'anulada').order('created_at')
+    const lista2 = data || []
+    const abiertas = lista2.filter((x) => x.estado !== 'cerrada')
+    const items = lista2.filter((x) => x.estado === 'cerrada' && x.resultado_final).map((x) => ({ v: x, e: x.resultado_final }))
+    if (!items.length) return setMsg({ tipo: 'warn', texto: 'No hay votaciones cerradas vinculadas a esta asamblea' })
+    setNotaAsm({ asm, items, abiertas: abiertas.map((x) => x.titulo), texto: textoNotaCierre(items, asm, adminPerfil) })
+  }
+  function copiar(txt) {
+    try { navigator.clipboard.writeText(txt); setMsg({ tipo: 'ok', texto: '✓ Texto copiado' }) } catch { setMsg({ tipo: 'warn', texto: 'No se pudo copiar; seleccione el texto manualmente' }) }
+  }
+  function imprimirNota(titulo, texto) {
+    const w = window.open('', '_blank')
+    if (!w) return setMsg({ tipo: 'warn', texto: 'Habilite las ventanas emergentes' })
+    w.document.open()
+    w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${esc(titulo)}</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:12px;margin:24px;line-height:1.6}h1{font-family:Georgia,serif;font-size:16px;color:#133F58}</style></head><body><h1>${esc(titulo)}</h1><div><strong>${esc(consorcioActivo?.nombre || '')}</strong></div><p style="white-space:pre-wrap">${esc(texto)}</p><script>window.onload=function(){window.print()}<\/script></body></html>`)
+    w.document.close()
+  }
+
+  async function quitarVoto(r) {
+    const motivo = window.prompt(`Quitar el voto cargado de la UF ${r.etiqueta}. Motivo (queda registrado):`)
+    if (!motivo || !motivo.trim()) return
+    setOcupado(true)
+    const { error } = await supabase.rpc('vot_quitar', { p_votacion_id: detalle.id, p_unidad_id: r.unidad_id, p_motivo: motivo.trim() })
+    setOcupado(false)
+    if (error && (error.code === 'PGRST202' || /could not find the function/i.test(error.message || '')))
+      return setMsg({ tipo: 'warn', texto: 'La función para quitar votos todavía no está habilitada en la base. Mientras tanto puede corregir el voto eligiendo otra opción.' })
+    if (error) return setMsg({ tipo: 'error', texto: errTxt(error) })
+    setMsg({ tipo: 'ok', texto: `✓ Voto de la UF ${r.etiqueta} quitado` }); refrescarDetalle()
+  }
+
 
   async function cerrar() {
     const anticipado = new Date(detalle.cierre) > new Date()
@@ -325,10 +543,10 @@ export default function Votaciones() {
     if (!esc_) return []
     const filas = []
     for (const o of esc_.opciones || []) for (const u of o.unidades || []) {
-      filas.push({ uf: u.etiqueta, propietario: u.propietario || '', coef: u.coeficiente, voto: o.etiqueta, origen: ORIGEN[u.origen] || u.origen || '', fecha: fF(u.emitido_at) })
+      filas.push({ uf: u.etiqueta, propietario: u.propietario || '', coef: u.coeficiente, voto: o.etiqueta, origen: ORIGEN[u.origen] || u.origen || '', fecha: fF(u.emitido_at), respaldo: u.nota || '' })
     }
     for (const u of esc_.no_voto?.unidades || []) {
-      filas.push({ uf: u.etiqueta, propietario: u.propietario || '', coef: u.coeficiente, voto: u.presente_asamblea ? 'PRESENTE (sin voto cargado)' : 'NO VOTÓ', origen: '', fecha: '' })
+      filas.push({ uf: u.etiqueta, propietario: u.propietario || '', coef: u.coeficiente, voto: u.presente_asamblea ? 'PRESENTE (sin voto cargado)' : 'NO VOTÓ', origen: '', fecha: '', respaldo: '' })
     }
     return filas.sort((a, b) => String(a.uf).localeCompare(String(b.uf), 'es', { numeric: true }))
   }
@@ -336,7 +554,7 @@ export default function Votaciones() {
   function excel() {
     exportarExcel({
       titulo: `Escrutinio ${detalle.titulo} - ${consorcioActivo?.nombre || ''}`,
-      columnas: [{ key: 'uf', label: 'UF' }, { key: 'propietario', label: 'Propietario' }, { key: 'coef', label: 'Coeficiente' }, { key: 'voto', label: 'Voto' }, { key: 'origen', label: 'Origen' }, { key: 'fecha', label: 'Fecha y hora' }],
+      columnas: [{ key: 'uf', label: 'UF' }, { key: 'propietario', label: 'Propietario' }, { key: 'coef', label: 'Coeficiente' }, { key: 'voto', label: 'Voto' }, { key: 'origen', label: 'Origen' }, { key: 'fecha', label: 'Fecha y hora' }, { key: 'respaldo', label: 'Respaldo' }],
       filas: filasDetalle(),
     })
   }
@@ -347,6 +565,23 @@ export default function Votaciones() {
     const filas = filasDetalle()
     const resLabel = (RESULTADO[e.resultado] || e.resultado) + (e.ganador?.etiqueta ? ': ' + e.ganador.etiqueta : '')
     const estadoTxt = e.estado_efectivo === 'cerrada' ? 'ESCRUTINIO FINAL' : 'ESCRUTINIO PARCIAL (votación en curso)'
+    const asmA = detalle.asamblea_id ? asambleas.find((x) => x.id === detalle.asamblea_id) : null
+    const A6 = e.art2060
+    const pc = (x) => (e.total_coef > 0 ? (100 * Number(x.coef) / Number(e.total_coef)).toFixed(4) : '0')
+    const pu = (x) => (100 * x.uf / e.total_uf).toFixed(2)
+    const f6 = (l, x, b) => `<tr${b ? ' style="font-weight:700"' : ''}><td>${l}</td><td class="n">${x.uf}</td><td class="n">${pu(x)}%</td><td class="n">${pc(x)}%</td></tr>`
+    const a60html = A6 ? `<h2>Cómputo art. 2060 CCyC ${A6.silencio_positivo ? '(silencios de ausentes computados a favor, art. 263)' : '(conformidad expresa, art. 2061)'}</h2>
+<div class="k">Presentes en la asamblea: ${A6.presentes.uf} UF (${A6.presentes_pct_uf}% de las unidades / ${A6.presentes_pct_coef}% de los porcentuales)${A6.presentes_pct_uf > 50 && A6.presentes_pct_coef > 50 ? '' : ' — no se alcanzó la doble mayoría: lo resuelto constituyó una propuesta, comunicada a los ausentes.'}</div>
+<table style="margin-top:6px"><tr><th>Concepto</th><th>UF</th><th>% UF</th><th>% Coef.</th></tr>
+${f6('SÍ presentes', A6.presentes.si)}${f6('SÍ ausentes (expreso)', A6.ausentes.si)}${f6(A6.silencio_positivo ? 'Silencios de ausentes (a favor)' : 'Silencios de ausentes (no computan)', A6.ausentes.silencio)}
+${f6('TOTAL A FAVOR DE LA PROPUESTA', A6.favor, true)}
+${f6('NO presentes', A6.presentes.no)}${f6('Oposiciones de ausentes', A6.ausentes.no)}
+${f6('TOTAL OPOSICIÓN' + (A6.oposicion.mayoria_suficiente ? ' — alcanza mayoría suficiente' : ' — no alcanza mayoría suficiente'), A6.oposicion, true)}
+${f6('Abstenciones', { uf: A6.presentes.abstencion.uf + A6.ausentes.abstencion.uf, coef: Number(A6.presentes.abstencion.coef) + Number(A6.ausentes.abstencion.coef) })}
+</table>` : ''
+    const notaFinal = detalle.tipo === 'ausentes_2060' && e.estado_efectivo === 'cerrada' ? (notaTxt || detalle.nota_cierre || textoNotaCierre([{ v: detalle, e }], asmA, adminPerfil)) : ''
+    const notaHtml = notaFinal ? `<h2>Nota de cierre</h2><p style="white-space:pre-wrap;line-height:1.6">${esc(notaFinal)}</p>` : ''
+    const asmActa = asmA ? `${asmA.tipo === 'ordinaria' ? 'Ordinaria' : 'Extraordinaria'} del ${String(asmA.fecha).split('-').reverse().join('/')} — presentes: ${(asmA.unidades_presentes || []).length} UF (${(asmA.unidades_presentes || []).join(', ')})` : ''
     const avisos = (e.avisos || []).map((a) => a.tipo === 'coef_suma' ? a.detalle : a.tipo === 'coef_cero' ? 'UF con coeficiente 0: ' + (a.unidades || []).join(', ') : '').filter(Boolean)
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Acta de escrutinio — ${esc(detalle.titulo)}</title>
 <style>body{font-family:Calibri,Arial,sans-serif;font-size:11px;color:#111;margin:24px}h1{font-family:Georgia,serif;font-size:17px;color:#133F58;margin:0 0 4px}
@@ -358,9 +593,10 @@ td.n{text-align:right}.k{color:#555}.box{border:1px solid #133F58;padding:8px;ma
 <div class="k">Administración: ${esc(adminPerfil?.nombre || '')}${adminPerfil?.matricula_rpac ? ' — RPAC N° ' + esc(adminPerfil.matricula_rpac) : ''}</div>
 <h2>Votación</h2>
 <table><tr><th style="width:28%">Asunto</th><td>${esc(detalle.titulo)}</td></tr>
-<tr><th>Tipo</th><td>${esc(TIPOS[detalle.tipo]?.l || detalle.tipo)}</td></tr>
+<tr><th>Tipo</th><td>${esc(TIPOS[detalle.tipo]?.l || detalle.tipo)}${detalle.modalidad === 'registro' ? ' — registro manual de votos recibidos por medios fehacientes (mail / nota)' : ''}</td></tr>
+${asmActa ? `<tr><th>Asamblea de origen</th><td>${esc(asmActa)}</td></tr>` : ''}
 <tr><th>Mayoría requerida</th><td>${esc(MAYORIAS[detalle.mayoria] || detalle.mayoria)} — cómputo doble: unidades y coeficiente (${esc(detalle.campo_coef)})</td></tr>
-<tr><th>Apertura / Cierre</th><td>${fF(detalle.apertura)} hs / ${fF(detalle.cierre)} hs</td></tr>
+<tr><th>${detalle.modalidad === 'registro' && detalle.tipo === 'ausentes_2060' ? 'Notificación a ausentes / Cierre del plazo' : 'Apertura / Cierre'}</th><td>${fF(detalle.apertura)} hs / ${fF(detalle.cierre)} hs</td></tr>
 ${detalle.descripcion ? `<tr><th>Propuesta</th><td style="white-space:pre-wrap">${esc(detalle.descripcion)}</td></tr>` : ''}
 </table>
 <h2>Resultado</h2>
@@ -370,11 +606,13 @@ ${(e.opciones || []).map((o) => `<tr><td>${esc(o.etiqueta)}</td><td class="n">${
 <tr><th>Total padrón</th><th class="n">${e.total_uf}</th><th class="n">100%</th><th class="n">100%</th><th></th></tr></table>
 <div class="box"><strong>Resultado:</strong> ${esc(resLabel)} · Participación ${e.votos_emitidos}/${e.total_uf} UF (${e.participacion_pct_uf}%)</div>
 ${avisos.length ? `<div class="k" style="margin-top:6px">Observaciones: ${avisos.map(esc).join(' · ')}</div>` : ''}
+${a60html}
+${notaHtml}
 <h2>Detalle por unidad funcional</h2>
-<table><tr><th>UF</th><th>Propietario</th><th>Coef.</th><th>Voto</th><th>Origen</th><th>Fecha y hora</th></tr>
-${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td class="n">${esc(f.coef)}</td><td>${esc(f.voto)}</td><td>${esc(f.origen)}</td><td>${esc(f.fecha)}</td></tr>`).join('')}
+<table><tr><th>UF</th><th>Propietario</th><th>Coef.</th><th>Voto</th><th>Origen</th><th>Fecha y hora</th><th>Respaldo</th></tr>
+${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td class="n">${esc(f.coef)}</td><td>${esc(f.voto)}</td><td>${esc(f.origen)}</td><td>${esc(f.fecha)}</td><td>${esc(f.respaldo)}</td></tr>`).join('')}
 </table>
-<p class="k" style="margin-top:14px">Cada voto emitido por el portal queda registrado con fecha, hora, IP y un código de verificación (SHA-256). Los cambios de voto se conservan en historial. Documento generado por GASP Consorcios el ${fF(new Date().toISOString())} hs.</p>
+<p class="k" style="margin-top:14px">${detalle.modalidad === 'registro' ? 'Los votos fueron cargados por la administración con la fecha de recepción y el respaldo de cada uno; los originales (mails / notas) quedan a disposición de los propietarios.' : 'Cada voto emitido por el portal queda registrado con fecha, hora, IP y un código de verificación (SHA-256).'} Los cambios de voto se conservan en historial. Documento generado por GASP Consorcios el ${fF(new Date().toISOString())} hs.</p>
 <br><br><table style="border:none"><tr><td style="border:none;width:50%;text-align:center">_____________________________<br>${esc(adminPerfil?.nombre || 'Administrador')}${adminPerfil?.matricula_rpac ? '<br>RPAC N° ' + esc(adminPerfil.matricula_rpac) : ''}</td><td style="border:none"></td></tr></table>
 <script>window.onload=function(){window.print()}</script></body></html>`
     const w = window.open('', '_blank')
@@ -402,6 +640,56 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
           <div style={{ fontSize: 12, color: GR, marginTop: 6 }}>{t.d}</div>
           <div style={{ fontSize: 11, color: AM, marginTop: 6 }}>La validez de cada modalidad depende de lo que disponga el Reglamento de Propiedad Horizontal. Verifique antes de usarla para decisiones vinculantes.</div>
         </Card>
+
+        {(() => {
+          const asmSel = asambleas.find((a) => a.id === form.asamblea_id)
+          const registro = form.modalidad === 'registro'
+          return (
+            <Card style={{ marginBottom: 12, border: registro ? '1.5px solid ' + AM : undefined }}>
+              <label style={{ fontSize: 13, fontWeight: 700, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <input type="checkbox" checked={registro} onChange={(e) => setModalidad(e.target.checked)} style={{ marginTop: 3 }} />
+                <span>📋 Registro de votación ya realizada (carga manual)
+                  <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: GR, marginTop: 2 }}>
+                    Para votos ya recibidos por mail o nota firmada (por ejemplo, ausentes de una asamblea sin mayoría, art. 2060). Admite fechas pasadas; no envía notificaciones ni habilita el voto por el portal. Cada voto se carga con su fecha real de recepción y su respaldo.
+                  </span>
+                </span>
+              </label>
+              {form.tipo === 'ausentes_2060' && (
+                <label style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 12 }}>
+                  <input type="checkbox" checked={form.silencio_positivo === false} onChange={(e) => setForm({ ...form, silencio_positivo: !e.target.checked })} style={{ marginTop: 2 }} />
+                  <span><strong>Suprime o limita derechos acordados por el RPH (art. 2061 CCyC)</strong>
+                    <span style={{ display: 'block', color: GR }}>Exige conformidad expresa: el silencio de los ausentes NO se computa a favor. Sin marcar, rige la regla general: los silencios se suman a la propuesta (art. 263).</span>
+                  </span>
+                </label>
+              )}
+              {(form.tipo === 'ausentes_2060' || registro) && (
+                <div style={{ marginTop: 12 }}>
+                  <label style={LBL}>Asamblea de origen{form.tipo === 'ausentes_2060' && registro ? ' *' : ''}</label>
+                  <select style={INP} value={form.asamblea_id} onChange={(e) => setAsamblea(e.target.value)}>
+                    <option value="">— Sin vincular —</option>
+                    {asambleas.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {String(a.fecha || '').split('-').reverse().join('/')} · {a.tipo === 'ordinaria' ? 'Ordinaria' : 'Extraordinaria'} · {(a.unidades_presentes || []).length} presentes{a.estado ? ' · ' + a.estado : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {asmSel && (asmSel.orden_del_dia || []).length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 12, color: '#374151', marginBottom: 4 }}>Orden del día — elija el punto que se somete a votación (completa título y propuesta si están vacíos):</div>
+                      {asmSel.orden_del_dia.map((pto, i) => (
+                        <button key={i} onClick={() => tomarPunto(i)}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: 12, padding: '6px 8px', marginBottom: 4, border: '1px solid #e5e7eb', borderRadius: 6, background: '#fff', cursor: 'pointer' }}>
+                          <strong>{i + 1}.</strong> {String(pto)}
+                        </button>
+                      ))}
+                      <div style={{ fontSize: 11, color: GR }}>Cree una votación por cada moción. Redacte en "Propuesta" la decisión concreta que votó la mayoría de los presentes.</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          )
+        })()}
 
         <Card style={{ marginBottom: 12 }}>
           <label style={LBL}>Título / asunto *</label>
@@ -460,34 +748,37 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
               <div style={{ fontSize: 11, color: GR, marginTop: 3 }}>Usar el coeficiente del RPH (en ATICA II es pct_gtos_grales).</div>
             </div>
             <div>
-              <label style={LBL}>Apertura (vacío = al abrir)</label>
-              <input type="datetime-local" style={INP} value={form.apertura} onChange={(e) => setForm({ ...form, apertura: e.target.value })} />
+              <label style={LBL}>
+                {form.modalidad === 'registro'
+                  ? (form.tipo === 'ausentes_2060' ? 'Notificación a los ausentes *' : 'Inicio *')
+                  : 'Apertura (vacío = al abrir)'}
+              </label>
+              <input type="datetime-local" style={INP} value={form.apertura} onChange={(e) => setApertura(e.target.value)} />
+              {form.modalidad === 'registro' && form.tipo === 'ausentes_2060' && (
+                <div style={{ fontSize: 11, color: GR, marginTop: 3 }}>Fecha en que se comunicó fehacientemente lo propuesto a los ausentes. El plazo de 15 días corre desde aquí.</div>
+              )}
             </div>
             <div>
               <label style={LBL}>Cierre *</label>
               <input type="datetime-local" style={INP} value={form.cierre} onChange={(e) => setForm({ ...form, cierre: e.target.value })} />
+              {form.tipo === 'ausentes_2060' && <div style={{ fontSize: 11, color: GR, marginTop: 3 }}>Se completa solo: 15 días corridos desde el día siguiente a la notificación, vence a las 23:59 del último día (art. 6 CCyC).</div>}
             </div>
-            <div>
-              <label style={LBL}>Resultados visibles al propietario</label>
-              <select style={INP} value={form.resultados_visibles} onChange={(e) => setForm({ ...form, resultados_visibles: e.target.value })}>
-                <option value="al_cierre">Al cierre</option><option value="siempre">Siempre (parcial en vivo)</option><option value="nunca">Nunca</option>
-              </select>
-            </div>
-            {form.tipo === 'ausentes_2060' && (
+            {form.modalidad !== 'registro' && (
               <div>
-                <label style={LBL}>Asamblea de origen</label>
-                <select style={INP} value={form.asamblea_id} onChange={(e) => setForm({ ...form, asamblea_id: e.target.value })}>
-                  <option value="">— Sin vincular —</option>
-                  {asambleas.map((a) => <option key={a.id} value={a.id}>{a.fecha} · {a.tipo}</option>)}
+                <label style={LBL}>Resultados visibles al propietario</label>
+                <select style={INP} value={form.resultados_visibles} onChange={(e) => setForm({ ...form, resultados_visibles: e.target.value })}>
+                  <option value="al_cierre">Al cierre</option><option value="siempre">Siempre (parcial en vivo)</option><option value="nunca">Nunca</option>
                 </select>
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 12, fontSize: 13 }}>
-            <label><input type="checkbox" checked={form.permite_cambio} onChange={(e) => setForm({ ...form, permite_cambio: e.target.checked })} /> Permitir cambiar el voto hasta el cierre</label>
-            <label><input type="checkbox" checked={form.requiere_otp} onChange={(e) => setForm({ ...form, requiere_otp: e.target.checked })} /> Exigir código por email para votar</label>
-          </div>
-          {form.requiere_otp && <div style={{ fontSize: 11, color: AM, marginTop: 4 }}>Las UF sin email registrado no podrán votar por el portal (podrá cargar su voto manualmente).</div>}
+          {form.modalidad !== 'registro' && (
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 12, fontSize: 13 }}>
+              <label><input type="checkbox" checked={form.permite_cambio} onChange={(e) => setForm({ ...form, permite_cambio: e.target.checked })} /> Permitir cambiar el voto hasta el cierre</label>
+              <label><input type="checkbox" checked={form.requiere_otp} onChange={(e) => setForm({ ...form, requiere_otp: e.target.checked })} /> Exigir código por email para votar</label>
+            </div>
+          )}
+          {form.modalidad !== 'registro' && form.requiere_otp && <div style={{ fontSize: 11, color: AM, marginTop: 4 }}>Las UF sin email registrado no podrán votar por el portal (podrá cargar su voto manualmente).</div>}
         </Card>
 
         <div style={{ display: 'flex', gap: 8 }}>
@@ -501,10 +792,10 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
   if (vista === 'detalle' && detalle) {
     const d = detalle
     const ef = d.estado === 'abierta' && new Date(d.cierre) <= new Date() ? 'cerrada' : d.estado
-    const votados = new Set((esc_?.opciones || []).flatMap((o) => (o.unidades || []).map((u) => u.unidad_id)))
-    const ufsManual = d.tipo === 'ausentes_2060'
-      ? (esc_?.no_voto?.unidades || []).concat((esc_?.opciones || []).flatMap((o) => o.unidades || []))
-      : null
+    const registro = d.modalidad === 'registro'
+    const asmD = d.asamblea_id ? asambleas.find((a) => a.id === d.asamblea_id) : null
+    const nSucias = planilla.filter(filaSucia).length
+    const nConVoto = planilla.filter((r) => r.orig.opcion_id).length
     return (
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
@@ -517,8 +808,10 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
             <span style={{ background: EST_COLOR[ef], color: '#fff', borderRadius: 999, padding: '3px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }}>{ef}</span>
             <span style={{ fontSize: 13, fontWeight: 600 }}>{TIPOS[d.tipo]?.l}</span>
             <span style={{ fontSize: 12, color: GR }}>· {MAYORIAS[d.mayoria]} · coef. {d.campo_coef}</span>
+            {registro && <span style={{ background: AM, color: '#fff', borderRadius: 999, padding: '3px 10px', fontSize: 11, fontWeight: 700 }}>REGISTRO MANUAL</span>}
           </div>
-          <div style={{ fontSize: 12, color: '#374151', marginTop: 6 }}>Apertura: {fF(d.apertura)} · Cierre: {fF(d.cierre)}{d.estado === 'abierta' && ef === 'cerrada' ? ' (vencida — registre el cierre)' : ''}</div>
+          {asmD && <div style={{ fontSize: 12, color: '#374151', marginTop: 6 }}>Asamblea de origen: {String(asmD.fecha).split('-').reverse().join('/')} · {asmD.tipo === 'ordinaria' ? 'Ordinaria' : 'Extraordinaria'} · {(asmD.unidades_presentes || []).length} presentes registrados</div>}
+          <div style={{ fontSize: 12, color: '#374151', marginTop: 6 }}>{registro && d.tipo === 'ausentes_2060' ? 'Notificación a ausentes' : 'Apertura'}: {fF(d.apertura)} · Cierre: {fF(d.cierre)}{d.estado === 'abierta' && ef === 'cerrada' ? (registro ? ' (plazo vencido — cargue los votos recibidos y registre el cierre)' : ' (vencida — registre el cierre)') : ''}</div>
           {d.descripcion && <div style={{ fontSize: 13, marginTop: 8, whiteSpace: 'pre-wrap' }}>{d.descripcion}</div>}
           {(d.adjuntos || []).map((a, i) => <a key={i} href={a.url} target="_blank" rel="noreferrer" style={{ display: 'block', fontSize: 12, color: AZ, marginTop: 4 }}>📎 {a.nombre}</a>)}
           <div style={{ fontSize: 12, color: GR, marginTop: 8 }}>Opciones: {opcs.map((o) => o.etiqueta).join(' · ')}{d.permite_cambio ? ' · admite cambio de voto' : ''}{d.requiere_otp ? ' · requiere código por email' : ''}</div>
@@ -532,6 +825,14 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
                 {d.tipo === 'ausentes_2060' && (
                   <div style={{ marginBottom: 10 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>UF presentes en la asamblea ({presentesSel.length})</div>
+                    {presAviso && (
+                      <div style={{ fontSize: 12, marginBottom: 6, color: presAviso.noRec.length || presAviso.ambig.length ? AM : VD }}>
+                        Precargadas desde la asistencia de la asamblea: {presAviso.ok} de {presAviso.total} reconocidas.
+                        {presAviso.noRec.length > 0 && ` No reconocidas: ${presAviso.noRec.join(', ')}.`}
+                        {presAviso.ambig.length > 0 && ` Ambiguas: ${presAviso.ambig.join(', ')}.`}
+                        {' '}Verifique y corrija antes de abrir.
+                      </div>
+                    )}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 220, overflow: 'auto' }}>
                       {(unidades || []).slice().sort((a, b) => etiquetaUF(a).localeCompare(etiquetaUF(b), 'es', { numeric: true })).map((u) => (
                         <label key={u.id} style={{ fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, padding: '3px 8px', background: presentesSel.includes(u.id) ? '#dbeafe' : '#fff' }}>
@@ -542,7 +843,7 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <Btn color={VD} onClick={abrir} disabled={ocupado}>▶ Abrir votación</Btn>
+                  <Btn color={VD} onClick={abrir} disabled={ocupado}>{registro ? '▶ Abrir registro y cargar votos' : '▶ Abrir votación'}</Btn>
                   <BtnSec onClick={() => editarBorrador(d)}>✏️ Editar</BtnSec>
                   <BtnSec onClick={eliminarBorrador}>🗑 Eliminar borrador</BtnSec>
                 </div>
@@ -550,11 +851,11 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
             )}
             {d.estado === 'abierta' && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {ef === 'abierta' && <Btn onClick={() => notificar('convocatoria')} disabled={ocupado}>✉️ Notificar a propietarios</Btn>}
-                {ef === 'abierta' && <BtnSec onClick={() => notificar('recordatorio')}>🔔 Recordatorio a quienes no votaron</BtnSec>}
-                {ef === 'abierta' && <BtnSec onClick={prorrogar}>⏱ Prorrogar cierre</BtnSec>}
+                {!registro && ef === 'abierta' && <Btn onClick={() => notificar('convocatoria')} disabled={ocupado}>✉️ Notificar a propietarios</Btn>}
+                {!registro && ef === 'abierta' && <BtnSec onClick={() => notificar('recordatorio')}>🔔 Recordatorio a quienes no votaron</BtnSec>}
+                {!registro && ef === 'abierta' && <BtnSec onClick={prorrogar}>⏱ Prorrogar cierre</BtnSec>}
                 {(d.tipo !== 'ausentes_2060' || ef === 'cerrada') && <Btn color={AZ} onClick={cerrar} disabled={ocupado}>■ {ef === 'cerrada' ? 'Registrar cierre y escrutinio final' : 'Cerrar anticipadamente'}</Btn>}
-                {ef === 'abierta' && <Btn color={RJ} onClick={anular} disabled={ocupado}>Anular</Btn>}
+                {(ef === 'abierta' || registro) && <Btn color={RJ} onClick={anular} disabled={ocupado}>Anular</Btn>}
               </div>
             )}
           </Card>
@@ -575,8 +876,59 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
               <span style={{ color: GR }}> · Participación {esc_.votos_emitidos}/{esc_.total_uf} UF ({esc_.participacion_pct_uf}%)</span>
             </div>
             {(esc_.avisos || []).map((a, i) => (
-              <div key={i} style={{ fontSize: 12, color: AM, marginTop: 4 }}>⚠ {a.tipo === 'coef_suma' ? a.detalle : 'UF con coeficiente 0: ' + (a.unidades || []).join(', ')}</div>
+              <div key={i} style={{ fontSize: 12, color: AM, marginTop: 4 }}>⚠ {a.tipo === 'coef_cero' ? 'UF con coeficiente 0: ' + (a.unidades || []).join(', ') : a.detalle}</div>
             ))}
+            {esc_.art2060 && (() => {
+              const a = esc_.art2060
+              const fila = (lbl, x, extra) => (
+                <tr style={{ borderTop: '1px solid #e5e7eb' }}>
+                  <td style={{ padding: 5 }}>{lbl}</td>
+                  <td style={{ padding: 5, textAlign: 'right' }}>{x.uf}</td>
+                  <td style={{ padding: 5, textAlign: 'right' }}>{(100 * x.uf / esc_.total_uf).toFixed(2)}%</td>
+                  <td style={{ padding: 5, textAlign: 'right' }}>{esc_.total_coef > 0 ? (100 * Number(x.coef) / Number(esc_.total_coef)).toFixed(4) : '0'}%</td>
+                  <td style={{ padding: 5 }}>{extra || ''}</td>
+                </tr>
+              )
+              return (
+                <div style={{ marginTop: 10, border: '1px solid #dbeafe', background: '#f8fbff', borderRadius: 8, padding: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: AZ }}>Cómputo art. 2060 CCyC {a.silencio_positivo ? '— silencios a favor (art. 263)' : '— conformidad expresa (art. 2061)'}</div>
+                  <div style={{ fontSize: 11, color: GR, margin: '2px 0 6px' }}>
+                    Presentes en la asamblea: {a.presentes.uf} UF ({a.presentes_pct_uf}% / {a.presentes_pct_coef}% coef.) — {a.presentes_pct_uf > 50 && a.presentes_pct_coef > 50 ? 'hubo doble mayoría' : 'sin doble mayoría: lo resuelto es una PROPUESTA'}.
+                  </div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead><tr style={{ background: '#eef4ff' }}><th style={{ textAlign: 'left', padding: 5 }}>Concepto</th><th style={{ padding: 5 }}>UF</th><th style={{ padding: 5 }}>% UF</th><th style={{ padding: 5 }}>% Coef.</th><th /></tr></thead>
+                      <tbody>
+                        {fila('SÍ presentes', a.presentes.si)}
+                        {fila('SÍ ausentes (expreso)', a.ausentes.si)}
+                        {fila(a.silencio_positivo ? 'Silencios de ausentes (a favor)' : 'Silencios de ausentes (no computan)', a.ausentes.silencio)}
+                        <tr style={{ borderTop: '2px solid #93c5fd', fontWeight: 700 }}>
+                          <td style={{ padding: 5 }}>Total a favor de la propuesta</td>
+                          <td style={{ padding: 5, textAlign: 'right' }}>{a.favor.uf}</td>
+                          <td style={{ padding: 5, textAlign: 'right' }}>{a.favor.pct_uf}%</td>
+                          <td style={{ padding: 5, textAlign: 'right' }}>{a.favor.pct_coef}%</td>
+                          <td style={{ padding: 5 }}>{a.favor.doble_mayoria ? '✓ doble mayoría' : ''}</td>
+                        </tr>
+                        {fila('NO presentes', a.presentes.no)}
+                        {fila('Oposiciones de ausentes', a.ausentes.no)}
+                        <tr style={{ borderTop: '2px solid #fca5a5', fontWeight: 700 }}>
+                          <td style={{ padding: 5 }}>Total oposición</td>
+                          <td style={{ padding: 5, textAlign: 'right' }}>{a.oposicion.uf}</td>
+                          <td style={{ padding: 5, textAlign: 'right' }}>{a.oposicion.pct_uf}%</td>
+                          <td style={{ padding: 5, textAlign: 'right' }}>{a.oposicion.pct_coef}%</td>
+                          <td style={{ padding: 5, color: a.oposicion.mayoria_suficiente ? RJ : VD }}>{a.oposicion.mayoria_suficiente ? '✗ mayoría suficiente: revierte' : '✓ no alcanza para revertir'}</td>
+                        </tr>
+                        {fila('Abstenciones (presentes + ausentes)', { uf: a.presentes.abstencion.uf + a.ausentes.abstencion.uf, coef: Number(a.presentes.abstencion.coef) + Number(a.ausentes.abstencion.coef) })}
+                        {a.presentes.sin_voto.uf > 0 && fila('Presentes sin voto cargado', a.presentes.sin_voto, <span style={{ color: AM }}>⚠ cargar</span>)}
+                      </tbody>
+                    </table>
+                  </div>
+                  {esc_.estado_efectivo !== 'cerrada' && (
+                    <div style={{ fontSize: 12, marginTop: 6 }}>Proyección si cerrara hoy: <strong>{RESULTADO[esc_.proyeccion] || esc_.proyeccion}</strong></div>
+                  )}
+                </div>
+              )
+            })()}
             <div style={{ overflowX: 'auto', marginTop: 10 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead><tr style={{ background: '#f1f5f9' }}>
@@ -614,32 +966,105 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
           </Card>
         )}
 
-        {puedeOperar && d.estado === 'abierta' && (
+        {d.tipo === 'ausentes_2060' && esc_ && ef === 'cerrada' && (
           <Card style={{ marginBottom: 12 }}>
-            <strong style={{ fontSize: 14 }}>Cargar voto manualmente</strong>
-            <div style={{ fontSize: 11, color: GR, margin: '4px 0 8px' }}>
-              {d.tipo === 'ausentes_2060'
-                ? 'Origen "Asamblea": voto de las UF presentes según el acta (también después del cierre). Origen "Carga admin": voto de un ausente recibido por medio fehaciente (dentro del plazo).'
-                : 'Para votos recibidos por nota firmada u otro medio fehaciente. Indique el respaldo.'}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 14 }}>📝 Nota de cierre</strong>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <BtnSec small onClick={() => setNotaTxt(notaGenerada())}>↺ Regenerar texto</BtnSec>
+                <BtnSec small onClick={() => copiar(notaTxt || notaGenerada())}>📋 Copiar</BtnSec>
+                {puedeOperar && <Btn small onClick={guardarNota}>💾 Guardar</Btn>}
+                {d.asamblea_id && <Btn small color={AZ} onClick={generarNotaAsamblea}>🏛 Nota de la asamblea (todos los puntos)</Btn>}
+              </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 8 }}>
-              <select style={INP} value={manual.unidad_id} onChange={(e) => setManual({ ...manual, unidad_id: e.target.value })}>
-                <option value="">UF…</option>
-                {(ufsManual || (unidades || []).map((u) => ({ unidad_id: u.id, etiqueta: etiquetaUF(u) })))
-                  .slice().sort((a, b) => String(a.etiqueta).localeCompare(String(b.etiqueta), 'es', { numeric: true }))
-                  .map((u) => <option key={u.unidad_id} value={u.unidad_id}>{u.etiqueta}{votados.has(u.unidad_id) ? ' ✓' : ''}{u.presente_asamblea ? ' (presente)' : ''}</option>)}
-              </select>
-              <select style={INP} value={manual.opcion_id} onChange={(e) => setManual({ ...manual, opcion_id: e.target.value })}>
-                <option value="">Opción…</option>
-                {opcs.map((o) => <option key={o.id} value={o.id}>{o.etiqueta}</option>)}
-              </select>
-              {d.tipo === 'ausentes_2060' && (
-                <select style={INP} value={manual.origen} onChange={(e) => setManual({ ...manual, origen: e.target.value })}>
-                  <option value="asamblea">Asamblea (presente)</option><option value="admin">Carga admin (ausente)</option>
-                </select>
-              )}
-              <input style={INP} value={manual.nota} placeholder="Respaldo (ej.: nota firmada 12/10)" onChange={(e) => setManual({ ...manual, nota: e.target.value })} />
-              <Btn onClick={cargarVotoManual} disabled={ocupado}>Registrar</Btn>
+            {d.estado === 'abierta' && <div style={{ fontSize: 11, color: AM, marginTop: 4 }}>El plazo venció: registre el cierre para que el escrutinio final quede fijo antes de usar la nota.</div>}
+            <textarea value={notaTxt || notaGenerada()} onChange={(e) => setNotaTxt(e.target.value)}
+              style={{ ...INP, minHeight: 190, fontFamily: 'inherit', marginTop: 8, lineHeight: 1.5 }} />
+            <div style={{ fontSize: 11, color: GR, marginTop: 4 }}>Texto para el Libro de Actas, a continuación del acta de la asamblea. Puede editarlo antes de guardar.</div>
+          </Card>
+        )}
+
+        {notaAsm && (
+          <Card style={{ marginBottom: 12, border: '1.5px solid ' + AZ }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 14 }}>🏛 Nota de cierre — Asamblea del {fDf(notaAsm.asm?.fecha)} ({notaAsm.items.length} punto{notaAsm.items.length > 1 ? 's' : ''})</strong>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <BtnSec small onClick={() => copiar(notaAsm.texto)}>📋 Copiar</BtnSec>
+                <Btn small color={GR} onClick={() => imprimirNota('Nota de cierre — Asamblea del ' + fDf(notaAsm.asm?.fecha), notaAsm.texto)}>🖨️ Imprimir</Btn>
+                <BtnSec small onClick={() => setNotaAsm(null)}>✕</BtnSec>
+              </div>
+            </div>
+            {notaAsm.abiertas.length > 0 && <div style={{ fontSize: 12, color: AM, marginTop: 4 }}>⚠ Quedan sin cerrar: {notaAsm.abiertas.join(', ')}. No se incluyen.</div>}
+            <textarea value={notaAsm.texto} onChange={(e) => setNotaAsm({ ...notaAsm, texto: e.target.value })}
+              style={{ ...INP, minHeight: 260, fontFamily: 'inherit', marginTop: 8, lineHeight: 1.5 }} />
+          </Card>
+        )}
+
+        {puedeOperar && d.estado === 'abierta' && planilla.length > 0 && (
+          <Card style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 14 }}>📋 Planilla de carga de votos ({nConVoto}/{planilla.length} con voto)</strong>
+              <Btn onClick={guardarPlanilla} disabled={ocupado || !nSucias}>{ocupado ? 'Guardando…' : `💾 Guardar cambios (${nSucias})`}</Btn>
+            </div>
+            <div style={{ fontSize: 11, color: GR, margin: '6px 0 8px', lineHeight: 1.5 }}>
+              {d.tipo === 'ausentes_2060'
+                ? 'UF presentes (fondo azul): su voto se registra como emitido en la asamblea. Ausentes: voto recibido por mail o nota, con fecha de recepción dentro del plazo (notificación → cierre) y respaldo obligatorio.'
+                : 'Votos recibidos por mail o nota firmada: fecha de recepción dentro de la ventana de la votación y respaldo obligatorio.'}
+              {' '}Corregir un voto deja el anterior en el historial.
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, fontSize: 12 }}>
+              <span>Fecha/hora de recepción por defecto (se aplica al elegir un voto):</span>
+              <input type="datetime-local" value={fechaDef} onChange={(e) => setFechaDef(e.target.value)} style={{ ...INP, width: 200 }} />
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 760 }}>
+                <thead><tr style={{ background: '#f1f5f9' }}>
+                  <th style={{ textAlign: 'left', padding: 5 }}>UF</th>
+                  <th style={{ textAlign: 'left', padding: 5 }}>Propietario</th>
+                  <th style={{ padding: 5 }}>Coef.</th>
+                  <th style={{ padding: 5 }}>Voto</th>
+                  <th style={{ padding: 5 }}>Recibido</th>
+                  <th style={{ padding: 5 }}>Respaldo</th>
+                  <th style={{ padding: 5 }} />
+                </tr></thead>
+                <tbody>
+                  {planilla.map((r) => {
+                    const pres = d.tipo === 'ausentes_2060' && r.presente
+                    const sucia = filaSucia(r)
+                    return (
+                      <tr key={r.unidad_id} style={{ borderTop: '1px solid #e5e7eb', background: sucia ? '#fef9c3' : pres ? '#eff6ff' : undefined }}>
+                        <td style={{ padding: 5, fontWeight: 700, whiteSpace: 'nowrap' }}>{r.etiqueta}{pres && <span style={{ fontSize: 10, color: AZ }}> PRES.</span>}</td>
+                        <td style={{ padding: 5 }}>{r.propietario}</td>
+                        <td style={{ padding: 5, textAlign: 'right' }}>{r.coef}</td>
+                        <td style={{ padding: 5 }}>
+                          <select value={r.opcion_id} onChange={(e) => setFila(r.unidad_id, 'opcion_id', e.target.value)} style={{ ...INP, padding: '4px 6px', fontSize: 12, minWidth: 110 }}>
+                            <option value="">— sin voto —</option>
+                            {opcs.map((o) => <option key={o.id} value={o.id}>{o.etiqueta}</option>)}
+                          </select>
+                        </td>
+                        <td style={{ padding: 5 }}>
+                          {pres
+                            ? <span style={{ color: GR }}>En asamblea{asmD ? ' ' + String(asmD.fecha).split('-').reverse().join('/') : ''}</span>
+                            : <input type="datetime-local" value={r.emitido} onChange={(e) => setFila(r.unidad_id, 'emitido', e.target.value)} style={{ ...INP, padding: '4px 6px', fontSize: 12, width: 175 }} />}
+                        </td>
+                        <td style={{ padding: 5 }}>
+                          <input value={r.nota} onChange={(e) => setFila(r.unidad_id, 'nota', e.target.value)} placeholder={pres ? 'Opcional' : 'Ej.: mail de x@… 30/09 10:15'}
+                            style={{ ...INP, padding: '4px 6px', fontSize: 12, minWidth: 170 }} />
+                        </td>
+                        <td style={{ padding: 5, textAlign: 'center' }}>
+                          {r.orig.opcion_id && (
+                            <button title="Quitar voto cargado" onClick={() => quitarVoto(r)} disabled={ocupado}
+                              style={{ border: 'none', background: 'none', color: RJ, cursor: 'pointer', fontSize: 14 }}>✕</button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+              <Btn onClick={guardarPlanilla} disabled={ocupado || !nSucias}>{ocupado ? 'Guardando…' : `💾 Guardar cambios (${nSucias})`}</Btn>
             </div>
           </Card>
         )}
@@ -679,7 +1104,7 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{v.titulo}</div>
-                <div style={{ fontSize: 12, color: GR, marginTop: 2 }}>{TIPOS[v.tipo]?.l} · cierre {fF(v.cierre)}</div>
+                <div style={{ fontSize: 12, color: GR, marginTop: 2 }}>{TIPOS[v.tipo]?.l}{v.modalidad === 'registro' ? ' · registro manual' : ''} · cierre {fF(v.cierre)}</div>
                 {v.resultado_final?.resultado && <div style={{ fontSize: 12, marginTop: 2 }}>Resultado: <strong>{RESULTADO[v.resultado_final.resultado] || v.resultado_final.resultado}</strong></div>}
               </div>
               <span style={{ background: EST_COLOR[ef], color: '#fff', borderRadius: 999, padding: '3px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{ef}</span>
