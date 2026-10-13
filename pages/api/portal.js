@@ -92,7 +92,7 @@ async function votAccion(req, res, uf, accion, isPost) {
     const [{ data: vots }, { data: opcs }, { data: votos }] = await Promise.all([
       db.from('con_votaciones')
         .select('id, consorcio_id, asamblea_id, tipo, titulo, descripcion, adjuntos, mayoria, apertura, cierre, estado, permite_cambio, requiere_otp, resultados_visibles, resultado_final')
-        .in('id', ids).in('estado', ['abierta', 'cerrada']).order('cierre', { ascending: false }),
+        .in('id', ids).in('estado', ['abierta', 'cerrada']).eq('modalidad', 'online').order('cierre', { ascending: false }),
       db.from('con_votacion_opciones').select('id, votacion_id, orden, clave, etiqueta, detalle').in('votacion_id', ids).order('orden'),
       db.from('con_votacion_votos').select('votacion_id, opcion_id, emitido_at, hash, origen').in('votacion_id', ids).eq('unidad_id', uf.id),
     ])
