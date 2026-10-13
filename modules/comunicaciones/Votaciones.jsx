@@ -159,6 +159,8 @@ export default function Votaciones() {
   const [fechaDef, setFechaDef]   = useState('')     // fecha/hora de recepción por defecto
   const [presAviso, setPresAviso] = useState(null)   // UF presentes no reconocidas/ambiguas
   const [presentesSel, setPresentesSel] = useState([])
+  const [dup, setDup]             = useState(null)   // §60.10 duplicar: { origen, copiarVotos }
+  const [opPres, setOpPres]       = useState('')     // §60.10 opción a aplicar a todos los presentes
   const [notaTxt, setNotaTxt]     = useState('')     // §60.9 nota de cierre de la votación
   const [notaAsm, setNotaAsm]     = useState(null)   // §60.9 nota combinada de la asamblea { asm, texto, items }
 
@@ -366,6 +368,47 @@ export default function Votaciones() {
       op.push({ id: `${id}-O${op.length + 1}`, votacion_id: id, admin_id: adminId, orden: op.length + 1, clave: 'abstencion', etiqueta: 'ABSTENCIÓN', detalle: null })
       const { error: e3 } = await supabase.from('con_votacion_opciones').insert(op)
       if (e3) throw e3
+
+      // §60.10 Duplicado de una votación ya abierta/cerrada: abrir con los mismos presentes y copiar votos
+      if (!form.id && dup?.origen && dup.origen.estado !== 'borrador') {
+        const o = dup.origen
+        const { data: padO } = await supabase.from('con_votacion_padron').select('unidad_id, presente_asamblea').eq('votacion_id', o.id)
+        const pres = (padO || []).filter((x) => x.presente_asamblea).map((x) => x.unidad_id)
+        const { error: eA } = await supabase.rpc('vot_abrir', { p_votacion_id: id, p_presentes: row.tipo === 'ausentes_2060' ? pres : null })
+        if (eA) {
+          setMsg({ tipo: 'warn', texto: 'Borrador creado, pero no se pudo abrir: ' + errTxt(eA) })
+        } else {
+          let resumen = ''
+          if (dup.copiarVotos) {
+            const [{ data: vO }, { data: opO }] = await Promise.all([
+              supabase.from('con_votacion_votos').select('unidad_id, opcion_id, origen, emitido_at, nota').eq('votacion_id', o.id),
+              supabase.from('con_votacion_opciones').select('id, clave, orden').eq('votacion_id', o.id),
+            ])
+            const porId = new Map((opO || []).map((x) => [x.id, x]))
+            const mapear = (oid) => {
+              const src = porId.get(oid); if (!src) return null
+              const dst = src.clave === 'opcion' ? op.find((x) => x.clave === 'opcion' && x.orden === src.orden) : op.find((x) => x.clave === src.clave)
+              return dst?.id || null
+            }
+            const items = (vO || []).filter((x) => x.origen !== 'portal').map((x) => ({
+              unidad_id: x.unidad_id, opcion_id: mapear(x.opcion_id), origen: x.origen, emitido_at: x.emitido_at, nota: x.nota,
+            })).filter((x) => x.opcion_id)
+            if (items.length) {
+              const { data: rL, error: eL } = await supabase.rpc('vot_registrar_lote', { p_votacion_id: id, p_items: items })
+              resumen = eL ? ' No se pudieron copiar los votos: ' + errTxt(eL)
+                : ` Votos copiados: ${rL?.registrados || 0}${(rL?.errores || []).length ? ` · con error: ${rL.errores.length}` : ''}.`
+            }
+          }
+          setMsg({ tipo: 'ok', texto: `✓ Votación creada y abierta con ${pres.length} presentes.${resumen} Ajuste en la planilla los votos que difieran para este punto.` })
+        }
+        setDup(null)
+        await cargar()
+        const { data } = await supabase.from('con_votaciones').select('*').eq('id', id).single()
+        if (data) await abrirDetalle(data)
+        setOcupado(false)
+        return
+      }
+
       setMsg({ tipo: 'ok', texto: '✓ Borrador guardado. Revíselo y ábralo cuando esté listo.' })
       await cargar()
       const { data } = await supabase.from('con_votaciones').select('*').eq('id', id).single()
@@ -373,6 +416,31 @@ export default function Votaciones() {
       setForm((f) => ({ ...f, id }))
     } catch (e) { setMsg({ tipo: 'error', texto: errTxt(e) }) }
     setOcupado(false)
+  }
+
+  // §60.10 Duplicar: misma asamblea, fechas, configuración y presentes; título y propuesta nuevos
+  function duplicar(v) {
+    const base = formVacio()
+    const esMulti = opcs.some((x) => x.clave === 'opcion')
+    setForm({
+      ...base,
+      tipo: v.tipo, modalidad: v.modalidad || 'online', asamblea_id: v.asamblea_id || '',
+      mayoria: v.mayoria, campo_coef: v.campo_coef, silencio_positivo: v.silencio_positivo !== false,
+      apertura: isoALocal(v.apertura), cierre: isoALocal(v.cierre),
+      permite_cambio: v.permite_cambio, requiere_otp: v.requiere_otp, resultados_visibles: v.resultados_visibles,
+      multiple: esMulti,
+      opciones: opcs.filter((x) => x.clave !== 'abstencion').map((x) => ({ etiqueta: x.etiqueta, clave: x.clave, detalle: '' })),
+      titulo: '', descripcion: '', adjuntos: [],
+    })
+    setDup({ origen: v, copiarVotos: true })
+    setVista('form'); setMsg(null)
+  }
+
+  // §60.10 Aplicar una opción a todas las UF presentes (filas azules)
+  function aplicarPresentes() {
+    if (!opPres) return setMsg({ tipo: 'warn', texto: 'Elija la opción a aplicar' })
+    setPlanilla((rows) => rows.map((r) => (r.presente ? { ...r, opcion_id: opPres } : r)))
+    setMsg({ tipo: 'info', texto: 'Opción aplicada a los presentes. Revise y pulse Guardar cambios.' })
   }
 
   // ── Acciones sobre la votación ──────────────────────────────────────────
@@ -632,6 +700,22 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
           <BtnSec small onClick={() => { setVista('lista'); setMsg(null) }}>← Volver</BtnSec>
         </div>
         <Msg data={msg} />
+        {dup?.origen && !form.id && (
+          <Card style={{ marginBottom: 12, border: '1.5px solid ' + AZ, background: '#f8fbff' }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>📄 Duplicando «{dup.origen.titulo}»</div>
+            <div style={{ fontSize: 12, color: GR, marginTop: 4 }}>
+              Se conservan tipo, asamblea, fechas (notificación {fF(dup.origen.apertura)} · cierre {fF(dup.origen.cierre)}), mayoría y coeficiente.
+              Complete el <strong>título</strong> y la <strong>propuesta</strong> del nuevo punto.
+              {dup.origen.estado !== 'borrador' && ' Al guardar, la votación se crea y se abre con los mismos presentes.'}
+            </div>
+            {dup.origen.estado !== 'borrador' && (
+              <label style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                <input type="checkbox" checked={dup.copiarVotos} onChange={(e) => setDup({ ...dup, copiarVotos: e.target.checked })} />
+                Copiar los votos cargados (presentes y mails, con su fecha y respaldo); después ajuste solo los que cambian
+              </label>
+            )}
+          </Card>
+        )}
         <Card style={{ marginBottom: 12 }}>
           <label style={LBL}>Tipo de votación</label>
           <select style={INP} value={form.tipo} onChange={(e) => setTipo(e.target.value)}>
@@ -782,8 +866,10 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
         </Card>
 
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn onClick={guardarBorrador} disabled={ocupado || subiendo}>{ocupado ? 'Guardando…' : '💾 Guardar borrador'}</Btn>
-          <BtnSec onClick={() => { setVista('lista'); setMsg(null) }}>Cancelar</BtnSec>
+          <Btn onClick={guardarBorrador} disabled={ocupado || subiendo}>
+            {ocupado ? 'Guardando…' : (dup?.origen && !form.id && dup.origen.estado !== 'borrador' ? '💾 Crear y abrir' : '💾 Guardar borrador')}
+          </Btn>
+          <BtnSec onClick={() => { setVista('lista'); setDup(null); setMsg(null) }}>Cancelar</BtnSec>
         </div>
       </div>
     )
@@ -817,6 +903,12 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
           <div style={{ fontSize: 12, color: GR, marginTop: 8 }}>Opciones: {opcs.map((o) => o.etiqueta).join(' · ')}{d.permite_cambio ? ' · admite cambio de voto' : ''}{d.requiere_otp ? ' · requiere código por email' : ''}</div>
           {d.estado === 'anulada' && <div style={{ fontSize: 12, color: RJ, marginTop: 6 }}>Anulada: {d.anulada_motivo}</div>}
         </Card>
+
+        {puedeOperar && d.estado !== 'anulada' && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <BtnSec small onClick={() => duplicar(d)}>📄 Duplicar para otro punto</BtnSec>
+          </div>
+        )}
 
         {puedeOperar && (
           <Card style={{ marginBottom: 12 }}>
@@ -1012,6 +1104,17 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
                 : 'Votos recibidos por mail o nota firmada: fecha de recepción dentro de la ventana de la votación y respaldo obligatorio.'}
               {' '}Corregir un voto deja el anterior en el historial.
             </div>
+            {d.tipo === 'ausentes_2060' && planilla.some((r) => r.presente) && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, fontSize: 12, background: '#eff6ff', padding: '6px 8px', borderRadius: 6 }}>
+                <span>Aplicar a las {planilla.filter((r) => r.presente).length} UF presentes:</span>
+                <select value={opPres} onChange={(e) => setOpPres(e.target.value)} style={{ ...INP, width: 160, padding: '4px 6px', fontSize: 12 }}>
+                  <option value="">— elegir —</option>
+                  {opcs.map((o) => <option key={o.id} value={o.id}>{o.etiqueta}</option>)}
+                </select>
+                <BtnSec small onClick={aplicarPresentes}>Aplicar</BtnSec>
+                <span style={{ color: GR }}>(luego corrija las que votaron distinto)</span>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, fontSize: 12 }}>
               <span>Fecha/hora de recepción por defecto (se aplica al elegir un voto):</span>
               <input type="datetime-local" value={fechaDef} onChange={(e) => setFechaDef(e.target.value)} style={{ ...INP, width: 200 }} />
@@ -1093,7 +1196,7 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>🗳️ Votaciones — {consorcioActivo?.nombre}</h2>
-        {puedeOperar && <Btn onClick={() => { setForm(formVacio()); setVista('form'); setMsg(null) }}>+ Nueva votación</Btn>}
+        {puedeOperar && <Btn onClick={() => { setForm(formVacio()); setDup(null); setVista('form'); setMsg(null) }}>+ Nueva votación</Btn>}
       </div>
       <Msg data={msg} />
       {!lista.length && <Card><div style={{ color: GR, fontSize: 13 }}>No hay votaciones en este consorcio.</div></Card>}
