@@ -38,6 +38,129 @@ async function resolverInvitacion(inv) {
   return u || null
 }
 
+// ══ §60 Votaciones ════════════════════════════════════════════════════════════
+// Toda la lógica de validación (ventana, padrón, presentes art. 2060, cambio de voto, OTP)
+// vive en las RPC SECURITY DEFINER vot_* (rol service_role). Acá solo se arma la vista
+// pública y se traducen errores. El escrutinio que ve el propietario NO incluye nombres.
+
+const etiquetaUF = (u) => String(u?.numero_interno || u?.numero || u?.id || '').trim()
+const maskEmail = (e) => {
+  if (!e || !String(e).includes('@')) return null
+  const [u, d] = String(e).split('@')
+  return u.slice(0, 2) + '***@' + d
+}
+const ipDe = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || null
+const estadoEf = (v) => (v.estado === 'abierta' && new Date(v.cierre) <= new Date() ? 'cerrada' : v.estado)
+const errVot = (e) => String(e?.message || e || 'error').replace(/^VOT:\s*/, '')
+
+async function llamarEFVot(accion, body) {
+  try {
+    const r = await fetch(`${SUPA_URL}/functions/v1/votacion-notificar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SRV_KEY}`, 'apikey': SRV_KEY },
+      body: JSON.stringify({ accion, ...body }),
+    })
+    return await r.json().catch(() => ({ ok: false, error: 'respuesta_invalida' }))
+  } catch (e) { return { ok: false, error: String(e?.message || e) } }
+}
+
+function escrutinioPublico(esc) {
+  if (!esc) return null
+  return {
+    resultado: esc.resultado, ganador: esc.ganador || null,
+    total_uf: esc.total_uf, votos_emitidos: esc.votos_emitidos, participacion_pct_uf: esc.participacion_pct_uf,
+    opciones: (esc.opciones || []).map((o) => ({
+      opcion_id: o.opcion_id, clave: o.clave, etiqueta: o.etiqueta, uf: o.uf,
+      pct_uf: o.pct_uf, pct_coef: o.pct_coef, alcanza_mayoria: o.alcanza_mayoria,
+      unidades: (o.unidades || []).map((x) => x.etiqueta),
+    })),
+    no_voto: esc.no_voto ? { uf: esc.no_voto.uf, pct_uf: esc.no_voto.pct_uf, pct_coef: esc.no_voto.pct_coef } : null,
+  }
+}
+
+async function votAccion(req, res, uf, accion, isPost) {
+  const b = isPost ? (req.body || {}) : {}
+
+  if (accion === 'vot_listar') {
+    const [{ data: pads }, { data: con }] = await Promise.all([
+      db.from('con_votacion_padron').select('votacion_id, presente_asamblea, email').eq('unidad_id', uf.id),
+      db.from('con_consorcios').select('nombre').eq('id', uf.consorcio_id).single(),
+    ])
+    const base = { consorcio: con?.nombre || '', unidad: etiquetaUF(uf), votaciones: [] }
+    const ids = (pads || []).map((p) => p.votacion_id)
+    if (!ids.length) return res.status(200).json(base)
+    const [{ data: vots }, { data: opcs }, { data: votos }] = await Promise.all([
+      db.from('con_votaciones')
+        .select('id, consorcio_id, asamblea_id, tipo, titulo, descripcion, adjuntos, mayoria, apertura, cierre, estado, permite_cambio, requiere_otp, resultados_visibles, resultado_final')
+        .in('id', ids).in('estado', ['abierta', 'cerrada']).order('cierre', { ascending: false }),
+      db.from('con_votacion_opciones').select('id, votacion_id, orden, clave, etiqueta, detalle').in('votacion_id', ids).order('orden'),
+      db.from('con_votacion_votos').select('votacion_id, opcion_id, emitido_at, hash, origen').in('votacion_id', ids).eq('unidad_id', uf.id),
+    ])
+    const ahora = new Date()
+    for (const v of vots || []) {
+      if (v.consorcio_id !== uf.consorcio_id) continue
+      const pad = (pads || []).find((p) => p.votacion_id === v.id) || {}
+      const ef = estadoEf(v)
+      const mi = (votos || []).find((x) => x.votacion_id === v.id) || null
+      const enVentana = ef === 'abierta' && new Date(v.apertura) <= ahora
+      const bloqueoPresente = v.tipo === 'ausentes_2060' && pad.presente_asamblea
+      const puede_votar = enVentana && !bloqueoPresente && (!mi || v.permite_cambio) && (!v.requiere_otp || !!pad.email)
+      let resultados = null
+      if (v.resultados_visibles === 'siempre' || (v.resultados_visibles === 'al_cierre' && ef === 'cerrada')) {
+        let esc = v.resultado_final
+        if (!esc) { const { data } = await db.rpc('vot_escrutinio', { p_votacion_id: v.id }); esc = data }
+        resultados = escrutinioPublico(esc)
+      }
+      base.votaciones.push({
+        id: v.id, tipo: v.tipo, titulo: v.titulo, descripcion: v.descripcion, adjuntos: v.adjuntos || [],
+        mayoria: v.mayoria, apertura: v.apertura, cierre: v.cierre, estado: ef,
+        permite_cambio: v.permite_cambio, requiere_otp: v.requiere_otp,
+        presente_asamblea: !!pad.presente_asamblea, tiene_email: !!pad.email, email_mask: maskEmail(pad.email),
+        opciones: (opcs || []).filter((o) => o.votacion_id === v.id),
+        mi_voto: mi ? { opcion_id: mi.opcion_id, emitido_at: mi.emitido_at, hash: mi.hash, origen: mi.origen } : null,
+        puede_votar, resultados,
+      })
+    }
+    return res.status(200).json(base)
+  }
+
+  if (accion === 'vot_otp' && isPost) {
+    const { data: pad } = await db.from('con_votacion_padron').select('email')
+      .eq('votacion_id', b.votacion_id).eq('unidad_id', uf.id).maybeSingle()
+    if (!pad) return res.status(403).json({ error: 'La unidad no integra el padrón de esta votación' })
+    if (!pad.email) return res.status(422).json({ error: 'La unidad no tiene email registrado. Comuníquese con la administración.' })
+    const r = await llamarEFVot('otp', { votacion_id: b.votacion_id, unidad_id: uf.id })
+    if (!r?.ok) return res.status(400).json({ error: errVot(r?.error || 'No se pudo enviar el código') })
+    return res.status(200).json({ ok: true, email_mask: maskEmail(pad.email) })
+  }
+
+  if (accion === 'vot_emitir' && isPost) {
+    if (!b.votacion_id || !b.opcion_id) return res.status(400).json({ error: 'Faltan datos' })
+    let verificado = false
+    if (b.codigo) {
+      const { data: okOtp, error: eOtp } = await db.rpc('vot_otp_verificar', {
+        p_votacion_id: b.votacion_id, p_unidad_id: uf.id, p_codigo: String(b.codigo).trim(),
+      })
+      if (eOtp) return res.status(400).json({ error: errVot(eOtp) })
+      if (!okOtp) return res.status(400).json({ error: 'Código incorrecto o vencido' })
+      verificado = true
+    }
+    const { data: voto, error } = await db.rpc('vot_emitir', {
+      p_votacion_id: b.votacion_id, p_unidad_id: uf.id, p_opcion_id: b.opcion_id,
+      p_origen: 'portal', p_ip: ipDe(req), p_user_agent: String(req.headers['user-agent'] || ''),
+      p_email_verificado: verificado, p_nota: null,
+    })
+    if (error) return res.status(400).json({ error: errVot(error) })
+    const cons = await llamarEFVot('constancia', { votacion_id: b.votacion_id, unidad_id: uf.id })
+    return res.status(200).json({
+      ok: true, emitido_at: voto?.emitido_at, hash: voto?.hash,
+      constancia_enviada: !!cons?.email_enviado,
+    })
+  }
+
+  return res.status(400).json({ error: 'accion_desconocida' })
+}
+
 export default async function handler(req, res) {
   try {
     if (!SUPA_URL || !SRV_KEY) return res.status(500).json({ error: 'config' })
@@ -57,8 +180,18 @@ export default async function handler(req, res) {
 
     // G (2026-09-24): el Portal es SOLO para consorcios nativos (con_consorcios.portal_habilitado).
     // Los históricos acceden recién cuando se migran. Se corta antes de exponer cualquier dato.
-    const { data: habil } = await db.from('con_consorcios').select('portal_habilitado').eq('id', uf.consorcio_id).single()
-    if (!habil?.portal_habilitado) return res.status(403).json({ error: 'portal_no_habilitado' })
+    // §60 (2026-10-12): EXCEPCIÓN acotada — las acciones vot_* (página /votar) valen para TODOS los
+    // consorcios. Solo exponen las votaciones del consorcio en cuyo padrón figura la UF del token;
+    // ningún dato de cta cte, expensas ni pagos.
+    const esVot = String(accion).startsWith('vot_')
+    if (esVot && scope !== 'full') return res.status(403).json({ error: 'scope' })
+    if (!esVot) {
+      const { data: habil } = await db.from('con_consorcios').select('portal_habilitado').eq('id', uf.consorcio_id).single()
+      if (!habil?.portal_habilitado) return res.status(403).json({ error: 'portal_no_habilitado' })
+    }
+
+    // ── §60 vot_*: Votaciones (consulta / art. 2060 / art. 2059) ──
+    if (esVot) return await votAccion(req, res, uf, accion, isPost)
 
     // ── init: carga inicial del portal ──
     if (accion === 'init') {
