@@ -11,6 +11,7 @@ import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
 import { SUPA_URL, AZ, VD, RJ, AM, GR } from '../../lib/config'
 import { exportarExcel } from '../../lib/exportExcel'
+import { LOGO_ADM_B64 } from '../../lib/logo'
 import { Btn, BtnSec, Card, Msg } from '../../components/ui'
 
 const TZ = 'America/Argentina/Buenos_Aires'
@@ -627,6 +628,144 @@ export default function Votaciones() {
     })
   }
 
+  // §60.11 Encabezado común de documentos (logo oficial lib/logo.js, mismo criterio que exportarPDF)
+  function encabezadoDoc(titulo, subtitulo) {
+    return `<div style="display:flex;align-items:center;gap:14px;border-bottom:3px solid #1A3FA0;padding-bottom:8px;margin-bottom:12px">
+<img src="${LOGO_ADM_B64}" style="height:56px;width:auto;object-fit:contain"/>
+<div style="flex:1">
+<div style="font-family:Georgia,serif;font-size:16px;font-weight:700;color:#133F58">${esc(titulo)}</div>
+${subtitulo ? `<div style="font-size:12px;color:#374151">${esc(subtitulo)}</div>` : ''}
+<div style="font-size:12px"><strong>${esc(consorcioActivo?.nombre || '')}</strong>${consorcioActivo?.cuit ? ' · CUIT ' + esc(consorcioActivo.cuit) : ''}${consorcioActivo?.direccion ? ' · ' + esc(consorcioActivo.direccion) : ''}</div>
+<div style="font-size:11px;color:#555">Administración: ${esc(adminPerfil?.nombre || 'Administración de Consorcios Pinamar')}${adminPerfil?.matricula_rpac ? ' — R.P.A.C. N° ' + esc(adminPerfil.matricula_rpac) : ''}</div>
+</div></div>`
+  }
+
+  // §60.11 Escrutinio consolidado de todos los puntos de una asamblea (Excel y PDF)
+  async function datosConsolidado() {
+    const asm = asambleas.find((a) => a.id === detalle.asamblea_id)
+    const { data: vs } = await supabase.from('con_votaciones').select('*')
+      .eq('asamblea_id', detalle.asamblea_id).eq('consorcio_id', consorcioId).neq('estado', 'anulada').order('created_at')
+    const lista2 = vs || []
+    if (!lista2.length) return null
+    const ids = lista2.map((x) => x.id)
+    const [{ data: pad }, { data: vts }, { data: ops }] = await Promise.all([
+      supabase.from('con_votacion_padron').select('votacion_id, unidad_id, etiqueta, propietario_nombre, coeficiente, presente_asamblea').in('votacion_id', ids),
+      supabase.from('con_votacion_votos').select('votacion_id, unidad_id, opcion_id, origen, emitido_at, nota').in('votacion_id', ids),
+      supabase.from('con_votacion_opciones').select('id, votacion_id, clave, etiqueta').in('votacion_id', ids),
+    ])
+    const puntos = []
+    for (const v of lista2) {
+      let e = v.estado === 'cerrada' ? v.resultado_final : null
+      if (!e && v.estado !== 'borrador') { const { data } = await supabase.rpc('vot_escrutinio', { p_votacion_id: v.id }); e = data }
+      const corto = String(v.titulo || '').split('—').pop().trim() || v.titulo
+      puntos.push({ v, e, corto: corto.length > 40 ? corto.slice(0, 38) + '…' : corto })
+    }
+    const opDe = new Map((ops || []).map((o) => [o.id, o]))
+    const votoDe = new Map((vts || []).map((x) => [x.votacion_id + '|' + x.unidad_id, x]))
+    const ufs = new Map()
+    for (const p of pad || []) if (!ufs.has(p.unidad_id)) ufs.set(p.unidad_id, p)
+    const filas = [...ufs.values()].sort((a, b) => String(a.etiqueta).localeCompare(String(b.etiqueta), 'es', { numeric: true })).map((u) => {
+      const celdas = puntos.map(({ v }) => {
+        const pv = (pad || []).find((x) => x.votacion_id === v.id && x.unidad_id === u.unidad_id)
+        const x = votoDe.get(v.id + '|' + u.unidad_id)
+        if (x) {
+          const o = opDe.get(x.opcion_id)
+          return { txt: o?.clave === 'si' ? 'SÍ' : o?.clave === 'no' ? 'NO' : o?.clave === 'abstencion' ? 'ABST.' : (o?.etiqueta || '?'), clave: o?.clave, origen: x.origen, nota: x.nota, emitido_at: x.emitido_at }
+        }
+        if (v.estado === 'borrador') return { txt: '', clave: null }
+        if (v.tipo === 'ausentes_2060' && !pv?.presente_asamblea) return { txt: v.silencio_positivo !== false ? 'S/C' : 'S/C*', clave: 'silencio' }
+        return { txt: '—', clave: null }
+      })
+      const mails = celdas.filter((c) => c.origen === 'admin' && c.nota)
+      const prim = mails.sort((a, b) => String(a.emitido_at).localeCompare(String(b.emitido_at)))[0]
+      return { uf: u.etiqueta, propietario: u.propietario_nombre || '', coef: u.coeficiente, presente: !!u.presente_asamblea, celdas,
+        respaldo: [...new Set(mails.map((c) => c.nota))].join(' / '), recibido: prim ? fF(prim.emitido_at) : '' }
+    })
+    return { asm, puntos, filas }
+  }
+
+  async function consolidadoExcel() {
+    setOcupado(true)
+    const d = await datosConsolidado()
+    setOcupado(false)
+    if (!d) return setMsg({ tipo: 'warn', texto: 'No hay votaciones vinculadas a esta asamblea' })
+    const columnas = [{ key: 'uf', label: 'UF' }, { key: 'propietario', label: 'Propietario' }, { key: 'coef', label: 'Coeficiente' }, { key: 'pres', label: 'Presente asamblea' }]
+      .concat(d.puntos.map((p, i) => ({ key: 'p' + i, label: p.corto })))
+      .concat([{ key: 'recibido', label: 'Mail recibido' }, { key: 'respaldo', label: 'Respaldo' }])
+    const filas = d.filas.map((f) => {
+      const r = { uf: f.uf, propietario: f.propietario, coef: f.coef, pres: f.presente ? 'SÍ' : '', recibido: f.recibido, respaldo: f.respaldo }
+      f.celdas.forEach((c, i) => { r['p' + i] = c.txt })
+      return r
+    })
+    const resumen = (lbl, fn) => { const r = { uf: '', propietario: lbl, coef: '', pres: '', recibido: '', respaldo: '' }; d.puntos.forEach((p, i) => { r['p' + i] = fn(p) }); return r }
+    const a = (p) => p.e?.art2060
+    filas.push(resumen('', () => ''))
+    filas.push(resumen('A favor (UF)', (p) => (a(p) ? `${a(p).favor.uf} (${a(p).favor.pct_uf}%)` : '')))
+    filas.push(resumen('A favor (% porcentuales)', (p) => (a(p) ? `${a(p).favor.pct_coef}%` : '')))
+    filas.push(resumen('Oposición (UF)', (p) => (a(p) ? `${a(p).oposicion.uf} (${a(p).oposicion.pct_uf}%)` : '')))
+    filas.push(resumen('Oposición (% porcentuales)', (p) => (a(p) ? `${a(p).oposicion.pct_coef}%` : '')))
+    filas.push(resumen('Resultado', (p) => RESULTADO[p.e?.resultado] || p.e?.resultado || (p.v.estado === 'borrador' ? 'Borrador' : '')))
+    filas.push(resumen('Referencias: S/C = sin contestación (silencio computado a favor, art. 263); S/C* = silencio no computable (art. 2061); ABST. = abstención', () => ''))
+    exportarExcel({ titulo: `Escrutinio consolidado Asamblea ${fDf(d.asm?.fecha)} - ${consorcioActivo?.nombre || ''}`, columnas, filas })
+  }
+
+  async function consolidadoPDF() {
+    setOcupado(true)
+    const d = await datosConsolidado()
+    setOcupado(false)
+    if (!d) return setMsg({ tipo: 'warn', texto: 'No hay votaciones vinculadas a esta asamblea' })
+    const asm = d.asm, v0 = d.puntos[0].v
+    const color = (c) => (c === 'si' ? '#166534' : c === 'no' ? '#B91C1C' : c === 'silencio' ? '#1A3FA0' : '#555')
+    const cab = d.puntos.map((p, i) => `<th class="c" title="${esc(p.v.titulo)}">${i + 1}</th>`).join('')
+    const filasH = d.filas.map((f, k) => `<tr style="background:${f.presente ? '#eef4ff' : (k % 2 ? '#fafafa' : '#fff')}"><td><strong>${esc(f.uf)}</strong></td><td>${esc(f.propietario)}</td><td class="n">${esc(f.coef)}</td><td class="c">${f.presente ? '●' : ''}</td>${
+      f.celdas.map((c) => `<td class="c" style="color:${color(c.clave)};font-weight:700">${esc(c.txt)}</td>`).join('')}<td style="font-size:8px">${esc(f.respaldo)}${f.recibido ? '<br><span style="color:#777">' + esc(f.recibido) + '</span>' : ''}</td></tr>`).join('')
+    const tot = (lbl, fn, bold) => `<tr style="${bold ? 'font-weight:700;' : ''}background:#E8F0F5"><td colspan="4" style="text-align:right">${lbl}</td>${d.puntos.map((p) => `<td class="c">${fn(p)}</td>`).join('')}<td></td></tr>`
+    const a = (p) => p.e?.art2060
+    const pies = tot('A favor — UF / % UF', (p) => (a(p) ? `${a(p).favor.uf}<br>${a(p).favor.pct_uf}%` : '')) +
+      tot('A favor — % porcentuales', (p) => (a(p) ? `${a(p).favor.pct_coef}%` : '')) +
+      tot('Oposición — UF / % UF', (p) => (a(p) ? `${a(p).oposicion.uf}<br>${a(p).oposicion.pct_uf}%` : '')) +
+      tot('Oposición — % porcentuales', (p) => (a(p) ? `${a(p).oposicion.pct_coef}%` : '')) +
+      tot('Resultado', (p) => (APROB.includes(p.e?.resultado) ? '<span style="color:#166534">APROBADO</span>' : p.e?.resultado === 'en_curso' ? 'En curso' : p.v.estado === 'borrador' ? 'Borrador' : '<span style="color:#B91C1C">DESAPROBADO</span>'), true)
+    const puntosH = d.puntos.map((p, i) => {
+      const A6 = a(p)
+      return `<tr><td class="c"><strong>${i + 1}</strong></td><td>${esc(p.v.titulo)}${p.v.descripcion ? '<div style="color:#555;font-size:9px">' + esc(p.v.descripcion) + '</div>' : ''}</td>
+<td class="n">${A6 ? `${A6.presentes.si.uf} / ${A6.ausentes.si.uf} / ${A6.ausentes.silencio.uf}` : '—'}</td>
+<td class="n">${A6 ? `${A6.favor.uf} UF · ${A6.favor.pct_uf}% · ${A6.favor.pct_coef}%` : '—'}</td>
+<td class="n">${A6 ? `${A6.oposicion.uf} UF · ${A6.oposicion.pct_uf}% · ${A6.oposicion.pct_coef}%` : '—'}</td>
+<td>${A6 ? (A6.oposicion.mayoria_suficiente ? 'Sí' : 'No') : '—'}</td>
+<td><strong>${esc(RESULTADO[p.e?.resultado] || p.e?.resultado || '')}</strong></td></tr>`
+    }).join('')
+    const cerrados = d.puntos.filter((p) => p.v.estado === 'cerrada' && p.e)
+    const nota = cerrados.length ? textoNotaCierre(cerrados.map((p) => ({ v: p.v, e: p.e })), asm, adminPerfil) : ''
+    const pres = (asm?.unidades_presentes || []).length
+    const sub = `Asamblea ${asm?.tipo === 'ordinaria' ? 'Ordinaria' : 'Extraordinaria'} del ${fDf(asm?.fecha)} — ${pres} UF presentes${v0.tipo === 'ausentes_2060' ? ` · Notificación a ausentes ${fD(v0.apertura)} · Plazo vencido ${fF(v0.cierre)}` : ''}`
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Escrutinio consolidado — ${esc(consorcioActivo?.nombre || '')}</title><style>
+*{box-sizing:border-box}body{font-family:Calibri,Arial,sans-serif;font-size:10px;color:#111;margin:0}
+.page{padding:8mm 9mm}@page{size:A4 landscape;margin:0}
+@media print{.no-print{display:none!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+h2{font-family:Georgia,serif;font-size:12px;color:#133F58;margin:12px 0 5px;border-bottom:1px solid #133F58;padding-bottom:2px}
+table{width:100%;border-collapse:collapse}th,td{border:1px solid #cbd5e1;padding:3px 5px;text-align:left;vertical-align:top}
+th{background:#133F58;color:#fff;font-size:9px}td.n{text-align:right;white-space:nowrap}td.c,th.c{text-align:center}
+thead{display:table-header-group}tr{page-break-inside:avoid}
+.btn{display:block;margin:10px auto;padding:8px 22px;background:#1A3FA0;color:#fff;border:none;border-radius:5px;font-size:13px;cursor:pointer}
+.foot{margin-top:10px;border-top:1px solid #ccc;padding-top:3px;font-size:8px;color:#666;display:flex;justify-content:space-between}
+</style></head><body><button class="btn no-print" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button><div class="page">
+${encabezadoDoc('ESCRUTINIO CONSOLIDADO — ' + d.puntos.length + ' PUNTOS', sub)}
+<h2>Puntos sometidos a votación</h2>
+<table><thead><tr><th class="c">N°</th><th>Punto / propuesta</th><th>SÍ pres. / SÍ aus. / S/C</th><th>A favor (UF · %UF · %coef.)</th><th>Oposición (UF · %UF · %coef.)</th><th>Mayoría suficiente para revertir</th><th>Resultado</th></tr></thead><tbody>${puntosH}</tbody></table>
+<h2>Detalle por unidad funcional</h2>
+<table><thead><tr><th>UF</th><th>Propietario</th><th>Coef.</th><th class="c">Pres.</th>${cab}<th>Respaldo (mail) / recibido</th></tr></thead><tbody>${filasH}</tbody><tfoot>${pies}</tfoot></table>
+<div style="font-size:9px;color:#555;margin-top:5px">Referencias: ● presente en la asamblea · SÍ / NO / ABST. voto expreso · S/C sin contestación del ausente dentro del plazo (silencio computado a favor, art. 263 CCyC) · S/C* silencio no computable (art. 2061 CCyC) · Porcentajes sobre la totalidad de las unidades y de los porcentuales del Reglamento (art. 2060 CCyC).</div>
+${nota ? `<h2>Nota de cierre</h2><p style="white-space:pre-wrap;line-height:1.5;font-size:11px">${esc(nota)}</p>` : ''}
+<div class="foot"><span>${esc(consorcioActivo?.nombre || '')} — Escrutinio consolidado asamblea ${fDf(asm?.fecha)}</span><span>R.P.A.C. N° ${esc(adminPerfil?.matricula_rpac || '83')} | Administración Pinamar</span><span>Generado ${fF(new Date().toISOString())}</span></div>
+</div></body></html>`
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const w = window.open(url, '_blank')
+    if (!w) setMsg({ tipo: 'warn', texto: 'Habilite las ventanas emergentes para ver el PDF' })
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  }
+
   function actaPDF() {
     if (!esc_) return
     const e = esc_
@@ -656,9 +795,7 @@ ${f6('Abstenciones', { uf: A6.presentes.abstencion.uf + A6.ausentes.abstencion.u
 h2{font-family:Georgia,serif;font-size:13px;color:#133F58;margin:16px 0 6px;border-bottom:1px solid #133F58;padding-bottom:2px}
 table{width:100%;border-collapse:collapse}th,td{border:1px solid #cbd5e1;padding:4px 6px;text-align:left}th{background:#E8F0F5}
 td.n{text-align:right}.k{color:#555}.box{border:1px solid #133F58;padding:8px;margin-top:8px}@media print{body{margin:10mm}}</style></head><body>
-<h1>ACTA DE ESCRUTINIO — ${esc(estadoTxt)}</h1>
-<div><strong>${esc(consorcioActivo?.nombre || '')}</strong>${consorcioActivo?.cuit ? ' · CUIT ' + esc(consorcioActivo.cuit) : ''}${consorcioActivo?.direccion ? ' · ' + esc(consorcioActivo.direccion) : ''}</div>
-<div class="k">Administración: ${esc(adminPerfil?.nombre || '')}${adminPerfil?.matricula_rpac ? ' — RPAC N° ' + esc(adminPerfil.matricula_rpac) : ''}</div>
+${encabezadoDoc('ACTA DE ESCRUTINIO — ' + estadoTxt)}
 <h2>Votación</h2>
 <table><tr><th style="width:28%">Asunto</th><td>${esc(detalle.titulo)}</td></tr>
 <tr><th>Tipo</th><td>${esc(TIPOS[detalle.tipo]?.l || detalle.tipo)}${detalle.modalidad === 'registro' ? ' — registro manual de votos recibidos por medios fehacientes (mail / nota)' : ''}</td></tr>
@@ -906,7 +1043,9 @@ ${filas.map((f) => `<tr><td>${esc(f.uf)}</td><td>${esc(f.propietario)}</td><td c
 
         {puedeOperar && d.estado !== 'anulada' && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-            <BtnSec small onClick={() => duplicar(d)}>📄 Duplicar para otro punto</BtnSec>
+            {d.asamblea_id && <Btn small color={VD} onClick={consolidadoExcel} disabled={ocupado}>📊 Excel consolidado (todos los puntos)</Btn>}
+            {d.asamblea_id && <Btn small color={GR} onClick={consolidadoPDF} disabled={ocupado} style={{ marginLeft: 6 }}>🖨️ PDF consolidado</Btn>}
+            <BtnSec small onClick={() => duplicar(d)} style={{ marginLeft: 6 }}>📄 Duplicar para otro punto</BtnSec>
           </div>
         )}
 
