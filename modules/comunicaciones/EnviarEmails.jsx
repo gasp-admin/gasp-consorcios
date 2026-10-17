@@ -240,7 +240,7 @@ export default function EnviarEmails() {
                     <span style={{ fontSize:12, flex:1 }}>
                       <strong>UF {u.numero}</strong> {u.piso?`· Piso ${u.piso}`:''} — {cp?.apellido_nombre||'Sin propietario'}
                     </span>
-                    <span style={{ fontSize:10, color:GR }}>{cp?.email_notificacion||cp?.email||''}</span>
+                    <span style={{ fontSize:10, color:GR }}>{cp?.email_notificacion||cp?.email||''}{u.ocupante_recibe_liquidacion && (u.ocupante_email||'').trim() ? <span style={{ color:'#7c3aed' }} title={u.ocupante_email}> + 🏠 ocupante</span> : null}</span>
                   </label>
                 )
               })}
