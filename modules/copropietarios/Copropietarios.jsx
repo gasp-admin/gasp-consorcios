@@ -1,5 +1,9 @@
 // modules — Copropietarios.jsx
 // Extraído del V59. Refactorizado: props → useApp(). Cero cambios de comportamiento.
+// 2026-10-17: Ocupante POR UF. La solapa "Ocupante / Inquilino" edita con_unidades.ocupante_*
+//   (una ficha por cada UF del propietario) + flags ocupante_recibe_liquidacion / ocupante_recibe_avisos
+//   que leen enviar-liquidacion v13 y enviar-notificacion v10 (BCC informativo).
+//   Los campos viejos con_copropietarios.*_ocupante quedan solo lectura ("dato anterior").
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
@@ -18,7 +22,7 @@ function ufNum(u) {
 }
 
 export default function Copropietarios() {
-  const { session, consorcioActivo, copropietarios, setCopropietarios, unidades, expensas, puede } = useApp()
+  const { session, consorcioActivo, copropietarios, setCopropietarios, unidades, setUnidades, expensas, puede } = useApp()
   const consorcioId = consorcioActivo?.id
   const uid = session?.user?.id
 
@@ -28,13 +32,25 @@ export default function Copropietarios() {
   const [msg, setMsg] = useState(null)
   const [tabForm, setTabForm] = useState('principal')
   const [busqueda, setBusqueda] = useState('')
+  const [ocup, setOcup] = useState({}) // unidad_id → { ocupante_* } (edición por UF)
   const F = f => setForm(x => ({ ...x, ...f }))
+  const FO = (ufId, f) => setOcup(x => ({ ...x, [ufId]: { ...(x[ufId] || {}), ...f } }))
+  const OCUP_KEYS = ['ocupante_nombre', 'ocupante_email', 'ocupante_telefono', 'ocupante_recibe_liquidacion', 'ocupante_recibe_avisos']
+  const ocupDe = uf => Object.fromEntries(OCUP_KEYS.map(k => [k, k.startsWith('ocupante_recibe') ? !!uf?.[k] : (uf?.[k] || '')]))
+
+  function abrirForm(cp) {
+    setForm(cp ? { ...cp } : {})
+    setTabForm('principal')
+    const m = {}
+    for (const uf of (cp ? (ufsMap[cp.id] || []) : [])) m[uf.id] = ocupDe(uf)
+    setOcup(m)
+  }
 
   async function cargar() {
     const [{ data: cpData }, { data: ufData }] = await Promise.all([
       supabase.from('con_copropietarios').select('*')
         .eq('admin_id', uid).eq('consorcio_id', consorcioId).order('apellido_nombre'),
-      supabase.from('con_unidades').select('id, numero, propietario_id, tipo, piso, nro_uf_pdf')
+      supabase.from('con_unidades').select('id, numero, propietario_id, tipo, piso, nro_uf_pdf, ' + OCUP_KEYS.join(', '))
         .eq('consorcio_id', consorcioId).eq('estado', 'ocupada').order('numero')
     ])
     const cps = cpData || []
@@ -58,7 +74,27 @@ export default function Copropietarios() {
     const { error } = await supabase.from('con_copropietarios').upsert(
       { ...form, id, admin_id:uid, consorcio_id:consorcioId }, { onConflict:'id' })
     if (error) return setMsg({ tipo:'error', texto:error.message })
-    setForm(null); setMsg({ tipo:'ok', texto:'✓ Guardado' }); cargar()
+
+    // Ocupante por UF: solo las UF de este propietario cuyo dato cambió
+    const ufsProp = form.id ? (ufsMap[form.id] || []) : []
+    const cambios = ufsProp
+      .map(uf => ({ uf, nuevo: ocup[uf.id] }))
+      .filter(({ uf, nuevo }) => nuevo && OCUP_KEYS.some(k => ocupDe(uf)[k] !== nuevo[k]))
+    for (const { uf, nuevo } of cambios) {
+      const payload = {
+        ocupante_nombre:   (nuevo.ocupante_nombre || '').trim() || null,
+        ocupante_email:    (nuevo.ocupante_email || '').trim() || null,
+        ocupante_telefono: (nuevo.ocupante_telefono || '').trim() || null,
+        ocupante_recibe_liquidacion: !!nuevo.ocupante_recibe_liquidacion,
+        ocupante_recibe_avisos:      !!nuevo.ocupante_recibe_avisos,
+      }
+      const { error: eUf } = await supabase.from('con_unidades').update(payload)
+        .eq('id', uf.id).eq('consorcio_id', consorcioId)
+      if (eUf) return setMsg({ tipo:'error', texto:`Propietario guardado, pero falló el ocupante de UF ${uf.numero}: ${eUf.message}` })
+      // Mantener sincronizado el contexto (lo usan las pantallas de envío)
+      if (setUnidades) setUnidades(prev => (prev || []).map(u => u.id === uf.id ? { ...u, ...payload } : u))
+    }
+    setForm(null); setOcup({}); setMsg({ tipo:'ok', texto: cambios.length ? `✓ Guardado (ocupante actualizado en ${cambios.length} UF)` : '✓ Guardado' }); cargar()
   }
   async function eliminar(id) {
     if (!puede('editar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite editar datos.' })
@@ -137,7 +173,7 @@ export default function Copropietarios() {
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
         <div style={{ fontWeight:700, fontSize:15 }}>Copropietarios ({lista.length})</div>
-        <Btn onClick={() => { setForm({}); setTabForm('principal') }}>+ Agregar</Btn>
+        <Btn onClick={() => abrirForm(null)}>+ Agregar</Btn>
       </div>
       <BarraListado busqueda={busqueda} onBuscar={setBusqueda} onPDF={handlePDF} onExcel={handleExcel} placeholder="Buscar por nombre, DNI, email..." />
       <Msg data={msg} />
@@ -183,18 +219,71 @@ export default function Copropietarios() {
             </div>
           )}
 
-          {tabForm==='ocupante' && (
+          {tabForm==='ocupante' && (() => {
+            const ufsProp = form.id ? (ufsMap[form.id] || []) : []
+            const legado = [form.nombre_ocupante, form.email_ocupante, form.telefono_ocupante].filter(x => (x || '').trim())
+            return (
             <div>
-              <div style={{ fontSize:12, color:GR, marginBottom:12, background:'#f0f9ff', padding:'8px 12px', borderRadius:6 }}>
-                Complete estos datos si la unidad está alquilada. El inquilino recibirá notificaciones a su propio email/teléfono.
+              <div style={{ fontSize:12, color:GR, marginBottom:12, background:'#f0f9ff', padding:'8px 12px', borderRadius:6, lineHeight:1.5 }}>
+                El ocupante se carga <strong>por unidad</strong>. Si tilda las casillas, recibe una <strong>copia informativa</strong> (en copia oculta) de la liquidación — con el link al portal de esa UF — y/o de las notificaciones.
+                Las convocatorias a asamblea y las votaciones se dirigen solo al propietario.
               </div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
-                <div style={{ gridColumn:'span 2' }}><Input label="Nombre del ocupante / inquilino" value={form.nombre_ocupante||''} onChange={v=>F({nombre_ocupante:v})} /></div>
-                <Input label="Email del ocupante" value={form.email_ocupante||''} onChange={v=>F({email_ocupante:v})} type="email" />
-                <Input label="Teléfono del ocupante" value={form.telefono_ocupante||''} onChange={v=>F({telefono_ocupante:v})} />
-              </div>
+
+              {legado.length > 0 && (
+                <div style={{ fontSize:12, marginBottom:12, background:'#fffbeb', border:'1px solid #fde68a', padding:'8px 12px', borderRadius:6, color:'#92400e' }}>
+                  <strong>Dato anterior (cargado por propietario, no se usa para envíos):</strong> {legado.join(' · ')}
+                  {ufsProp.length > 0 && <div style={{ marginTop:4 }}>Use “Copiar dato anterior” en la UF que corresponda.</div>}
+                </div>
+              )}
+
+              {!form.id && (
+                <div style={{ fontSize:12, color:GR, marginBottom:12 }}>Guarde primero el copropietario y asígnele la unidad desde <strong>Unidades</strong>; luego podrá cargar el ocupante de cada UF.</div>
+              )}
+              {form.id && ufsProp.length === 0 && (
+                <div style={{ fontSize:12, color:GR, marginBottom:12 }}>Este copropietario no tiene unidades asignadas.</div>
+              )}
+
+              {ufsProp.map(uf => {
+                const o = ocup[uf.id] || ocupDe(uf)
+                const idL = `ocl-${uf.id}`, idA = `oca-${uf.id}`
+                return (
+                  <div key={uf.id} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:12, marginBottom:10 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8, gap:8, flexWrap:'wrap' }}>
+                      <div style={{ fontWeight:700, fontSize:13, color:AZ }}>UF {ufNum(uf)} · {uf.numero}{uf.tipo ? ` · ${uf.tipo}` : ''}</div>
+                      {legado.length > 0 && (
+                        <button type="button" onClick={() => FO(uf.id, {
+                            ocupante_nombre:   form.nombre_ocupante || '',
+                            ocupante_email:    form.email_ocupante || '',
+                            ocupante_telefono: form.telefono_ocupante || '' })}
+                          style={{ fontSize:11, padding:'3px 8px', border:'1px solid #fde68a', background:'#fffbeb', color:'#92400e', borderRadius:6, cursor:'pointer' }}>
+                          Copiar dato anterior
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:8 }}>
+                      <div style={{ gridColumn:'span 2' }}><Input label="Nombre del ocupante / inquilino" value={o.ocupante_nombre} onChange={v=>FO(uf.id,{ocupante_nombre:v})} /></div>
+                      <Input label="Email(s) del ocupante (separe con ;)" value={o.ocupante_email} onChange={v=>FO(uf.id,{ocupante_email:v})} />
+                      <Input label="Teléfono del ocupante" value={o.ocupante_telefono} onChange={v=>FO(uf.id,{ocupante_telefono:v})} />
+                    </div>
+                    <div style={{ display:'flex', gap:18, flexWrap:'wrap', fontSize:12 }}>
+                      <label htmlFor={idL} style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer' }}>
+                        <input id={idL} type="checkbox" checked={!!o.ocupante_recibe_liquidacion} onChange={e=>FO(uf.id,{ocupante_recibe_liquidacion:e.target.checked})} />
+                        Recibe copia de la liquidación
+                      </label>
+                      <label htmlFor={idA} style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer' }}>
+                        <input id={idA} type="checkbox" checked={!!o.ocupante_recibe_avisos} onChange={e=>FO(uf.id,{ocupante_recibe_avisos:e.target.checked})} />
+                        Recibe copia de notificaciones
+                      </label>
+                    </div>
+                    {(o.ocupante_recibe_liquidacion || o.ocupante_recibe_avisos) && !(o.ocupante_email || '').trim() && (
+                      <div style={{ fontSize:11, color:RJ, marginTop:6 }}>Tildó envío pero no cargó email: no se enviará nada al ocupante.</div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
-          )}
+            )
+          })()}
 
           {tabForm==='fiscal' && (
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
@@ -244,13 +333,18 @@ export default function Copropietarios() {
                 {cp.dni && <span>🪪 {cp.dni}</span>}
                 {cp.telefono && <span>📱 {cp.telefono}</span>}
                 {cp.email && <span>✉ {cp.email}</span>}
-                {cp.nombre_ocupante && <span style={{ color:'#7c3aed' }}>🏠 Ocup: {cp.nombre_ocupante}</span>}
+                {ufs.filter(u => u.ocupante_nombre || u.ocupante_email).map(u => (
+                  <span key={'oc'+u.id} style={{ color:'#7c3aed' }}>
+                    🏠 {ufs.length > 1 ? `UF ${ufNum(u)}: ` : ''}{u.ocupante_nombre || u.ocupante_email}
+                    {(u.ocupante_recibe_liquidacion || u.ocupante_recibe_avisos) ? ' ✉' : ''}
+                  </span>
+                ))}
                 {cp.cuit_cuil && <span>🏛 CUIT: {cp.cuit_cuil}</span>}
               </div>
             </div>
             <div style={{ display:'flex', gap:6, marginLeft:8, flexShrink:0 }}>
               {cp.telefono && <Btn small color='#25d366' onClick={() => window.open(`https://wa.me/549${(()=>{let n=(cp.telefono||'').replace(/\D/g,'');if(n.startsWith('549'))return n;if(n.startsWith('54'))return '9'+n.slice(2);if(n.startsWith('0'))n=n.slice(1);return n})()}`)}>WhatsApp</Btn>}
-              <Btn small onClick={() => { setForm({...cp}); setTabForm('principal') }} style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
+              <Btn small onClick={() => abrirForm(cp)} style={{ background:'#f3f4f6', color:'#374151' }}>✏</Btn>
               <Btn small onClick={() => eliminar(cp.id)} style={{ background:'#fee2e2', color:RJ }}>✕</Btn>
             </div>
           </Card>
