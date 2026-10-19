@@ -439,6 +439,7 @@ Esta acción no se puede deshacer fácilmente.`)) return
           fecha: hoy,
           notas: `Migrado desde: ${archivo?.name}`,
           estado: 'vigente',
+          afecta_caja: false, // (2026-10-19) ya incluido en la cabecera saldo_caja_final; no lo suma con_estado_financiero
         }])
       }
 
