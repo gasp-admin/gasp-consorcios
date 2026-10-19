@@ -44,6 +44,8 @@ export default function LiquidacionPeriodo() {
   const [cobradoActual, setCobradoActual]         = useState(0) // ingresos en término
   const [cobradoAdeudado, setCobradoAdeudado]     = useState(0) // ingresos por deuda
   const [cobradoInteres, setCobradoInteres]       = useState(0) // ingresos por intereses
+  const [ingresosVarios, setIngresosVarios]       = useState(0) // (2026-10-19) ingresos de Movimientos varios (RPC)
+  const [egresosVarios, setEgresosVarios]         = useState(0) // (2026-10-19) egresos de Movimientos varios (RPC)
   // Grupos y columnas de liquidación del consorcio activo
   const [gruposLiq, setGruposLiq]     = useState([])
   const [columnasLiq, setColumnasLiq] = useState([])
@@ -666,6 +668,8 @@ export default function LiquidacionPeriodo() {
     setCobradoActual(parseFloat(ef?.ingresos_termino)   || 0)
     setCobradoAdeudado(parseFloat(ef?.ingresos_adeudados) || 0)
     setCobradoInteres(parseFloat(ef?.ingresos_intereses)  || 0)
+    setIngresosVarios(parseFloat(ef?.ingresos_varios)     || 0)
+    setEgresosVarios(parseFloat(ef?.egresos_varios)       || 0)
 
     // Calcular fechas de vencimiento
     const exp_periodo = expSel?.periodo || ''
@@ -890,7 +894,7 @@ export default function LiquidacionPeriodo() {
   // U1: datos de la plantilla nativa (serializables; U2 los guarda al cierre)
   function datosPDFNativo() {
     return { consorcioActivo, expSel, gastos, distribucion, columnasLiq, gruposLiq, config, importesPorColumna,
-      saldoCajaAnterior, cobradoActual, cobradoAdeudado, cobradoInteres, notasPeriodo,
+      saldoCajaAnterior, cobradoActual, cobradoAdeudado, cobradoInteres, ingresosVarios, egresosVarios, notasPeriodo,
       adminPerfil: adminPerfil || {}, esPreliquidacion: expSel?.estado !== 'cerrada' }
   }
 
@@ -942,6 +946,8 @@ export default function LiquidacionPeriodo() {
         ingresos_adeudados: parseFloat(efC?.ingresos_adeudados) || 0,
         ingresos_intereses: parseFloat(efC?.ingresos_intereses) || 0,
         total_egresos:      parseFloat(efC?.total_egresos)      || 0,
+        ingresos_varios:    parseFloat(efC?.ingresos_varios)    || 0,
+        egresos_varios:     parseFloat(efC?.egresos_varios)     || 0,
       }).eq('id', expSel.id)
 
       // 2. Eliminar detalles anteriores si existen (recalculo)
