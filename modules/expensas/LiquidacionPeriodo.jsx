@@ -46,6 +46,7 @@ export default function LiquidacionPeriodo() {
   const [cobradoInteres, setCobradoInteres]       = useState(0) // ingresos por intereses
   const [ingresosVarios, setIngresosVarios]       = useState(0) // (2026-10-19) ingresos de Movimientos varios (RPC)
   const [egresosVarios, setEgresosVarios]         = useState(0) // (2026-10-19) egresos de Movimientos varios (RPC)
+  const [movsVarios, setMovsVarios]               = useState([]) // (2026-10-19) detalle por concepto (RPC con_movimientos_varios_ef)
   // Grupos y columnas de liquidación del consorcio activo
   const [gruposLiq, setGruposLiq]     = useState([])
   const [columnasLiq, setColumnasLiq] = useState([])
@@ -670,6 +671,11 @@ export default function LiquidacionPeriodo() {
     setCobradoInteres(parseFloat(ef?.ingresos_intereses)  || 0)
     setIngresosVarios(parseFloat(ef?.ingresos_varios)     || 0)
     setEgresosVarios(parseFloat(ef?.egresos_varios)       || 0)
+    // Detalle de movimientos varios (mismo criterio que la RPC) para itemizar el concepto en el EF
+    const { data: mvRows, error: mvErr } = await supabase
+      .rpc('con_movimientos_varios_ef', { p_consorcio_id: consorcioId, p_periodo: expSel?.periodo || '' })
+    if (mvErr) console.error('con_movimientos_varios_ef:', mvErr)
+    setMovsVarios(Array.isArray(mvRows) ? mvRows : [])
 
     // Calcular fechas de vencimiento
     const exp_periodo = expSel?.periodo || ''
@@ -894,7 +900,7 @@ export default function LiquidacionPeriodo() {
   // U1: datos de la plantilla nativa (serializables; U2 los guarda al cierre)
   function datosPDFNativo() {
     return { consorcioActivo, expSel, gastos, distribucion, columnasLiq, gruposLiq, config, importesPorColumna,
-      saldoCajaAnterior, cobradoActual, cobradoAdeudado, cobradoInteres, ingresosVarios, egresosVarios, notasPeriodo,
+      saldoCajaAnterior, cobradoActual, cobradoAdeudado, cobradoInteres, ingresosVarios, egresosVarios, movsVarios, notasPeriodo,
       adminPerfil: adminPerfil || {}, esPreliquidacion: expSel?.estado !== 'cerrada' }
   }
 
