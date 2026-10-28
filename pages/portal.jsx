@@ -542,9 +542,16 @@ export default function Portal() {
     : (detOrdenados[0] ? saldoDetReal(detOrdenados[0]) : 0)
   const estaAlDia = deudaReal <= 0.005
   const ultimoPago = cobranzas[0] || null
-  const cbu    = cuentaBanco?.cbu   || consorcio?.cbu   || null
-  const alias  = cuentaBanco?.alias || consorcio?.alias_cbu || '—'
-  const banco  = cuentaBanco?.banco || consorcio?.banco  || '—'
+  // Coordenadas de pago: misma fuente que el PDF de liquidación (con_consorcios),
+  // tomadas como bloque coherente (CBU + alias + banco de la MISMA cuenta). Solo si el
+  // consorcio no tiene CBU cargado se cae a la cuenta bancaria activa, también en bloque.
+  // No se mezclan campos de distintas fuentes (causa del CBU Roela + alias Macro en CON006).
+  const fuentePago = (consorcio?.cbu || '').trim()
+    ? { cbu: consorcio.cbu, alias: consorcio.alias_cbu, banco: consorcio.banco }
+    : { cbu: cuentaBanco?.cbu, alias: cuentaBanco?.alias, banco: cuentaBanco?.banco }
+  const cbu    = (fuentePago.cbu   || '').trim() || null
+  const alias  = (fuentePago.alias || '').trim() || '—'
+  const banco  = (fuentePago.banco || '').trim() || '—'
   const bloqueComoPagar = (interfast?.cvu || cbu) ? (
     <div style={{ background:'#fff', borderRadius:14, padding:'18px 20px',
       marginBottom:14, border:'1.5px solid #dbeafe', boxShadow:'0 2px 8px #0001' }}>
