@@ -32,7 +32,18 @@ export async function saveConsorcio(form, adminId) {
   }
 }
 export async function setArchivadoConsorcio(id, archivado) {
+  // Al archivar (entrega a otra administración) también se da de baja el link del Portal
+  // de Propietarios (portal_habilitado=false) → el link queda inerte pero el portal_token
+  // de cada UF se conserva intacto. Al reactivar se re-habilita el portal SOLO si el
+  // consorcio es nativo (fecha_corte_nativo IS NOT NULL); los históricos no migrados
+  // nunca tuvieron portal y quedan como estaban.
   const patch = { archivado, archivado_at: archivado ? new Date().toISOString() : null }
+  if (archivado) {
+    patch.portal_habilitado = false
+  } else {
+    const { data: c } = await supabase.from('con_consorcios').select('fecha_corte_nativo').eq('id', id).single()
+    if (c?.fecha_corte_nativo) patch.portal_habilitado = true
+  }
   const { error } = await supabase.from('con_consorcios').update(patch).eq('id', id)
   if (error) throw error
 }
