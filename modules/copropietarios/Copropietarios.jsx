@@ -21,6 +21,29 @@ function ufNum(u) {
   return isNaN(n) ? (u?.nro_uf_pdf ?? '—') : n
 }
 
+// 2026-10-30: listados con TODOS los mails (principal, secundario, notificaciones,
+// ocupante por UF y ocupante "dato anterior" de la ficha). Separador ; o , en origen.
+const splitMails = s => String(s || '').split(/[;,]/).map(x => x.trim()).filter(Boolean)
+const escH = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+function mailsDe(cp, ufs) {
+  const grupos = [
+    { tipo:'Principal',     mails: splitMails(cp.email) },
+    { tipo:'Secundario',    mails: splitMails(cp.email_secundario) },
+    { tipo:'Notificaciones', mails: splitMails(cp.email_notificacion) },
+  ]
+  for (const u of (ufs || [])) {
+    const m = splitMails(u.ocupante_email)
+    if (!m.length && !u.ocupante_nombre) continue
+    const envia = [u.ocupante_recibe_liquidacion && 'liq.', u.ocupante_recibe_avisos && 'avisos'].filter(Boolean).join('+')
+    grupos.push({ tipo:`Ocupante UF ${ufNum(u)}`, nombre: u.ocupante_nombre || '', mails: m, envia })
+  }
+  const ant = splitMails(cp.email_ocupante)
+  if (ant.length || cp.nombre_ocupante) grupos.push({ tipo:'Ocupante (dato anterior)', nombre: cp.nombre_ocupante || '', mails: ant })
+  const vistos = new Set(), todos = []
+  for (const g of grupos) for (const m of g.mails) { const k = m.toLowerCase(); if (!vistos.has(k)) { vistos.add(k); todos.push(m) } }
+  return { grupos: grupos.filter(g => g.mails.length || g.nombre), todos }
+}
+
 export default function Copropietarios() {
   const { session, consorcioActivo, copropietarios, setCopropietarios, unidades, setUnidades, expensas, puede } = useApp()
   const consorcioId = consorcioActivo?.id
@@ -123,19 +146,26 @@ export default function Copropietarios() {
         {key:'ufs',     label:'UFs'},
         {key:'dni',     label:'DNI'},
         {key:'tel',     label:'Teléfono'},
-        {key:'email',   label:'Email'},
+        {key:'email',   label:'Emails'},
         {key:'cons',    label:'Consejero'},
       ],
       filas:filtrados.map(cp=>{
         const ufs = ufsMap[cp.id] || []
         const ufsStr = ufs.length === 0 ? '—'
           : ufs.map(u => `UF ${ufNum(u)} · ${u.numero}${u.tipo ? ' · ' + u.tipo : ''}`).join(', ')
+        const { grupos } = mailsDe(cp, ufs)
+        // exportarPDF inserta el valor como HTML: se escapa todo y se arma con <br>
+        const emailHtml = grupos.length === 0 ? '—' : grupos.map(g =>
+          `<div style="margin-bottom:2px"><span style="color:#6b7280;font-size:7pt">${escH(g.tipo)}${g.envia ? ' ('+escH(g.envia)+')' : ''}:</span> `
+          + (g.nombre ? `<i>${escH(g.nombre)}</i> ` : '')
+          + `<span style="word-break:break-all">${g.mails.map(escH).join('; ')}</span></div>`
+        ).join('')
         return {
-          nombre: cp.apellido_nombre||'',
-          ufs:    ufsStr,
-          dni:    cp.dni||'',
-          tel:    cp.telefono||'',
-          email:  cp.email||'',
+          nombre: escH(cp.apellido_nombre||''),
+          ufs:    escH(ufsStr),
+          dni:    escH(cp.dni||''),
+          tel:    escH(cp.telefono||''),
+          email:  emailHtml,
           cons:   cp.es_consejero?'Sí':'',
         }
       })
@@ -149,21 +179,36 @@ export default function Copropietarios() {
         {key:'cant_ufs',  label:'Cant. UFs'},
         {key:'dni',       label:'DNI'},
         {key:'tel',       label:'Teléfono'},
-        {key:'email',     label:'Email'},
+        {key:'email',     label:'Email principal'},
+        {key:'email_sec', label:'Email secundario'},
+        {key:'email_not', label:'Email notificaciones'},
+        {key:'ocup',      label:'Ocupantes por UF (nombre · email · envíos)'},
+        {key:'ocup_ant',  label:'Ocupante (dato anterior)'},
+        {key:'todos',     label:'Todos los emails'},
         {key:'cuit',      label:'CUIT/CUIL'},
         {key:'cons',      label:'Consejero'},
       ],
       filas:filtrados.map(cp=>{
         const ufs = ufsMap[cp.id] || []
+        const { grupos, todos } = mailsDe(cp, ufs)
+        const ocup = grupos.filter(g => g.tipo.startsWith('Ocupante UF'))
+          .map(g => `${g.tipo.replace('Ocupante ','')}: ${[g.nombre, g.mails.join('; ')].filter(Boolean).join(' · ')}${g.envia ? ' ['+g.envia+']' : ''}`)
+          .join(' | ')
+        const ant = grupos.find(g => g.tipo === 'Ocupante (dato anterior)')
         return {
-          nombre:   cp.apellido_nombre||'',
-          ufs:      ufs.map(u => `UF ${ufNum(u)} · ${u.numero}`).join(' / ') || '—',
-          cant_ufs: ufs.length,
-          dni:      cp.dni||'',
-          tel:      cp.telefono||'',
-          email:    cp.email||'',
-          cuit:     cp.cuit_cuil||'',
-          cons:     cp.es_consejero?'Sí':'',
+          nombre:    cp.apellido_nombre||'',
+          ufs:       ufs.map(u => `UF ${ufNum(u)} · ${u.numero}`).join(' / ') || '—',
+          cant_ufs:  ufs.length,
+          dni:       cp.dni||'',
+          tel:       cp.telefono||'',
+          email:     splitMails(cp.email).join('; '),
+          email_sec: splitMails(cp.email_secundario).join('; '),
+          email_not: splitMails(cp.email_notificacion).join('; '),
+          ocup,
+          ocup_ant:  ant ? [ant.nombre, ant.mails.join('; ')].filter(Boolean).join(' · ') : '',
+          todos:     todos.join('; '),
+          cuit:      cp.cuit_cuil||'',
+          cons:      cp.es_consejero?'Sí':'',
         }
       })
     })
