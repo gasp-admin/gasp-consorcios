@@ -183,6 +183,15 @@ export default async function handler(req, res) {
     // §60 (2026-10-12): EXCEPCIÓN acotada — las acciones vot_* (página /votar) valen para TODOS los
     // consorcios. Solo exponen las votaciones del consorcio en cuyo padrón figura la UF del token;
     // ningún dato de cta cte, expensas ni pagos.
+    // Entrega a otra administración: si el consorcio está archivado, el link de Propietarios
+    // queda sin efecto para TODO, incluidas las votaciones (/votar). Se corta antes de exponer
+    // cualquier dato y antes de la excepción §60. El portal_token se conserva: al reactivar
+    // (y re-habilitar el portal) el mismo link vuelve a funcionar.
+    {
+      const { data: arch } = await db.from('con_consorcios').select('archivado').eq('id', uf.consorcio_id).single()
+      if (arch?.archivado) return res.status(403).json({ error: 'consorcio_archivado' })
+    }
+
     const esVot = String(accion).startsWith('vot_')
     if (esVot && scope !== 'full') return res.status(403).json({ error: 'scope' })
     if (!esVot) {
