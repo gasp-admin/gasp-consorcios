@@ -34,6 +34,7 @@ export const NAV_ITEMS = [
   { id: 'historial_liquidaciones',  label: 'Historial Liquidaciones', icon: '📂', sec: 'Expensas' },
   { id: 'verificacion_unidades',    label: 'Verificar UFs (PDF)',     icon: '🔍', sec: 'Expensas' },
   { id: 'control_liquidaciones',    label: 'Control liquidaciones',   icon: '✅', sec: 'Expensas' },
+  { id: 'tablero_cierres',          label: 'Tablero de cierres',      icon: '🗓️', sec: 'Expensas' },
   { id: 'cobranzas',                label: 'Cobranzas',               icon: '💳', sec: 'Cobranzas' },
   { id: 'cobranzas_auto',           label: 'Cobranzas automáticas',   icon: '🏦', sec: 'Cobranzas' },
   { id: 'conciliar_pagos',          label: 'Importar pagos banco',    icon: '🏦', sec: 'Cobranzas', perm: 'cobrar' },
