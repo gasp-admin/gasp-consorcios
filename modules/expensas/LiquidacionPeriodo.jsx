@@ -875,6 +875,66 @@ export default function LiquidacionPeriodo() {
     }
   }, [expSel])
 
+  // ── Informe de trabajos realizados en el período (texto editable → PDF nativo) ──
+  const [informeTrabajos, setInformeTrabajos] = useState('')
+  const [cargandoInforme, setCargandoInforme] = useState(null) // null | 'guardar' | 'ia'
+  useEffect(() => {
+    if (expSel?.informe_trabajos !== undefined) setInformeTrabajos(expSel.informe_trabajos || '')
+  }, [expSel])
+
+  // Rubros que NO son trabajos (servicios, impuestos, seguros, honorarios, sueldos, bancarios, particulares)
+  const CATS_NO_TRABAJO = ['honorarios_admin','honorarios_contable','contratos','seguros','gastos_bancarios',
+    'electricidad','gas','agua','servicios_publicos','telefonia','impuesto_municipal','impuesto_provincial','arba','imp_muni',
+    'sueldos','liquidacion_sueldo','cargas_sociales_arca','fateryh','vep931','gastos_particulares','articulos_limpieza']
+  // Abonos mensuales fijos: "abono", "mensual", o concepto con "<mes> 20xx"
+  const RE_ABONO = /\babono\b|mensual|\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+(de\s+)?20\d\d\b/i
+
+  function precargarInforme() {
+    const items = (gastos || []).filter(g => {
+      const cat = String(g.categoria || '').toLowerCase()
+      if (CATS_NO_TRABAJO.includes(cat)) return false
+      return !RE_ABONO.test(String(g.concepto || ''))
+    })
+    if (items.length === 0) return setMsg({ tipo:'warn', texto:'No hay comprobantes de trabajos puntuales en este período (se excluyen servicios, impuestos, seguros, honorarios, sueldos, bancarios, particulares y abonos mensuales).' })
+    if (informeTrabajos.trim() && !confirm('El informe ya tiene texto. ¿Reemplazarlo por el precargado desde los comprobantes?')) return
+    const lineas = items.map(g => {
+      const c = String(g.concepto || '').trim().replace(/\s+/g, ' ')
+      const prov = String(g.proveedor_nombre || '').trim()
+      return `• ${c.charAt(0).toUpperCase()}${c.slice(1)}${prov ? ` (${prov})` : ''}`
+    })
+    setInformeTrabajos(lineas.join('\n'))
+    setMsg({ tipo:'ok', texto:`✓ ${items.length} trabajo(s) precargado(s) desde los comprobantes — revisá el texto y guardalo` })
+  }
+
+  async function redactarInformeIA() {
+    if (!informeTrabajos.trim()) return setMsg({ tipo:'warn', texto:'Precargá o escribí los trabajos antes de redactar con IA.' })
+    setCargandoInforme('ia')
+    try {
+      const { data: { session: sess } } = await supabase.auth.getSession()
+      const res = await fetch(`${SUPA_URL}/functions/v1/asistente-redaccion`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' },
+        body: JSON.stringify({ texto: informeTrabajos, accion: 'informe' })
+      })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error || 'No se pudo procesar')
+      setInformeTrabajos(data.texto)
+      setMsg({ tipo:'ok', texto:'✓ Informe redactado por IA — revisalo y guardalo' })
+    } catch (e) {
+      setMsg({ tipo:'error', texto:'Error IA: ' + e.message })
+    }
+    setCargandoInforme(null)
+  }
+
+  async function guardarInforme() {
+    if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
+    if (!expSel?.id) return
+    setCargandoInforme('guardar')
+    const { error } = await supabase.from('con_expensas').update({ informe_trabajos: informeTrabajos.trim() || null }).eq('id', expSel.id)
+    setCargandoInforme(null)
+    setMsg(error ? { tipo:'error', texto:'No se pudo guardar el informe: ' + error.message } : { tipo:'ok', texto:'✓ Informe de trabajos guardado' })
+  }
+
   async function guardarNotas() {
     if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
     if (!expSel?.id) return
@@ -901,7 +961,8 @@ export default function LiquidacionPeriodo() {
   function datosPDFNativo() {
     return { consorcioActivo, expSel, gastos, distribucion, columnasLiq, gruposLiq, config, importesPorColumna,
       saldoCajaAnterior, cobradoActual, cobradoAdeudado, cobradoInteres, ingresosVarios, egresosVarios, movsVarios, notasPeriodo,
-      adminPerfil: adminPerfil || {}, esPreliquidacion: expSel?.estado !== 'cerrada' }
+      adminPerfil: adminPerfil || {}, esPreliquidacion: expSel?.estado !== 'cerrada',
+      informeTrabajos: informeTrabajos.trim() }
   }
 
 
@@ -1074,7 +1135,7 @@ export default function LiquidacionPeriodo() {
       // U2: guardar los datos exactos del PDF nativo. Períodos y Portal regeneran este MISMO PDF.
       const pdfDatos = prepararDatosPDF({ ...snapBase, expSel: { ...(snapBase.expSel || {}), estado: 'cerrada' }, esPreliquidacion: false })
       const { error: eSnap } = await supabase.from('con_expensas')
-        .update({ pdf_datos: pdfDatos, pdf_datos_at: new Date().toISOString(), pdf_plantilla: 'nativa-ley14701-v1' })
+        .update({ pdf_datos: pdfDatos, pdf_datos_at: new Date().toISOString(), pdf_plantilla: 'nativa-ley14701-v1', informe_trabajos: snapBase.informeTrabajos || null })
         .eq('id', expSel.id)
 
       setMsg(eSnap
@@ -1771,6 +1832,38 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
                 boxSizing:'border-box', lineHeight:1.6, color:'#374151' }} />
             <div style={{ fontSize:11, color:GR, marginTop:6 }}>
               Si está vacío, se usará el texto predeterminado de comunicación a propietarios. Podés agregar información especial del período (obras, cambios de cuenta, anuncios, etc.)
+            </div>
+          </Card>
+
+          {/* ═══ PANEL: Informe de trabajos realizados en el período ═══ */}
+          <Card style={{ marginBottom:16, border:'1px solid #e5e7eb' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10, gap:8, flexWrap:'wrap' }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:13, color:'#374151' }}>🛠️ Informe de trabajos realizados</div>
+                <div style={{ fontSize:11, color:GR, marginTop:2 }}>
+                  Se imprime en la página de notas del PDF solo si tiene texto. No muestra importes (ya figuran en GASTOS).
+                </div>
+              </div>
+              <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                <Btn small color={AZ2} onClick={precargarInforme} disabled={!!cargandoInforme}>📥 Precargar desde comprobantes</Btn>
+                <Btn small color={AZ} onClick={redactarInformeIA} disabled={!!cargandoInforme}>
+                  {cargandoInforme === 'ia' ? '⏳ Redactando…' : '✨ Redactar con IA'}
+                </Btn>
+                <Btn small color={VD} onClick={guardarInforme} disabled={!!cargandoInforme}>
+                  {cargandoInforme === 'guardar' ? '⏳' : '💾 Guardar informe'}
+                </Btn>
+              </div>
+            </div>
+            <textarea
+              value={informeTrabajos}
+              onChange={e => setInformeTrabajos(e.target.value)}
+              rows={6}
+              placeholder={'• Reparación del termotanque de alta recuperación: quemadores e inyectores (proveedor)\n• Limpieza de tanques de agua con análisis y certificado (proveedor)'}
+              style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db',
+                borderRadius:7, fontSize:12, fontFamily:'inherit', resize:'vertical',
+                boxSizing:'border-box', lineHeight:1.6, color:'#374151' }} />
+            <div style={{ fontSize:11, color:GR, marginTop:6 }}>
+              La precarga excluye servicios, impuestos, seguros, honorarios, sueldos, gastos bancarios, gastos particulares y abonos mensuales. Al cerrar el período, el texto queda guardado en la liquidación.
             </div>
           </Card>
           {distribucion.length > 0 && (
