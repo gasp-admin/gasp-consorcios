@@ -875,51 +875,88 @@ export default function LiquidacionPeriodo() {
     }
   }, [expSel])
 
-  // ── Informe de trabajos realizados en el período (texto editable → PDF nativo) ──
-  const [informeTrabajos, setInformeTrabajos] = useState('')
-  const [cargandoInforme, setCargandoInforme] = useState(null) // null | 'guardar' | 'ia'
+  // ── §72 Informe de trabajos NO habituales y compras (pág. 4 del PDF nativo) ──
+  const [informeTrabajos, setInformeTrabajos] = useState('')       // resumen (texto)
+  const [informeIds, setInformeIds] = useState(null)               // null = sin revisar → usar sugerencia
+  const [informeMotivos, setInformeMotivos] = useState({})         // gasto.id → motivo de exclusión sugerida
+  const [cargandoInforme, setCargandoInforme] = useState(null)     // null | 'guardar' | 'ia'
   useEffect(() => {
     if (expSel?.informe_trabajos !== undefined) setInformeTrabajos(expSel.informe_trabajos || '')
+    if (expSel?.informe_gastos_ids !== undefined) setInformeIds(Array.isArray(expSel.informe_gastos_ids) ? expSel.informe_gastos_ids : null)
   }, [expSel])
 
-  // Rubros que NO son trabajos (servicios, impuestos, seguros, honorarios, sueldos, bancarios, particulares)
-  const CATS_NO_TRABAJO = ['honorarios_admin','honorarios_contable','contratos','seguros','gastos_bancarios',
+  // Rubros ordinarios: nunca son "trabajos no habituales"
+  const CATS_ORDINARIAS = ['honorarios_admin','honorarios_contable','contratos','contratos_abonos','seguros','gastos_bancarios',
     'electricidad','gas','agua','servicios_publicos','telefonia','impuesto_municipal','impuesto_provincial','arba','imp_muni',
-    'sueldos','liquidacion_sueldo','cargas_sociales_arca','fateryh','vep931','gastos_particulares','articulos_limpieza']
-  // Abonos mensuales fijos: "abono", "mensual", o concepto con "<mes> 20xx"
-  const RE_ABONO = /\babono\b|mensual|\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+(de\s+)?20\d\d\b/i
+    'sueldos','sueldos_detalle','liquidacion_sueldo','cargas_sociales','cargas_sociales_arca','fateryh','vep931',
+    'gastos_particulares','limpieza']
+  // Abonos / servicios mensuales reconocibles por el concepto
+  const RE_ABONO = new RegExp([
+    '\\babono', 'mensual', 'honorario', '\\bdeb(ito)?\\.?\\s*dir', '\\bper[ií]odo\\s+20\\d\\d',
+    '\\bmant(enimiento|\\.)?\\s+(de\\s+)?(parque|jard|espacios?\\s+verdes|pileta|piscina|ascensor|limpieza)',
+    '\\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\\s+(de\\s+)?20\\d\\d',
+  ].join('|'), 'i')
+  const normTxt = t => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/g, '')
+    .replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const provKey = g => g.proveedor_id ? 'id:' + g.proveedor_id : 'n:' + normTxt(g.proveedor_nombre)
 
-  function precargarInforme() {
-    const items = (gastos || []).filter(g => {
-      const cat = String(g.categoria || '').toLowerCase()
-      if (CATS_NO_TRABAJO.includes(cat)) return false
-      return !RE_ABONO.test(String(g.concepto || ''))
-    })
-    if (items.length === 0) return setMsg({ tipo:'warn', texto:'No hay comprobantes de trabajos puntuales en este período (se excluyen servicios, impuestos, seguros, honorarios, sueldos, bancarios, particulares y abonos mensuales).' })
-    if (informeTrabajos.trim() && !confirm('El informe ya tiene texto. ¿Reemplazarlo por el precargado desde los comprobantes?')) return
-    const lineas = items.map(g => {
-      const c = String(g.concepto || '').trim().replace(/\s+/g, ' ')
-      const prov = String(g.proveedor_nombre || '').trim()
-      return `• ${c.charAt(0).toUpperCase()}${c.slice(1)}${prov ? ` (${prov})` : ''}`
-    })
-    setInformeTrabajos(lineas.join('\n'))
-    setMsg({ tipo:'ok', texto:`✓ ${items.length} trabajo(s) precargado(s) desde los comprobantes — revisá el texto y guardalo` })
+  // Clasifica los gastos del período contra los 3 períodos anteriores del consorcio
+  useEffect(() => {
+    let cancel = false
+    async function clasificar() {
+      if (!expSel?.id || !gastos?.length) { setInformeMotivos({}); return }
+      const previos = (expensas || []).filter(e => e.id !== expSel.id && String(e.periodo) < String(expSel.periodo))
+        .sort((a, b) => String(b.periodo).localeCompare(String(a.periodo))).slice(0, 3).map(e => e.id)
+      let prev = []
+      if (previos.length) {
+        const { data } = await supabase.from('con_gastos').select('proveedor_id, proveedor_nombre, concepto, monto').in('expensa_id', previos)
+        prev = data || []
+      }
+      const mot = {}
+      for (const g of gastos) {
+        const cat = String(g.categoria || '').toLowerCase(), m = parseFloat(g.monto) || 0
+        if (CATS_ORDINARIAS.includes(cat)) { mot[g.id] = 'Rubro ordinario'; continue }
+        if (RE_ABONO.test(String(g.concepto || ''))) { mot[g.id] = 'Abono / servicio mensual'; continue }
+        const mismos = prev.filter(p => provKey(p) === provKey(g) && (provKey(g) !== 'n:'))
+        if (mismos.some(p => normTxt(p.concepto) && normTxt(p.concepto) === normTxt(g.concepto))) { mot[g.id] = 'Recurrente (mismo concepto en meses anteriores)'; continue }
+        if (m > 0 && mismos.some(p => Math.abs((parseFloat(p.monto) || 0) - m) / m <= 0.10)) { mot[g.id] = 'Recurrente (mismo proveedor e importe)'; continue }
+      }
+      if (!cancel) setInformeMotivos(mot)
+    }
+    clasificar()
+    return () => { cancel = true }
+  }, [gastos, expSel?.id, expensas])
+
+  const informeSugeridos = (gastos || []).filter(g => !informeMotivos[g.id]).map(g => String(g.id))
+  const informeSel = informeIds === null ? informeSugeridos : informeIds.map(String)
+  const informeItems = (gastos || []).filter(g => informeSel.includes(String(g.id)))
+  const informeTotGral = (gastos || []).reduce((a, g) => a + (parseFloat(g.monto) || 0), 0)
+  const informeTot = informeItems.reduce((a, g) => a + (parseFloat(g.monto) || 0), 0)
+  const informePct = v => informeTotGral > 0 ? (v / informeTotGral) * 100 : 0
+
+  function toggleInforme(id) {
+    const cur = new Set(informeSel); const k = String(id)
+    cur.has(k) ? cur.delete(k) : cur.add(k)
+    setInformeIds([...cur])
   }
 
   async function redactarInformeIA() {
-    if (!informeTrabajos.trim()) return setMsg({ tipo:'warn', texto:'Precargá o escribí los trabajos antes de redactar con IA.' })
+    if (informeItems.length === 0) return setMsg({ tipo:'warn', texto:'Marcá al menos un trabajo o compra antes de redactar el resumen.' })
     setCargandoInforme('ia')
     try {
+      const lineas = informeItems.map(g => `- ${g.concepto} (${g.proveedor_nombre || 'sin proveedor'}): $ ${fmtN(parseFloat(g.monto) || 0)} = ${informePct(parseFloat(g.monto) || 0).toFixed(1).replace('.', ',')}% del total`)
+      const texto = `Período: ${expSel?.periodo}\nTotal de gastos del período: $ ${fmtN(informeTotGral)}\nTrabajos no habituales y compras: $ ${fmtN(informeTot)} (${informePct(informeTot).toFixed(1).replace('.', ',')}% del total)\n${lineas.join('\n')}${informeTrabajos.trim() ? `\n\nObservaciones del administrador:\n${informeTrabajos.trim()}` : ''}`
       const { data: { session: sess } } = await supabase.auth.getSession()
       const res = await fetch(`${SUPA_URL}/functions/v1/asistente-redaccion`, {
         method:'POST',
         headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}`, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' },
-        body: JSON.stringify({ texto: informeTrabajos, accion: 'informe' })
+        body: JSON.stringify({ texto, accion: 'informe' })
       })
       const data = await res.json()
       if (!data.ok) throw new Error(data.error || 'No se pudo procesar')
       setInformeTrabajos(data.texto)
-      setMsg({ tipo:'ok', texto:'✓ Informe redactado por IA — revisalo y guardalo' })
+      setMsg({ tipo:'ok', texto:'✓ Resumen redactado por IA — revisalo y guardalo' })
     } catch (e) {
       setMsg({ tipo:'error', texto:'Error IA: ' + e.message })
     }
@@ -930,9 +967,12 @@ export default function LiquidacionPeriodo() {
     if (!puede('liquidar')) return setMsg({ tipo:'warn', texto:'Tu rol no permite liquidar ni modificar expensas.' })
     if (!expSel?.id) return
     setCargandoInforme('guardar')
-    const { error } = await supabase.from('con_expensas').update({ informe_trabajos: informeTrabajos.trim() || null }).eq('id', expSel.id)
+    const { error } = await supabase.from('con_expensas')
+      .update({ informe_trabajos: informeTrabajos.trim() || null, informe_gastos_ids: informeSel })
+      .eq('id', expSel.id)
     setCargandoInforme(null)
-    setMsg(error ? { tipo:'error', texto:'No se pudo guardar el informe: ' + error.message } : { tipo:'ok', texto:'✓ Informe de trabajos guardado' })
+    if (!error) setInformeIds(informeSel)
+    setMsg(error ? { tipo:'error', texto:'No se pudo guardar el informe: ' + error.message } : { tipo:'ok', texto:`✓ Informe guardado — ${informeSel.length} trabajo(s)/compra(s)` })
   }
 
   async function guardarNotas() {
@@ -962,7 +1002,7 @@ export default function LiquidacionPeriodo() {
     return { consorcioActivo, expSel, gastos, distribucion, columnasLiq, gruposLiq, config, importesPorColumna,
       saldoCajaAnterior, cobradoActual, cobradoAdeudado, cobradoInteres, ingresosVarios, egresosVarios, movsVarios, notasPeriodo,
       adminPerfil: adminPerfil || {}, esPreliquidacion: expSel?.estado !== 'cerrada',
-      informeTrabajos: informeTrabajos.trim() }
+      informeTrabajos: informeTrabajos.trim(), informeIds: informeSel }
   }
 
 
@@ -1135,7 +1175,8 @@ export default function LiquidacionPeriodo() {
       // U2: guardar los datos exactos del PDF nativo. Períodos y Portal regeneran este MISMO PDF.
       const pdfDatos = prepararDatosPDF({ ...snapBase, expSel: { ...(snapBase.expSel || {}), estado: 'cerrada' }, esPreliquidacion: false })
       const { error: eSnap } = await supabase.from('con_expensas')
-        .update({ pdf_datos: pdfDatos, pdf_datos_at: new Date().toISOString(), pdf_plantilla: 'nativa-ley14701-v1', informe_trabajos: snapBase.informeTrabajos || null })
+        .update({ pdf_datos: pdfDatos, pdf_datos_at: new Date().toISOString(), pdf_plantilla: 'nativa-ley14701-v1',
+          informe_trabajos: snapBase.informeTrabajos || null, informe_gastos_ids: snapBase.informeIds || [] })
         .eq('id', expSel.id)
 
       setMsg(eSnap
@@ -1835,35 +1876,76 @@ RECOMENDAMOS HACER USO DE TRANSFERENCIAS BANCARIAS...`}
             </div>
           </Card>
 
-          {/* ═══ PANEL: Informe de trabajos realizados en el período ═══ */}
+          {/* ═══ PANEL §72: Informe de trabajos no habituales y compras (pág. 4 del PDF) ═══ */}
           <Card style={{ marginBottom:16, border:'1px solid #e5e7eb' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10, gap:8, flexWrap:'wrap' }}>
               <div>
-                <div style={{ fontWeight:700, fontSize:13, color:'#374151' }}>🛠️ Informe de trabajos realizados</div>
+                <div style={{ fontWeight:700, fontSize:13, color:'#374151' }}>🛠️ Informe de trabajos realizados (no habituales y compras)</div>
                 <div style={{ fontSize:11, color:GR, marginTop:2 }}>
-                  Se imprime en la página de notas del PDF solo si tiene texto. No muestra importes (ya figuran en GASTOS).
+                  Se agrega como pág. 4 del PDF con gráficos e incidencia. Quedan fuera los abonos mensuales y los gastos ordinarios.
+                  {informeIds === null && <strong style={{ color:AM }}> · Selección sugerida (sin guardar)</strong>}
                 </div>
               </div>
               <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                <Btn small color={AZ2} onClick={precargarInforme} disabled={!!cargandoInforme}>📥 Precargar desde comprobantes</Btn>
+                <BtnSec small onClick={() => setInformeIds(null)}>↺ Volver a la sugerencia</BtnSec>
                 <Btn small color={AZ} onClick={redactarInformeIA} disabled={!!cargandoInforme}>
-                  {cargandoInforme === 'ia' ? '⏳ Redactando…' : '✨ Redactar con IA'}
+                  {cargandoInforme === 'ia' ? '⏳ Redactando…' : '✨ Redactar resumen con IA'}
                 </Btn>
                 <Btn small color={VD} onClick={guardarInforme} disabled={!!cargandoInforme}>
                   {cargandoInforme === 'guardar' ? '⏳' : '💾 Guardar informe'}
                 </Btn>
               </div>
             </div>
+
+            <div style={{ display:'flex', gap:8, marginBottom:10, flexWrap:'wrap' }}>
+              {[['Total gastos del período', '$ ' + fmtN(informeTotGral)],
+                ['Trabajos no habituales y compras', '$ ' + fmtN(informeTot) + ` (${informeItems.length})`],
+                ['Incidencia sobre el total', informePct(informeTot).toFixed(1).replace('.', ',') + '%']].map(([t, v]) => (
+                <div key={t} style={{ flex:'1 1 160px', border:'1px solid #e5e7eb', borderRadius:6, padding:'6px 10px' }}>
+                  <div style={{ fontSize:10, color:GR, textTransform:'uppercase' }}>{t}</div>
+                  <div style={{ fontSize:15, fontWeight:700, color:'#111827' }}>{v}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ maxHeight:280, overflowY:'auto', border:'1px solid #e5e7eb', borderRadius:6, marginBottom:10 }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                <thead><tr style={{ background:'#f3f4f6', position:'sticky', top:0 }}>
+                  <th style={{ padding:'5px 6px', width:28 }}></th>
+                  <th style={{ padding:'5px 6px', textAlign:'left' }}>Concepto</th>
+                  <th style={{ padding:'5px 6px', textAlign:'left' }}>Proveedor</th>
+                  <th style={{ padding:'5px 6px', textAlign:'right' }}>Importe</th>
+                  <th style={{ padding:'5px 6px', textAlign:'right' }}>% s/ total</th>
+                  <th style={{ padding:'5px 6px', textAlign:'left' }}>Sugerencia</th>
+                </tr></thead>
+                <tbody>
+                  {(gastos || []).map(g => {
+                    const on = informeSel.includes(String(g.id)), m = parseFloat(g.monto) || 0
+                    return (
+                      <tr key={g.id} onClick={() => toggleInforme(g.id)} style={{ cursor:'pointer', borderTop:'1px solid #f1f5f9', background: on ? '#eff6ff' : 'transparent' }}>
+                        <td style={{ padding:'4px 6px', textAlign:'center' }}><input type="checkbox" readOnly checked={on} /></td>
+                        <td style={{ padding:'4px 6px' }}>{g.concepto}</td>
+                        <td style={{ padding:'4px 6px', color:GR }}>{g.proveedor_nombre || '—'}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{fmtN(m)}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right' }}>{informePct(m).toFixed(1).replace('.', ',')}%</td>
+                        <td style={{ padding:'4px 6px', fontSize:11, color: informeMotivos[g.id] ? GR : VD }}>{informeMotivos[g.id] || 'Trabajo / compra'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
             <textarea
               value={informeTrabajos}
               onChange={e => setInformeTrabajos(e.target.value)}
-              rows={6}
-              placeholder={'• Reparación del termotanque de alta recuperación: quemadores e inyectores (proveedor)\n• Limpieza de tanques de agua con análisis y certificado (proveedor)'}
+              rows={4}
+              placeholder="Resumen del período (opcional). Escribí observaciones o usá ✨ Redactar resumen con IA."
               style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db',
                 borderRadius:7, fontSize:12, fontFamily:'inherit', resize:'vertical',
                 boxSizing:'border-box', lineHeight:1.6, color:'#374151' }} />
             <div style={{ fontSize:11, color:GR, marginTop:6 }}>
-              La precarga excluye servicios, impuestos, seguros, honorarios, sueldos, gastos bancarios, gastos particulares y abonos mensuales. Al cerrar el período, el texto queda guardado en la liquidación.
+              Hacé clic en una fila para incluirla o excluirla. Si no hay trabajos marcados ni resumen, el PDF no agrega la pág. 4. Al cerrar el período, la selección queda guardada en la liquidación.
             </div>
           </Card>
           {distribucion.length > 0 && (
