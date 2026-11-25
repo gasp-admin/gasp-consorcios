@@ -308,7 +308,18 @@ export default function ConciliarPagos() {
       }
       setLotes(creados); setLineas([])
       const aviso = compSinResolver.length ? ` (${compSinResolver.length} compartidas sin asignar quedaron afuera)` : ''
-      setMsg({ t:'ok', m:`✓ ${creados.length} lote(s) creado(s) con ${asignables.length} líneas${aviso}. Elegí un consorcio abajo para conciliar.` })
+      // (nov-2026) Conciliar cada lote al crearlo: antes quedaban en 'pendiente' hasta abrirlos y apretar
+      // Conciliar, y si se imputaba a mano no corría el control de duplicados ni el matcheo centavo/nombre.
+      let dup = 0, pdup = 0, sug = 0, fallos = 0
+      for (const c of creados) {
+        try { const d = await conciliarLote(c.id, { resetear: false }); dup += d.duplicados || 0; pdup += d.posibles_duplicados || 0; sug += d.procesadas || 0 }
+        catch (_) { fallos++ }
+      }
+      setMsg({ t: (dup || pdup || fallos) ? 'w' : 'ok', m:
+        `✓ ${creados.length} lote(s) creado(s) con ${asignables.length} líneas${aviso} y conciliado(s): ${sug} sugeridas` +
+        (dup ? ` · \u26a0 ${dup} ya acreditada(s)` : '') + (pdup ? ` · \u26a0 ${pdup} posible(s) duplicado(s)` : '') +
+        (fallos ? ` · ${fallos} lote(s) no se pudieron conciliar (abrilos y apretá Conciliar)` : '') +
+        '. Elegí un consorcio abajo para revisar y confirmar.' })
     } catch (err) { setMsg({ t:'e', m:'No se pudo importar: ' + err.message }) }
     setImportando(false)
   }
@@ -316,7 +327,18 @@ export default function ConciliarPagos() {
   async function abrirLote(l) {
     setLoteId(l.id); setLoteConsorcioId(l.consorcioId); setSel(new Set())
     await cargarUFs(l.consorcioId)
-    await cargarLineasLote(l.id)
+    const ls = await cargarLineasLote(l.id)
+    // (nov-2026) Líneas en 'pendiente' = la conciliación nunca corrió sobre ellas (sin control de duplicados,
+    // centavo ni nombre). Se concilian solas al abrir el lote; no toca líneas confirmadas ni asignadas a mano.
+    if (ls.some((x) => x.estado === 'pendiente')) {
+      setConciliando(true)
+      try {
+        const d = await conciliarLote(l.id, { resetear: false })
+        setMsg({ t: (d.duplicados || d.posibles_duplicados) ? 'w' : 'ok', m:`Conciliado automáticamente: ${resumenConc(d)}.` })
+        await cargarLineasLote(l.id)
+      } catch (e) { setMsg({ t:'e', m:'No se pudo conciliar automáticamente: ' + e.message + '. Usá el botón Conciliar.' }) }
+      setConciliando(false)
+    }
   }
 
   async function importar() {
@@ -347,10 +369,16 @@ export default function ConciliarPagos() {
       const { error: eLin } = await supabase.from('con_cobranza_lote_linea').insert(filas)
       if (eLin) throw eLin
 
-      setMsg({ t:'ok', m:`✓ Importadas ${lineas.length} líneas. Ahora conciliá para proponer la UF de cada pago.` })
       setLineas([]); setArchivo(null)
       setLoteId(lote.id)
       await cargarUFs()
+      // (nov-2026) Conciliar al importar (control de duplicados + matcheo centavo/nombre/CUIT).
+      try {
+        const d = await conciliarLote(lote.id, { resetear: false })
+        setMsg({ t: (d.duplicados || d.posibles_duplicados) ? 'w' : 'ok', m:`✓ Importadas ${filas.length} líneas y conciliadas: ${resumenConc(d)}.` })
+      } catch (e) {
+        setMsg({ t:'w', m:`✓ Importadas ${filas.length} líneas, pero no se pudo conciliar (${e.message}). Apretá Conciliar.` })
+      }
       await cargarLineasLote(lote.id)
     } catch (err) {
       setMsg({ t:'e', m:'No se pudo importar: ' + err.message })
@@ -408,25 +436,43 @@ export default function ConciliarPagos() {
   async function cargarLineasLote(id) {
     const { data } = await supabase.from('con_cobranza_lote_linea').select('*').eq('lote_id', id).order('fecha_pago')
     setLineasLote(data || [])
+    return data || []
   }
+  // (nov-2026) Núcleo de conciliación reutilizable: corre la EF sobre un lote y devuelve su respuesta.
+  // resetear=true vuelve a 'pendiente' las líneas no confirmadas (botón "Conciliar" = reintentar).
+  async function conciliarLote(id, { resetear = true } = {}) {
+    if (resetear) {
+      await supabase.from('con_cobranza_lote_linea').update({ estado: 'pendiente' })
+        .eq('lote_id', id).neq('estado', 'confirmada')
+    }
+    // Refrescar la sesión antes de invocar: con la sesión vencida la EF responde 'no_autorizado' (§61.3).
+    try { await supabase.auth.refreshSession() } catch (_) { /* sigue con la sesión actual */ }
+    const { data: { session: sess } } = await supabase.auth.getSession()
+    const r = await fetch(`${SUPA_URL}/functions/v1/conciliar-cobranzas`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}` },
+      body: JSON.stringify({ lote_id: id }),
+    })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok || !d.ok) {
+      const err = d.error === 'no_autorizado' ? 'la sesión venció — recargá la página (F5) y volvé a intentar' : (d.error || ('HTTP ' + r.status))
+      throw new Error(err)
+    }
+    return d
+  }
+  const resumenConc = (d) => `${d.procesadas||0} sugeridas${d.por_ia?` (${d.por_ia} por IA)`:''}, ${d.sin_match||0} sin coincidencia` +
+    `${d.duplicados?` · \u26a0 ${d.duplicados} ya acreditada(s) — duplicado`:''}` +
+    `${d.posibles_duplicados?` · \u26a0 ${d.posibles_duplicados} posible(s) duplicado(s) a revisar`:''}` +
+    `${d.ignoradas?` · ${d.ignoradas} de pasarela (se concilian por Interfast)`:''}`
+
   async function conciliar() {
     if (!loteId) return
     setConciliando(true); setMsg(null)
     try {
-      // Reintentar: volver a 'pendiente' las líneas aún no confirmadas
-      await supabase.from('con_cobranza_lote_linea').update({ estado: 'pendiente' })
-        .eq('lote_id', loteId).neq('estado', 'confirmada')
-      const { data: { session: sess } } = await supabase.auth.getSession()
-      const r = await fetch(`${SUPA_URL}/functions/v1/conciliar-cobranzas`, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}` },
-        body: JSON.stringify({ lote_id: loteId }),
-      })
-      const d = await r.json().catch(() => ({}))
-      if (!r.ok || !d.ok) { setMsg({ t:'e', m:'Error al conciliar: ' + (d.error || '') }); setConciliando(false); return }
-      setMsg({ t: d.duplicados ? 'w' : 'ok', m:`Conciliado: ${d.procesadas} sugeridas${d.por_ia?` (${d.por_ia} por IA)`:''}, ${d.sin_match||0} sin coincidencia${d.duplicados?` · \u26a0 ${d.duplicados} ya acreditada(s) — duplicado`:''}.` })
+      const d = await conciliarLote(loteId)
+      setMsg({ t: (d.duplicados || d.posibles_duplicados) ? 'w' : 'ok', m:`Conciliado: ${resumenConc(d)}.` })
       await cargarLineasLote(loteId)
-    } catch (e) { setMsg({ t:'e', m:'Error: ' + e.message }) }
+    } catch (e) { setMsg({ t:'e', m:'Error al conciliar: ' + e.message }) }
     setConciliando(false)
   }
 
@@ -450,7 +496,25 @@ export default function ConciliarPagos() {
       })
       const d = await r.json().catch(() => ({}))
       if (!r.ok || !d.ok) { setMsg({ t:'e', m:'Error al confirmar: ' + (d.error || '') }); setConfirmando(false); return }
-      setMsg({ t:'ok', m:`✓ ${d.confirmadas} cobranzas imputadas${d.aprendidas?` · ${d.aprendidas} reglas aprendidas (CUIT→UF)`:''}.` })
+      let forzadas = 0
+      // (nov-2026) confirmar-cobranza v19 NO crea la cobranza si ya existe una viva por el mismo importe
+      // (±1 día). Se muestra cada caso y sólo se fuerza si el usuario confirma que es otro pago.
+      if (Array.isArray(d.duplicados) && d.duplicados.length) {
+        const lista = d.duplicados.map((x) => `• $${Number(x.importe).toLocaleString('es-AR', { minimumFractionDigits: 2 })} del ${x.fecha.split('-').reverse().join('/')} ${x.nombre}\n   ya existe: ${x.existentes}`).join('\n')
+        const ok = window.confirm(`${d.duplicados.length} pago(s) NO se imputaron porque ya hay una cobranza por el mismo importe:\n\n${lista}\n\n¿Son pagos DISTINTOS y querés imputarlos igual? (Cancelar = no imputar, recomendado si es el mismo pago)`)
+        if (ok) {
+          const r2 = await fetch(`${SUPA_URL}/functions/v1/confirmar-cobranza`, {
+            method: 'POST',
+            headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${sess?.access_token}` },
+            body: JSON.stringify({ lote_id: loteId, line_ids: d.duplicados.map((x) => x.id), forzar_duplicado: true }),
+          })
+          const d2 = await r2.json().catch(() => ({}))
+          if (r2.ok && d2.ok) forzadas = d2.confirmadas || 0
+        }
+      }
+      const nDup = (d.duplicados?.length || 0) - forzadas
+      setMsg({ t: nDup > 0 ? 'w' : 'ok', m:`✓ ${(d.confirmadas || 0) + forzadas} cobranzas imputadas${d.aprendidas?` · ${d.aprendidas} reglas aprendidas (CUIT→UF)`:''}` +
+        (nDup > 0 ? ` · \u26a0 ${nDup} no imputada(s) por duplicado (ver motivo en la línea)` : '') + '.' })
       setSel(new Set())
       await cargarLineasLote(loteId)
     } catch (e) { setMsg({ t:'e', m:'Error: ' + e.message }) }
